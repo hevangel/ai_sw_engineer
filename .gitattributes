@@ -1,0 +1,16 @@
+* text=auto
+
+# Shell scripts run in Linux/WSL/Git-Bash and must keep LF line endings.
+*.sh text eol=lf
+
+# Oracle data and images must stay byte-exact.
+*.bin binary
+*.rom binary
+*.nes binary
+*.a26 binary
+*.prg binary
+*.dsk binary
+*.img binary
+*.hex -text
+system/*/*/oracle/** -text
+*.pdf binary

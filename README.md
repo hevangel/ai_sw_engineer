@@ -1,2 +1,106 @@
-# ai_sw_engineer
-AI Software Engineer
+# AI Software Engineer
+
+> An open-source experiment in asking frontier models to reimplement historically significant software in Rust, and to build the compiler backends that put that Rust back on the original chips.
+
+## What this repository is
+
+This is the software-side sibling of [ai_hw_engineer](https://github.com/hevangel/ai_hw_engineer). That project recreates historical chips as verified RTL. This one takes the software those chips ran (calculator firmware, monitors, BASIC interpreters, BIOSes, games) and asks:
+
+> Can a frontier model rewrite that software in modern Rust, then build the LLVM backend, assembler and linker needed to compile the Rust back onto a 4004, an 8008, a 6502 or an 8086, so that the result runs on the original machine?
+
+**This repository is the AI software engineer.** Its specs, plans, tool docs, templates, scripts, Rust sources, compiler backends and reports are the working context the engineer uses.
+
+## The pipeline
+
+Every piece of software goes through the same pipeline:
+
+```text
+ original binary ──► chip simulator ──► oracle traces / I/O transcripts
+                                              │
+ reference docs ──► Rust reimplementation ────┤  (1) host run: cargo test vs oracle
+                          │                   │
+                          ▼                   │
+                 rustc --emit=llvm-ir         │
+                          │                   │
+                          ▼                   │
+          llvm-<chip>: llc → asm → assembler/linker → ROM/disk image
+                                              │
+                          ▼                   │
+          chip simulator (ai_hw_engineer RTL / ISS / 3rd-party emulator)
+                          │                   │
+                          └──────── (2) target run: compare vs oracle
+```
+
+1. Run the original software in a simulator of the real chip and record oracle behavior (key-press transcripts, printer/screen output, memory dumps, instruction traces).
+2. Reimplement the software in `no_std` Rust from the reference material, behavior first, and prove it on the host against the oracle.
+3. Lower the Rust through LLVM IR to the target ISA with the chip's backend in `llvm-<chip>/`.
+4. Assemble, link and package the image within the real machine's ROM/RAM limits.
+5. Run the image on the chip simulator (preferably the RTL from `../ai_hw_engineer`) and compare against the same oracle.
+6. Investigate failures in the Rust, the backend or the simulator instead of stepping around them.
+7. Report what works, what does not fit, and what was learned.
+
+A passing host test is useful evidence. It is not proof the program fits in 4 KiB of 4001 ROM.
+
+## Repository structure
+
+```text
+ai_sw_engineer/
+├── README.md, AGENTS.md, CONTRIBUTING.md, LICENSE
+├── reference/              — Shared reference documents (datasheets, manuals, ISA refs)
+├── docs/                   — Tool documentation written for the agent (Rust, LLVM, simulators)
+├── system/                 — One folder per platform, one subfolder per software title
+│   ├── README.md           — System index
+│   ├── _template/          — Platform + software templates
+│   └── <system>/<software>/
+├── llvm-_template/         — Starting point for a new chip backend
+├── llvm-<chip>/            — One LLVM backend (and Rust target) per chip family
+├── external/               — Git submodules: llvm-mos, rust-mos, emulators, test suites
+├── scripts/                — Project-level utilities (scaffolding, toolchain checks)
+├── failure_notes/          — Post-mortems for bugs that escaped verification
+└── session_history/        — Per-session engineering logs
+```
+
+See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_template/README.md) and [external/README.md](external/README.md) for the per-area conventions.
+
+### Planned systems
+
+| System | CPU | LLVM backend | Status |
+|---|---|---|---|
+| Busicom 141-PF calculator | Intel 4004 | `llvm-i4004` (new) | planned |
+| Micral N | Intel 8008 | `llvm-i8008` (new) | planned |
+| Apple II / IIe | MOS 6502 | `llvm-mos6502` (llvm-mos) | planned |
+| Atari 2600 | MOS 6507 | `llvm-mos6502` (llvm-mos) | planned |
+| Commodore 64 | MOS 6510 | `llvm-mos6502` (llvm-mos) | planned |
+| Nintendo NES | Ricoh 2A03 | `llvm-mos6502` (llvm-mos) | planned |
+| IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | planned |
+
+## Quick start
+
+```bash
+git clone --recurse-submodules https://github.com/hevangel/ai_sw_engineer.git
+# or, in an existing checkout (large submodules are shallow):
+git submodule update --init --depth 1
+
+./scripts/check_toolchain.sh                    # what is installed, what is missing
+./scripts/new_system.sh apple_ii mos6502        # new platform
+./scripts/new_software.sh apple_ii integer_basic   # new software title
+./scripts/new_llvm_target.sh i4004              # new LLVM backend
+
+cd system/apple_ii/integer_basic
+./scripts/run_all.sh                            # host test → IR → target image → simulator compare
+```
+
+The chip simulators come from a sibling checkout of `ai_hw_engineer`; set `AI_HW_ENGINEER=/path/to/ai_hw_engineer` if it is not at `../ai_hw_engineer`.
+
+## Scope and limitations
+
+This project does not claim that:
+
+- A Rust reimplementation is byte- or cycle-identical to the original program (unless a report says it was checked).
+- A host test proves the target build is correct; the compiler backend is a second, independent source of bugs.
+- Every title will fit the original memory map; when it does not, the report says by how much and why.
+- Original ROMs and disk images are redistributable. Copyrighted originals stay out of git; only their hashes and provenance are recorded.
+
+## License
+
+Project-owned material is licensed under the [MIT License](LICENSE). Submodules under `external/` and reference material under `reference/` keep their own licenses (LLVM and llvm-mos: Apache-2.0 WITH LLVM-exception; Rust: MIT/Apache-2.0).

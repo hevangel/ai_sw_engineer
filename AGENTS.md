@@ -1,0 +1,146 @@
+# AI Coding Agent Guidelines
+
+This document defines how AI coding agents work in this repository.
+
+## Role
+
+You are the sole author of all code, documentation and configuration here. Humans specify, review and approve; they do not edit files.
+
+## Mission
+
+Reimplement historical software in Rust and run it on the original chip:
+
+1. **Oracle** — run the original binary in a chip simulator and capture its behavior.
+2. **Rust** — reimplement it as a `no_std` crate; prove it on the host against the oracle.
+3. **LLVM IR** — `rustc --emit=llvm-ir` (or `cargo rustc -- --emit=llvm-ir`).
+4. **Backend** — lower IR to the target ISA with `llvm-<chip>/` (llc → asm → assembler → linker).
+5. **Target run** — run the image on the chip simulator and compare against the same oracle.
+
+## Repository Structure
+
+```
+ai_sw_engineer/
+├── reference/                 — Shared reference docs (+ README with source URL and SHA-256 per file)
+├── docs/                      — Tool docs for the agent (one subfolder per tool)
+├── system/
+│   ├── README.md              — System index (system, year, CPU, software titles)
+│   ├── _template/             — platform/ and software/ templates
+│   └── <system>/              — e.g. busicom_141pf, micral_n, apple_ii, apple_iie,
+│       ├── README.md            ibm_pc, atari_2600, c64, nes
+│       ├── platform/          — memory map, I/O, boot, linker script, runtime (crt0, HAL)
+│       └── <software>/        — one folder per title (see below)
+├── llvm-_template/            — Backend template
+├── llvm-<chip>/               — i4004, i8008, mos6502, i8086 ...
+├── external/                  — Git submodules (third-party; never edit in place)
+├── scripts/                   — Project utilities
+├── failure_notes/             — Escaped-defect post-mortems
+└── session_history/           — Session logs
+```
+
+### Software folder (`system/<system>/<software>/`)
+
+```
+<software>/
+├── README.md        — history, year, original authors, sources, status, links
+├── Cargo.toml       — the crate (lib = portable logic, bin = target entry)
+├── spec/            — behavior spec derived from reference material (spec.md, io.md)
+├── original/        — provenance.md + SHA-256 of the original binary (binary itself gitignored
+│                      unless it is freely redistributable)
+├── oracle/          — captured oracle data: transcripts, traces, expected outputs (committed)
+├── src/
+│   ├── lib.rs       — no_std core logic, no target assumptions
+│   ├── hal.rs       — trait for the machine's I/O (keyboard, display, printer, ...)
+│   └── main.rs      — #![no_std] #![no_main] target entry using system/<system>/platform
+├── tests/           — host tests: replay oracle transcripts through lib + a mock HAL
+├── plans/           — implementation_plan.md, testplan.md
+├── scripts/         — build.sh, run_host.sh, run_sim.sh, compare.sh, run_all.sh
+├── bin/             — committed, signed-off target images (small ROMs only) + .sha256
+├── build/           — generated: .ll, .s, .o, .elf, .map, raw images (gitignored)
+└── report/          — final_report.md: size vs ROM budget, pass/fail vs oracle, limits
+```
+
+### Backend folder (`llvm-<chip>/`)
+
+```
+llvm-<chip>/
+├── README.md        — chip, year, ISA summary, backend strategy, status
+├── spec/            — isa.md, abi.md (calling convention, data layout), asm_syntax.md
+├── plans/           — implementation_plan.md, testplan.md
+├── target/          — LLVM Target sources (lib/Target/<Chip>/*.td, *.cpp) applied onto
+│                      external/llvm-project, or an overlay/patch set for llvm-mos
+├── rust/            — <chip>-none.json Rust target spec, build-std notes, linker wrapper
+├── asm/             — assembler/linker (LLVM MC integrated, or a standalone Rust tool)
+├── tests/           — lit/FileCheck codegen tests, MC encode tests, simulator smoke programs
+├── scripts/         — build_llvm.sh, build_rustc.sh, run_tests.sh
+└── report/          — final_report.md
+```
+
+Chips sharing an ISA share one backend: 6502/6507/6510/2A03 all use `llvm-mos6502` (llvm-mos), 8086/8088 use `llvm-i8086`.
+
+## Creating New Work
+
+- Platform: `./scripts/new_system.sh <system> <chip>`
+- Software: `./scripts/new_software.sh <system> <software>`
+- Backend: `./scripts/new_llvm_target.sh <chip>`
+
+Fill `spec/` and `plans/` before writing Rust or TableGen.
+
+## Conventions
+
+### Rust
+- Edition 2021, `#![no_std]` for every crate that reaches a target; `alloc` only when the platform provides a heap.
+- Portable logic in `lib.rs` behind a HAL trait; the host test and the target entry both implement the HAL.
+- No floating point, no `u64`/`u128` on 4/8-bit targets unless the original used multi-precision math; prefer the widths the original used (BCD nibbles, 8-bit registers).
+- Size matters: build target images with `opt-level = "z"`, `panic = "abort"`, `lto = true`, `codegen-units = 1`; report the size against the ROM budget.
+- `cargo fmt` and `cargo clippy -- -D warnings` clean on the host build.
+
+### LLVM backends
+- Prefer existing backends: llvm-mos for the 6502 family. Only write a new backend where none exists (4004, 8008, real-mode 8086 — LLVM's x86 `-m16` emits 386+ opcodes and is not acceptable for an 8088).
+- Each backend records its data layout and calling convention in `spec/abi.md` before code is written; the Rust target JSON must match it exactly.
+- Every instruction selection pattern gets a lit/FileCheck test; every MC encoding gets an encode test checked against the manufacturer opcode table.
+
+### Simulators
+- Primary oracle: the RTL and ISS in `../ai_hw_engineer` (`$AI_HW_ENGINEER`). Use its `system/<system>/` builds for whole-machine runs.
+- Secondary oracle: an independent third-party emulator in `external/` (MAME, AppleWin, Stella, MartyPC, ...). When the two disagree, the disagreement is a finding, not noise.
+
+### Original software and copyright
+- Never commit a copyrighted ROM/disk image. Record source URL, SHA-256 and license status in `original/provenance.md`; fetch scripts download into `original/` (gitignored).
+- Oracle transcripts (inputs and observable outputs) are committed.
+
+### Documentation
+- Markdown everywhere. Maintain `system/README.md` (system index) and `llvm-*/README.md`.
+- Every software README states the original's year, authors, sources and the current status. Historical dates are sourced; uncertainty is stated, not guessed.
+
+### Scripts
+- Bash, `set -euo pipefail`, clear status lines, nonzero on failure. Shell scripts are LF (`.gitattributes`).
+
+## Verification Before PR
+
+- [ ] Host: `cargo test` passes, oracle transcripts replay exactly
+- [ ] `cargo fmt --check`, `cargo clippy -D warnings`
+- [ ] Target image builds; size reported against the ROM/RAM budget
+- [ ] Target image run on a simulator and compared against the oracle (or the gap is documented)
+- [ ] Backend changes: lit + MC tests pass
+- [ ] README / report updated
+
+## Learning From Escaped Defects
+
+A bug found by anything other than the title's own tests (the original program's behavior, a second emulator, a reviewer) is an escaped defect: write a post-mortem in `failure_notes/`.
+
+- **Oracle from the original**: expected behavior comes from running the original binary or from the manufacturer's documentation, never from re-reading your own Rust.
+- **Two-stage check**: host pass + target pass are both required; a host pass with a target fail points at the backend first.
+- **Assumption ledger**: behavior the documentation does not state gets an `ASSUMPTION:` comment in code and an entry in `spec/spec.md`.
+
+## Commit Messages
+
+```
+<area>: <short description>
+```
+
+Areas: `system/<system>/<software>`, `system/<system>/platform`, `llvm/<chip>`, `external`, `docs/<tool>`, `reference`, `scripts`, `infra`.
+
+## Branches and PRs
+
+- `main` is protected; never push to it directly.
+- Branches: `system/<name>`, `llvm/<chip>`, `docs/<topic>`, `fix/<desc>`, `infra/<desc>`.
+- PR description: What / Why / Verification / Agent.
