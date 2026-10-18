@@ -1,0 +1,19 @@
+{
+  "_comment": "Draft Rust target for i4004. data-layout must equal spec/abi.md exactly. Requires nightly and -Zbuild-std=core.",
+  "arch": "i4004",
+  "llvm-target": "i4004-unknown-none",
+  "data-layout": "TODO",
+  "target-pointer-width": "16",
+  "target-c-int-width": "16",
+  "target-endian": "little",
+  "os": "none",
+  "executables": true,
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "disable-redzone": true,
+  "max-atomic-width": 0,
+  "atomic-cas": false,
+  "singlethread": true
+}
