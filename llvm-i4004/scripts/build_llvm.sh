@@ -61,6 +61,30 @@ echo "==> applying I4004 overlay"
 python3 "$BACKEND/scripts/apply_overlay.py" "$LLVM_SRC"
 
 # 3. Configure + build.
+#
+# The toolchain image's bare `clang`/`clang++` (/usr/local/bin, ahead of
+# /usr/bin on PATH) is the llvm-mos cross-compiler: it defaults to
+# `-target mos-unknown-unknown` and cannot link a host x86-64 binary (it pulls
+# the 6502 crt0). So the HOST LLVM build must use the Debian gcc/g++, never the
+# default clang. We both pass -DCMAKE_*_COMPILER and export CC/CXX so cmake's
+# own internal compiler probes (and any sub-build it spawns) also pick gcc, not
+# a re-detected clang. This is scoped to this script's process only: the global
+# env is untouched, so `rustc +mos` / llvm-mos-sdk builds that legitimately want
+# the mos clang are unaffected.
+HOST_CC="$(command -v gcc || true)"
+HOST_CXX="$(command -v g++ || true)"
+if [[ -z $HOST_CC || -z $HOST_CXX ]]; then
+  echo "ERROR: host gcc/g++ not found; the image should provide build-essential." >&2
+  exit 1
+fi
+# Guard: refuse to proceed if these somehow resolve to a non-host (mos) target.
+if "$HOST_CC" -dumpmachine 2>/dev/null | grep -qi '^mos'; then
+  echo "ERROR: $HOST_CC targets mos, not the host; refusing to build LLVM with it." >&2
+  exit 1
+fi
+export CC="$HOST_CC" CXX="$HOST_CXX"
+echo "==> host compilers: CC=$CC ($("$HOST_CC" -dumpmachine)) CXX=$CXX"
+
 if [[ "${CLEAN_OBJ:-0}" == "1" || ! -f $LLVM_OBJ/build.ninja ]]; then
   echo "==> configuring (cmake)"
   if [[ "${CLEAN_OBJ:-0}" == "1" ]]; then
@@ -80,8 +104,8 @@ if [[ "${CLEAN_OBJ:-0}" == "1" || ! -f $LLVM_OBJ/build.ninja ]]; then
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF \
     -DLLVM_CCACHE_BUILD=ON \
-    -DCMAKE_C_COMPILER=gcc \
-    -DCMAKE_CXX_COMPILER=g++ \
+    -DCMAKE_C_COMPILER="$HOST_CC" \
+    -DCMAKE_CXX_COMPILER="$HOST_CXX" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL"
 fi
 
