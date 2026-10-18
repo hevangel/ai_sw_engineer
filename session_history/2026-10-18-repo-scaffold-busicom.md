@@ -29,3 +29,10 @@
 ## Not done / next
 
 - Firmware M2 (multiply/divide/percent/EX/memory/square root), then M3 drivers checked against `external/chips`, M4 `llvm-i4004`, M5 run on ai_hw_engineer RTL.
+
+## Continuation (2026-10-18, same conversation)
+
+- Merged PR #1 and PR #2 (retargeted #2 to `main`); deleted both feature branches.
+- Two sub-agents in separate worktrees: llvm-i4004 ISA/ABI spec ([PR #3](https://github.com/hevangel/ai_sw_engineer/pull/3), data layout `e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8`); Busicom M2 ([PR #4](https://github.com/hevangel/ai_sw_engineer/pull/4)). The M2 agent hit its 100-call limit at 40/42 and was resumed to finish at 42/42.
+- Parent fixes on PR #4: `run_all.sh` scripts-dir resolution (title + template), exec bit, `*.env`/`*.ld` LF in `.gitattributes`.
+- Validation: `run_all.sh` clean in the container (worktree and git-archive export); manual replay 42/42, 135 checkpoints. Model calls: 3 sub-agent runs; token totals not exposed.
