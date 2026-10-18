@@ -30,3 +30,8 @@
 	path = external/chips
 	url = https://github.com/veniamin-ilmer/chips.git
 	shallow = true
+[submodule "external/llvm-project"]
+	path = external/llvm-project
+	url = https://github.com/llvm/llvm-project
+	shallow = true
+	branch = llvmorg-23.1.3

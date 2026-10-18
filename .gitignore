@@ -1,5 +1,8 @@
 # Rust / Cargo
 target/
+# ...but the LLVM backend target *sources* live in llvm-<chip>/target/ and ARE tracked.
+!llvm-*/target/
+!llvm-*/target/**
 debug/
 **/*.rs.bk
 *.pdb
@@ -10,6 +13,9 @@ rustc-ice-*.txt
 system/*/*/build/
 llvm-*/build/
 llvm-*/install/
+llvm-*/build_llvm.out
+llvm-*/tests/.lit/
+**/Output/
 
 # Original software images: provenance + SHA-256 are committed, the binaries are not.
 # A freely redistributable image may be force-added and noted in provenance.md.

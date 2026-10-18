@@ -363,13 +363,14 @@ These are explicit unknowns, **not** guesses baked into the spec:
 4. **Soft-stack base address and size** (§4.4) depend on `platform/link.ld`,
    still TODO; the firmware's RAM budget (`memory_map.md`: 160 nibbles) leaves
    little room, so deep call graphs may be infeasible and inlining mandatory.
-5. **Provisional `e_machine = 0x4004`** (§5) is unofficial; confirm it does not
-   collide with any value `ld.lld` special-cases, and document the migration if
-   upstream assigns a real EM_*.
+5. ~~Provisional `e_machine`~~ **Decided 2026-10-18 (project owner): `e_machine
+   = 0x4004`** (§5) is the value for this toolchain. It is private and
+   unregistered; the remaining check is that `ld.lld` does not special-case it,
+   and a migration note is needed only if upstream ever assigns a real EM_*.
 6. **16/32-bit runtime helpers** (§6) are unverified until a non-firmware title
    needs them; their calling-convention cost may force a different split.
-7. **C `int` width = 16** (§3) vs an 8-bit non-conforming `int` — revisit only
-   if a C (not Rust) consumer appears and 16-bit `int` blows the ROM budget.
+7. **Decided 2026-10-18 (project owner): C `int` = 16 bits** (`target-c-int-width` = 16),
+   conforming C. The 8-bit alternative is rejected.
 
 ## 8. Sources
 

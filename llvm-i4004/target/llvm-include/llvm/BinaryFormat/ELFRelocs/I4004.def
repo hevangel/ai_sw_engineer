@@ -1,0 +1,20 @@
+
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// Intel 4004 (MCS-4) relocations - see llvm-i4004/spec/abi.md sec.5.1.
+// Values are private to this toolchain (no official EM_* is assigned).
+ELF_RELOC(R_I4004_NONE,       0)
+// JUN/JMS: 12-bit absolute address across word1 low nibble + word2.
+ELF_RELOC(R_I4004_ADDR12,     1)
+// JCN/ISZ: 8-bit page-local address in word2 (page-crossing is an error).
+ELF_RELOC(R_I4004_PAGE8,      2)
+// FIM: 8-bit immediate in word2.
+ELF_RELOC(R_I4004_IMM8,       3)
+// FIN: pair-0 index, page-local 8-bit.
+ELF_RELOC(R_I4004_FIN8,       4)
+// addrspace-1 pointer stored as data (12-bit ROM address, zero-extended).
+ELF_RELOC(R_I4004_ROMADDR12,  5)
+// addrspace-0/2 pointer stored as data (16-bit RAM handle).
+ELF_RELOC(R_I4004_RAMADDR16,  6)
