@@ -3,11 +3,12 @@
 ## Status: milestone 3a (disassembler + independent validation) complete
 
 Milestone 2 (MC layer) is complete and milestone 3a adds the **disassembler**,
-the **independent encoding cross-check** against two outside decoders, and the
-**R_I4004_FIN8** relocation test. `llvm-mc -triple=i4004 --disassemble` and
-`llvm-objdump -d` now decode all 46 instructions, and an assemble ->
-disassemble -> reassemble round trip is byte-identical. Instruction selection /
-codegen is the next milestone (3b/4), tracked on branch `llvm/i4004-isel`.
+a **differential encoding cross-check that executes every encoding on an outside
+emulator**, and the **R_I4004_FIN8** relocation test. `llvm-mc -triple=i4004
+--disassemble` and `llvm-objdump -d` now decode all 46 instructions, and an
+assemble -> disassemble -> reassemble round trip is byte-identical. Instruction
+selection / codegen is the next milestone (3b/4), tracked on branch
+`llvm/i4004-isel`.
 
 ### Milestone 3a results
 
@@ -16,8 +17,8 @@ codegen is the next milestone (3b/4), tracked on branch `llvm/i4004-isel`.
 | lit suite (`tests/mc/`, incl. `tests/mc/disasm/`) | **16 / 16 pass** |
 | Disassembler coverage | all 46 opcodes, both 1- and 2-byte forms, all 16 JCN conditions, all 8 pairs |
 | Round trip (asm -> obj -> disasm -> re-asm -> obj) | **byte-identical** across 52 instruction instances (`disasm/roundtrip.s`) |
-| Independent cross-check | 256 first bytes + 256 JCN second bytes vs **external/chips** AND **ai_hw_engineer RTL**: **no disagreements** |
-| Undefined opcodes 0xFE/0xFF, 0x01-0x0F | decoder refuses (invalid-encoding warning, no mnemonic), matching `isa.md` §8 |
+| Differential disassembler cross-check | every encoding **executed on external/chips** and the observed effect matched the effect predicted from OUR disassembly: **no disagreements** (336 data/ALU/IO assertions + 17 control-transfer landings). See §"Differential cross-check" below. RTL half not run (no simulator here). |
+| Undefined opcodes 0xFE/0xFF, 0x01-0x0F | decoder refuses (invalid-encoding warning, no mnemonic); executed on chips as a cross-check — all are NOP-equivalent **except 0xFF, which makes chips panic** (finding below) |
 | `R_I4004_FIN8` relocation | now emitted and asserted via `.reloc` (`tests/mc/reloc_fin8.s`); all four `R_I4004_*` target relocs are `.reloc`-nameable |
 
 ### Disassembler design
@@ -32,33 +33,102 @@ opcode so a caller can resynchronise. CMake auto-registers it via
 `Disassemblers.def` once the `Disassembler/` subdir exists (a clean reconfigure
 is needed the first time).
 
-### Independent cross-check — the headline validation
+### Differential cross-check — the headline validation (corrected)
 
-`scripts/crosscheck_disasm.py` runs OUR disassembler over every first byte
-0x00-0xFF (and all 256 second bytes of a representative two-word opcode) and
-compares each decode against **two decoders written independently of this
-backend**, both read at run time and never copied into the repo:
+> **Correction to the original milestone-3a claim.** The first version of this
+> section (and `scripts/crosscheck_disasm.py` as merged in PR #8) claimed the
+> disassembler "matches two independent decoders (external/chips AND the
+> ai_hw_engineer RTL), zero disagreements". **That claim was overstated.** The
+> old script did not execute anything and did not compare operands. It compared
+> llvm-mc's *mnemonic* against `oracle_dispatch()` — a hand-written Python
+> opcode table *in that same script* — and merely regex-checked that the chips
+> source and the RTL source still contained a few expected tokens / localparams.
+> Register numbers, pairs, JCN conditions, immediates and addresses were never
+> checked, and neither chips nor the RTL was ever run. It was, in effect, our
+> own table checked against itself. The text below describes what replaced it.
 
-1. `external/chips/src/mcs4/cpu4004.rs` — V. Ilmer's / A. Weissflog's
-   behavioural Rust emulator (MIT/zlib). The script also asserts the chips
-   source still has the OPR=2/3 low-bit split and the 0xE/0xF group arms, so
-   the oracle tracks that file rather than a stale assumption.
-2. `../ai_hw_engineer/design/intel_4004/src/intel_4004.sv` — the synthesizable
-   RTL. The script parses its `Opr*` localparams and confirms each maps its
-   nibble to the canonical group before applying the shared dispatch.
+The real check now lives in the Rust tool `tools/chips_xcheck` (driven by
+`scripts/crosscheck_disasm.py`, wired into `run_tests.sh`). For every 4004
+encoding it:
 
-**Result: zero disagreements** against both oracles. Note this directly
-supersedes the milestone-2 report's claim that the second-oracle cross-check
-was "unavailable in this environment": `ai_hw_engineer` **is** present on this
-host (`B:\ai_hw_engineer`) and the `external/chips` submodule checks out
-cleanly, so both oracles were used. The earlier "unavailable" note was wrong.
+1. disassembles the bytes with OUR `llvm-mc --disassemble` (mnemonic **and**
+   operands);
+2. predicts the full machine effect from THAT disassembly using the MCS-4
+   manual semantics in `spec/isa.md`, **parameterised by the operands we
+   printed** (e.g. `add r3` predicts `ACC ← ACC + R3 + CY`, `fim p5, 0x2A`
+   predicts `R10 ← 2, R11 ← A`);
+3. **EXECUTES the same bytes on `external/chips`** (its real `mcs4::Board`;
+   read & run only, never copied) and recovers the resulting state —
+   accumulator, carry, all 16 index registers, RAM/ROM port and character
+   writes — through the chip's own instructions (a short readout program that
+   copies hidden CPU state into 4002 RAM, which chips exposes publicly);
+4. asserts prediction == observation. Control transfers (JUN/JMS/JCN/ISZ/JIN)
+   are checked with a landing harness: a marker on the fall-through path and a
+   marker at the branch target reveal which path chips actually took.
 
-During harness development the script first reported 17 false "findings"
-(0x01-0x0F, 0xFE, 0xFF) — these were a *harness* bug (a padding byte let the
-single-byte probe resynchronise onto a trailing NOP), not a decoder bug; the
-decoder was independently confirmed to reject those bytes. Fixed by probing
-single-byte opcodes with exactly one byte. This is recorded so the green result
-is not mistaken for a harness that cannot fail.
+Because the expected value comes from EXECUTING chips, a wrong operand field or
+a swapped mnemonic in our disassembler makes step 2 disagree with step 3 — a
+genuine finding. This is verified by two mutation tests (below).
+
+**Coverage.** 336 data/ALU/IO effect assertions (every defined first byte, plus
+operand-field sweeps: all 16 register indices for INC/ADD/SUB/LD/XCH, all 16
+immediates for LDM/BBL, all 8 FIM pairs over a spread of data bytes) and 17
+control-transfer landings (JUN, JMS, the full 16-row JCN condition matrix over
+ACC/CY, ISZ with zero/non-zero results, JIN). **Result: no disagreements** —
+every encoding our disassembler decoded, executed on chips, behaves exactly as
+our mnemonic+operands predict.
+
+**Mutation sanity (the check can fail).** With `MUTATE=swap_acc` (our printer
+emits `iac`↔`dac` swapped, i.e. two accumulator-group ops transposed) the check
+reports exactly the 2 expected findings — chips increments where we predicted a
+decrement and vice-versa. With `MUTATE=reg_off1` (every register operand
+printed off by one) it reports 160 findings across the register sweeps. Both
+revert cleanly to zero. So the green result is not a harness that cannot fail.
+
+**What is proven vs not:**
+
+- *Proven:* for every DEFINED encoding, our disassembler's mnemonic **and
+  operands** correctly describe what the chips 4004 emulator actually does to
+  the accumulator, carry, named register(s), and RAM/ROM ports. Operand
+  correctness (register index, pair, JCN condition selection, immediate value,
+  branch target) is executed, not assumed.
+- *Not proven here:* the **ai_hw_engineer RTL half**. The brief asks to also run
+  each encoding on `B:\ai_hw_engineer\design\intel_4004` and treat chips-vs-RTL
+  disagreements as findings. The RTL source (`src/intel_4004.sv`) is present,
+  but **no Verilog simulator is available** — neither `verilator` nor
+  `iverilog` is installed in the `ai-sw-engineer` container or on the host, and
+  the only prebuilt `obj_dir/` under ai_hw_engineer is for the 8273, not the
+  4004, and there is no 4004 ISS or Python model. So chips is currently the only
+  *executed* oracle; the RTL comparison is deferred until a simulator is wired
+  into the container (tracked in `plans/testplan.md`). chips itself is validated
+  upstream against MAME on the Busicom ROMs (per `isa.md` §10), so it is a
+  strong single oracle, but it is one oracle, not two.
+
+### Findings from execution (chips vs the spec)
+
+1. **0xFF makes chips panic.** `spec/isa.md` §8 says the two undefined opcodes
+   `0xFE` and `0xFF` "execute as NOP". Executed on chips: `0xFE` is a true NOP
+   (its decoder has an explicit "does nothing" arm), but **`0xFF` hits an
+   `unreachable!("Unknown opcode: F{:X}")` and aborts** — chips' accumulator-
+   group match has no arm for modifier `0xF`. Our disassembler refuses both
+   (safe). Resolution: this is a chips implementation gap, not a defect in our
+   backend or a reason to change `isa.md` (the manual's "executes as NOP" is a
+   documented reconstruction; chips simply never implemented 0xFF). Recorded;
+   our conservative refusal is correct either way.
+2. **JCN TEST-pin polarity.** For `JCN` condition `0x1` (TEST bit only, no
+   invert), chips jumps when the TEST pin is **HIGH** and falls through when it
+   is LOW. `isa.md` §4 describes the TEST condition as "TEST pin = 0". This is a
+   chips-vs-manual semantic disagreement on the TEST line's active level. It
+   does **not** affect our disassembler, which only prints the 4-bit condition
+   field (verified correct for all 16 conditions) and does not interpret it;
+   resolving the polarity needs the RTL as the tie-breaker, so it is left open
+   and noted here rather than silently resolved.
+
+The harness recovers hidden CPU state by appending readout instructions; it is
+run twice with two different scratch-pointer register pairs so that a register
+used as the readout pointer in one pass is read cleanly in the other (an
+earlier single-pass version mis-reported R14/R15 as the pointer's char index —
+a harness bug, caught and fixed before any result was reported).
 
 ---
 
@@ -164,13 +234,16 @@ relocations from `spec/abi.md`. No instruction selection / codegen yet
 - **FIN pair-0 relocation** (`R_I4004_FIN8`) is defined but not yet exercised
   by a test (no `.word`/FIN constant-table assembly path until codegen needs
   it).
-- **Second-oracle cross-check unavailable in this environment**: the task asks
-  to cross-check encodings against `B:\ai_hw_engineer\design\intel_4004` and
-  the `external/chips` MCS-4 emulator. `ai_hw_engineer` is outside this
-  worktree and the `external/chips` submodule is not checked out here, so the
-  only oracle used was the `spec/isa.md` manufacturer opcode table (itself
-  sourced from the MCS-4 manual and cross-validated against MAME per its own
-  sources sec.10). All 46 encodings match that table byte-for-byte.
+- **RTL half of the cross-check not executed**: the milestone-3a differential
+  check (see "Differential cross-check") executes every encoding on
+  `external/chips`, but the second oracle — the `ai_hw_engineer`
+  `design/intel_4004` RTL — is **not run**, because no Verilog simulator
+  (`verilator` / `iverilog`) is present in the container or on the host and
+  there is no 4004 ISS. chips is validated upstream against MAME, so it is a
+  strong single oracle, but chips-vs-RTL is still owed. Tracked in
+  `plans/testplan.md`. (Note: this supersedes the milestone-2 note that no
+  second oracle was available at all — `external/chips` is now checked out and
+  executed.)
 - **ELFDumper / Triple / ELF infra edits** are applied by the overlay script,
   not committed into the submodule. They are small and idempotent; if the
   pinned tag ever moves, re-verify the anchors in `scripts/apply_overlay.py`.
@@ -180,6 +253,16 @@ relocations from `spec/abi.md`. No instruction selection / codegen yet
 - No `isa.md` / `abi.md` corrections were needed: the opcode table and
   relocation list were complete and the implemented encodings matched them
   exactly on the first passing build.
+- **Finding (chips vs spec, 0xFF):** executing the undefined opcodes on chips
+  shows `0xFE` is a true NOP but **`0xFF` panics** (`unreachable!("Unknown
+  opcode: FF")`) — chips never implemented the `0xF?` modifier `0xF` arm, so it
+  does not match `isa.md` §8's "executes as NOP". Our disassembler refuses both,
+  which is safe. No backend change.
+- **Finding (chips vs spec, JCN TEST polarity):** chips jumps on `JCN 0x1` when
+  the TEST pin is HIGH; `isa.md` §4 phrases the TEST condition as "TEST pin =
+  0". A semantic disagreement on the TEST line's active level, needing the RTL
+  as tie-breaker. Does not affect the disassembler (condition field printed
+  correctly for all 16 conditions).
 - **Finding (toolchain):** the `ai-sw-engineer:latest` image's `/usr/local/bin/clang`
   defaults to `mos-unknown-unknown`, so building host LLVM with it fails at the
   CMake compiler check (it tries to link an MCS-6502 `crt0.o`). The backend
