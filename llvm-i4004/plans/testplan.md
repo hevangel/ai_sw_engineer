@@ -27,6 +27,24 @@ Execution tests run on the ai_hw_engineer RTL/ISS where one exists and on
 4. **Markdown links resolve.** Every relative link in the backend READMEs/specs
    points at a file that exists.
 
+## Milestone-2 status -- DONE (10/10 MC tests pass)
+
+Implemented in llvm-i4004/tests/mc/ and run by scripts/run_tests.sh against
+the LLVM 23.1.3 build in llvm-i4004/install/bin:
+
+- basic.s (16 OPR=0x0..0xD), ram_rom.s (16 OPR=0xE), accgroup.s (14 OPR=0xF),
+  jcn_cond.s (JCN conditions + jmp alias), pairs.s (all 8 pair forms),
+  reloc.s (symbolic two-word fixups), elf.s (e_machine 0x4004 + R_I4004_* via
+  llvm-readobj).
+- errors/: err_imm_range.s, err_pair_vs_reg.s, err_undefined.s.
+- All 46 opcodes assemble to the isa.md byte column; see report/final_report.md.
+
+**Deferred to milestone 5 (linker/image packer):** err_page_cross.s. The
+R_I4004_PAGE8 / R_I4004_FIN8 relocations are emitted, but the end-of-page
+(isa.md sec.9) *rejection* needs the linker-side page-identity check, which
+does not exist yet. R_I4004_FIN8 is defined but not yet exercised by a test
+(no FIN constant-table assembly path until codegen needs it).
+
 ## Milestone-2 MC encode tests (next, concrete)
 
 The `tests/mc/` fixture is generated directly from the `isa.md` tables — one

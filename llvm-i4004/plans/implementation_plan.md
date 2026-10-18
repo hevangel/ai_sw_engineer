@@ -15,18 +15,24 @@ Milestones (each ends with passing tests):
    - `rust/i4004-none.json`: data-layout equals abi.md; pointer/c-int = 16.
    - Open questions recorded in `abi.md` §7 (not guessed).
 
-2. **MC layer.** Next concrete steps:
-   - `target/lib/Target/I4004/I4004RegisterInfo.td`: `ACC`, `CY`, `R0`–`R15`,
-     `P0`–`P7` register pairs; classes `GR4`, `PR8`; reserve P0, P7; mark
-     ACC/CY fixed. Verify against `abi.md` §2.
-   - `I4004InstrInfo.td` / `I4004InstrFormats.td`: one record per `isa.md` row,
-     with the exact `OPR OPA` encoding bits and operand classes from
-     `asm_syntax.md`. Two-word instructions carry their second word as a fixup.
-   - `I4004AsmParser` + `I4004InstPrinter` + `I4004MCCodeEmitter` + fixups for
-     `R_I4004_ADDR12/PAGE8/IMM8/FIN8` (`abi.md` §5).
-   - **Exit:** `tests/mc/` assembles every one of the 46 opcodes and
-     `llvm-mc -show-encoding` matches the `isa.md` byte column; page-local
-     fixups reject a cross-page target.
+2. **MC layer. -- DONE.** Built on LLVM 23.1.3 as an overlay onto the
+   external/llvm-project submodule (llvm-i4004/target/, applied by
+   scripts/apply_overlay.py).
+   - I4004RegisterInfo.td: ACC, CY, R0-R15, P0-P7 register pairs; classes
+     GR4, PR8. (P0/P7 reservation per abi.md is a codegen concern deferred to
+     milestone 3; the MC layer only needs the encodings.)
+   - I4004InstrInfo.td / I4004InstrFormats.td: one record per isa.md row with
+     the exact OPR OPA encoding bits and operand classes from asm_syntax.md.
+     Two-word instructions carry their second word via a fixup.
+   - I4004AsmParser + I4004InstPrinter + I4004MCCodeEmitter + I4004AsmBackend +
+     I4004ELFObjectWriter: fixups fixup_addr12/page8/imm8/fin8 ->
+     R_I4004_ADDR12/PAGE8/IMM8/FIN8 (abi.md sec.5) and e_machine 0x4004.
+   - **Exit (met):** tests/mc/ assembles every one of the 46 opcodes and
+     llvm-mc -triple=i4004 -show-encoding matches the isa.md byte column;
+     10/10 MC tests pass; the ELF object carries e_machine 0x4004 and the
+     R_I4004_* relocations. **Deferred:** page-local cross-page *rejection*
+     (relocations exist, but the linker-side page-identity check lands with the
+     linker/image-packer in milestone 5), so err_page_cross.s is not yet in.
 
 3. **Instruction selection** for `i4`/`i8` add/sub/and/or/xor/load/store/branch
    at native width (`tests/codegen/`), ACC/CY modeled as implicit; `SRC`+`RDM`/
