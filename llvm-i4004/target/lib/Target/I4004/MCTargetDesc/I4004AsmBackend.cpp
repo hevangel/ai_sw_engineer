@@ -8,6 +8,7 @@
 
 #include "MCTargetDesc/I4004FixupKinds.h"
 #include "MCTargetDesc/I4004MCTargetDesc.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
@@ -25,11 +26,12 @@ using namespace llvm;
 
 namespace {
 class I4004AsmBackend : public MCAsmBackend {
+  const MCSubtargetInfo &STI;
   uint8_t OSABI;
 
 public:
   I4004AsmBackend(const MCSubtargetInfo &STI, uint8_t OSABI)
-      : MCAsmBackend(llvm::endianness::little), OSABI(OSABI) {}
+      : MCAsmBackend(llvm::endianness::little), STI(STI), OSABI(OSABI) {}
   ~I4004AsmBackend() override = default;
 
   void applyFixup(const MCFragment &, const MCFixup &, const MCValue &Target,
@@ -38,6 +40,26 @@ public:
   std::unique_ptr<MCObjectTargetWriter>
   createObjectTargetWriter() const override {
     return createI4004ELFObjectWriter(OSABI);
+  }
+
+  // Resolve a relocation NAME from a `.reloc` directive to a fixup kind. This
+  // lets assembly (and tests) name any R_I4004_* relocation directly -- in
+  // particular R_I4004_FIN8, which no instruction encoder emits yet (it is a
+  // CodeGen-era FIN constant-load fixup, abi.md sec.5.1). Mirrors the standard
+  // ELF-target pattern (RISC-V et al): a named literal relocation is emitted
+  // with its ELF type verbatim via FirstLiteralRelocationKind.
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override {
+    if (STI.getTargetTriple().isOSBinFormatELF()) {
+      unsigned Type = StringSwitch<unsigned>(Name)
+#define ELF_RELOC(NAME, ID) .Case(#NAME, ID)
+#include "llvm/BinaryFormat/ELFRelocs/I4004.def"
+#undef ELF_RELOC
+                          .Case("BFD_RELOC_NONE", ELF::R_I4004_NONE)
+                          .Default(-1u);
+      if (Type != -1u)
+        return static_cast<MCFixupKind>(FirstLiteralRelocationKind + Type);
+    }
+    return std::nullopt;
   }
 
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
