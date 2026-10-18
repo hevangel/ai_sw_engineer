@@ -227,8 +227,10 @@ impl Calculator {
         self.op_from_entry = false;
         self.lamps.overflow = false;
         self.lamps.negative = false;
-        // ASSUMPTION (spec A3): C prints its symbol on an empty row.
-        out.print(&Row::blank(Symbol::Clear));
+        // The original ROM prints the cleared value `0` with the C symbol, not
+        // a blank row (verified against oracle/rom_port_trace.txt; was spec A3's
+        // guessed blank row — see failure_notes/2026-10-18-clear-prints-zero.md).
+        out.print(&Row::number(&Num::ZERO, Symbol::Clear));
     }
 
     fn overflow<P: Printer>(&mut self, out: &mut P) {

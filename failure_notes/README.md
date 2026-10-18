@@ -22,4 +22,6 @@ Blame-free: the question is which step let a shared assumption pass as verified.
 
 ## Index
 
-_None yet._
+- `2026-10-18-busicom_141pf-clear-prints-zero.md` — `C` printed a blank row
+  instead of the cleared value `0`; caught by the original ROM's port trace
+  while adding `tests/port_trace.rs`.
