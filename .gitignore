@@ -1,5 +1,8 @@
 # Rust / Cargo
 target/
+# ...but the LLVM backend target *sources* live in llvm-<chip>/target/ and ARE tracked.
+!llvm-*/target/
+!llvm-*/target/**
 debug/
 **/*.rs.bk
 *.pdb
