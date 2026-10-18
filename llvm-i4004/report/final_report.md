@@ -1,5 +1,67 @@
 # llvm-i4004 final report
 
+## Status: milestone 3a (disassembler + independent validation) complete
+
+Milestone 2 (MC layer) is complete and milestone 3a adds the **disassembler**,
+the **independent encoding cross-check** against two outside decoders, and the
+**R_I4004_FIN8** relocation test. `llvm-mc -triple=i4004 --disassemble` and
+`llvm-objdump -d` now decode all 46 instructions, and an assemble ->
+disassemble -> reassemble round trip is byte-identical. Instruction selection /
+codegen is the next milestone (3b/4), tracked on branch `llvm/i4004-isel`.
+
+### Milestone 3a results
+
+| Check | Result |
+|---|---|
+| lit suite (`tests/mc/`, incl. `tests/mc/disasm/`) | **16 / 16 pass** |
+| Disassembler coverage | all 46 opcodes, both 1- and 2-byte forms, all 16 JCN conditions, all 8 pairs |
+| Round trip (asm -> obj -> disasm -> re-asm -> obj) | **byte-identical** across 52 instruction instances (`disasm/roundtrip.s`) |
+| Independent cross-check | 256 first bytes + 256 JCN second bytes vs **external/chips** AND **ai_hw_engineer RTL**: **no disagreements** |
+| Undefined opcodes 0xFE/0xFF, 0x01-0x0F | decoder refuses (invalid-encoding warning, no mnemonic), matching `isa.md` §8 |
+| `R_I4004_FIN8` relocation | now emitted and asserted via `.reloc` (`tests/mc/reloc_fin8.s`); all four `R_I4004_*` target relocs are `.reloc`-nameable |
+
+### Disassembler design
+
+`target/lib/Target/I4004/Disassembler/I4004Disassembler.cpp` is a **hand-written
+variable-length decoder**, not a TableGen `-gen-disassembler` table: the MCS-4
+stream mixes 1- and 2-byte instructions and TableGen's fixed-length decoder
+assumes a single width. The decoder dispatches on the OPR high nibble, one
+`case` per `isa.md` row, reads a second program byte for JCN/FIM/JUN/JMS/ISZ,
+and returns `Fail` (Size=1) on a truncated two-word instruction or an undefined
+opcode so a caller can resynchronise. CMake auto-registers it via
+`Disassemblers.def` once the `Disassembler/` subdir exists (a clean reconfigure
+is needed the first time).
+
+### Independent cross-check — the headline validation
+
+`scripts/crosscheck_disasm.py` runs OUR disassembler over every first byte
+0x00-0xFF (and all 256 second bytes of a representative two-word opcode) and
+compares each decode against **two decoders written independently of this
+backend**, both read at run time and never copied into the repo:
+
+1. `external/chips/src/mcs4/cpu4004.rs` — V. Ilmer's / A. Weissflog's
+   behavioural Rust emulator (MIT/zlib). The script also asserts the chips
+   source still has the OPR=2/3 low-bit split and the 0xE/0xF group arms, so
+   the oracle tracks that file rather than a stale assumption.
+2. `../ai_hw_engineer/design/intel_4004/src/intel_4004.sv` — the synthesizable
+   RTL. The script parses its `Opr*` localparams and confirms each maps its
+   nibble to the canonical group before applying the shared dispatch.
+
+**Result: zero disagreements** against both oracles. Note this directly
+supersedes the milestone-2 report's claim that the second-oracle cross-check
+was "unavailable in this environment": `ai_hw_engineer` **is** present on this
+host (`B:\ai_hw_engineer`) and the `external/chips` submodule checks out
+cleanly, so both oracles were used. The earlier "unavailable" note was wrong.
+
+During harness development the script first reported 17 false "findings"
+(0x01-0x0F, 0xFE, 0xFF) — these were a *harness* bug (a padding byte let the
+single-byte probe resynchronise onto a trailing NOP), not a decoder bug; the
+decoder was independently confirmed to reject those bytes. Fixed by probing
+single-byte opcodes with exactly one byte. This is recorded so the green result
+is not mistaken for a harness that cannot fail.
+
+---
+
 ## Status: milestone 2 (MC layer) complete
 
 `llvm-mc -triple=i4004 -show-encoding` assembles **all 46 Intel 4004
