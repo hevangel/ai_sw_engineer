@@ -23,7 +23,7 @@ pub mod print;
 
 pub use bcd::Num;
 pub use keys::{Key, Lamps, Rounding, Switches};
-pub use print::{Printer, Row, Symbol};
+pub use print::{Printer, Row, SymA, SymB};
 
 use bcd::CAPACITY;
 
@@ -116,7 +116,26 @@ impl Calculator {
     }
 
     /// Process one key with the selector positions read at that moment.
+    ///
+    /// After the key is handled, the front-panel **minus-sign lamp** is set from
+    /// the working register's sign, exactly as the original firmware's
+    /// status-light routine does: the annotated listing (§ status-light
+    /// handling, `010 jms $173 … 01d wmp`) builds the RAM1 nibble as
+    /// `8·WR.S0.bit1 + 4·WR.S0.bit0 + 2·overflow + (MR≠0)`, i.e. the minus lamp
+    /// (bit 2) is `WR.S0.bit0` — the sign of the number currently in WR, read at
+    /// idle — NOT the accumulator's running sign. A `+`/`-` operand leaves the
+    /// (positive) entry in WR so the lamp stays off; a negative total/result
+    /// leaves that value in WR so the lamp lights. See `driver_lamps` for bit 3
+    /// (`WR.S0.bit1`).
     pub fn press<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
+        self.dispatch(key, sw, out);
+        // The minus-sign lamp tracks the sign of WR at idle (listing: bit 2 =
+        // WR.S0.bit0). Digit entry does not reach here with a function result,
+        // and WR already holds whatever the last function left.
+        self.lamps.negative = self.wr.neg;
+    }
+
+    fn dispatch<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         // At overflow, only CE and C respond (disassembly: engine starts only
         // for those two keys when SR.S2 overflow is set).
         if self.lamps.overflow && !matches!(key, Key::Ce | Key::C) {
@@ -149,14 +168,14 @@ impl Calculator {
             Key::C => self.clear(out),
             Key::Plus => self.add_sub(false, sw, out),
             Key::Minus => self.add_sub(true, sw, out),
-            Key::Mul => self.mul_div_key(MulOp::Mul, out),
-            Key::Div => self.mul_div_key(MulOp::Div, out),
+            Key::Mul => self.mul_div_key(MulOp::Mul, sw, out),
+            Key::Div => self.mul_div_key(MulOp::Div, sw, out),
             Key::Eq => self.equals(sw, out),
             Key::Percent => self.percent(sw, out),
             Key::Ex => self.exchange(out),
             Key::St => self.subtotal_key(sw, out),
-            Key::MPlus => self.memory_add(false, out),
-            Key::MMinus => self.memory_add(true, out),
+            Key::MPlus => self.memory_add(false, sw, out),
+            Key::MMinus => self.memory_add(true, sw, out),
             Key::MEqPlus => self.memory_eq(false, sw, out),
             Key::MEqMinus => self.memory_eq(true, sw, out),
             Key::Rm => self.recall_memory(sw, out),
@@ -230,7 +249,7 @@ impl Calculator {
         // The original ROM prints the cleared value `0` with the C symbol, not
         // a blank row (verified against oracle/rom_port_trace.txt; was spec A3's
         // guessed blank row — see failure_notes/2026-10-18-clear-prints-zero.md).
-        out.print(&Row::number(&Num::ZERO, Symbol::Clear));
+        out.print(&Row::num_a(&Num::ZERO, SymA::Clear));
     }
 
     fn overflow<P: Printer>(&mut self, out: &mut P) {
@@ -253,9 +272,9 @@ impl Calculator {
             return;
         }
         self.wr = value;
-        out.print(&Row::number(
+        out.print(&Row::num_a(
             &value,
-            if minus { Symbol::Minus } else { Symbol::Plus },
+            if minus { SymA::Minus } else { SymA::Plus },
         ));
         match (
             self.sr.add_signed(&value, minus),
@@ -265,7 +284,6 @@ impl Calculator {
                 self.sr = s;
                 self.tr = t;
                 self.mode = Mode::AddSub;
-                self.lamps.negative = t.neg;
             }
             _ => self.overflow(out),
         }
@@ -274,7 +292,16 @@ impl Calculator {
     // --- multiply / divide keys ----------------------------------------
 
     /// `*` or `/`: establish or chain a multiply/divide operation.
-    fn mul_div_key<P: Printer>(&mut self, op: MulOp, out: &mut P) {
+    ///
+    /// Operand-echo rows (spec A6, from `oracle/rom_port_trace.txt`): the ROM
+    /// prints the first operand with the op glyph not only for a freshly typed
+    /// entry but also when the operand was *recalled or accumulated* (e.g.
+    /// after `RM` or `M+`, 9-1 `68.94 ×`, 3-6 `123.45 ÷`), and when the running
+    /// main total is pulled into a mixed calculation (`119.47 ×`). Pressing a
+    /// second op key with no new entry is an **operation correction**: the ROM
+    /// reprints only the op glyph with a BLANK value (2-8 `× ÷ ×`), the operand
+    /// already latched.
+    fn mul_div_key<P: Printer>(&mut self, op: MulOp, sw: Switches, out: &mut P) {
         let entered = self.entering;
         if entered {
             self.take_entry();
@@ -282,11 +309,13 @@ impl Calculator {
         match self.mode {
             Mode::AddSub => {
                 // Mixed calc: recall the main total as the first operand,
-                // clear the accumulators, and print it with the op symbol.
+                // clear the accumulators, and print it with the op symbol. A
+                // recalled total is a non-fresh operand → aligned to DP.
                 self.wr = self.tr;
                 self.sr = Num::ZERO;
                 self.tr = Num::ZERO;
-                out.print(&Row::number(&self.wr, sym_for(op)));
+                let shown = operand_shown(&self.wr, false, sw.dp);
+                out.print(&Row::num_a(&shown, sym_for(op)));
                 self.dr = self.wr;
                 self.cr = self.wr;
                 self.mop = op;
@@ -294,7 +323,14 @@ impl Calculator {
                 self.op_from_entry = false; // operand recalled, not typed
             }
             Mode::New if matches!(self.mop, MulOp::Mul | MulOp::Div) => {
-                // Chain: compute the pending operation, result feeds the next.
+                // Chain: a new op after a pending multiply/divide. The ROM first
+                // echoes the operand now in WR with the new op glyph (spec A6 —
+                // e.g. 2-4 `4.56 ×`, 3-4 `6 ÷`, 5-1 `12.4 ÷`, 8-1 `1368 ×`),
+                // then computes the pending product/quotient, whose result feeds
+                // the next op. A freshly typed operand echoes at its entered
+                // scale; a recalled one is aligned to DP.
+                let shown = operand_shown(&self.wr, entered, sw.dp);
+                out.print(&Row::num_a(&shown, sym_for(op)));
                 if let Some(r) = self.compute() {
                     self.wr = r;
                     self.dr = r;
@@ -306,17 +342,26 @@ impl Calculator {
                     self.overflow(out);
                 }
             }
+            Mode::MulDiv if !entered => {
+                // Operation correction: an op key pressed straight after another
+                // with no new entry. The operand stays latched; the ROM reprints
+                // only the op glyph with a blank value (spec A6).
+                out.print(&Row::blank(sym_for(op), SymB::None));
+                self.mop = op;
+            }
             _ => {
-                // First operand (also: new number after a constant op, or an
-                // operation correction when the last key was mul/div).
+                // First operand: a freshly typed entry, OR a value left in WR by
+                // a recall/accumulate/result (spec A6 echo). A fresh entry
+                // echoes at its entered scale; a recalled/accumulated operand is
+                // aligned to DP (10-1 `10.00 ×` after `10 M+`; 9-1 `11 ×` keeps
+                // its typed `11`).
+                let shown = operand_shown(&self.wr, entered, sw.dp);
                 self.dr = self.wr;
                 self.cr = self.wr;
                 self.mop = op;
                 self.mode = Mode::MulDiv;
                 self.op_from_entry = entered;
-                if entered {
-                    out.print(&Row::number(&self.wr, sym_for(op)));
-                }
+                out.print(&Row::num_a(&shown, sym_for(op)));
             }
         }
     }
@@ -365,9 +410,7 @@ impl Calculator {
             // Recall and clear the main total.
             let total = self.tr;
             let (shown, rounded) = total.round_at(sw.dp, sw.rounding == Rounding::Round);
-            let mut row = Row::number(&shown, Symbol::Total);
-            row.rounded = rounded;
-            self.lamps.negative = shown.neg;
+            let row = total_row(&shown, rounded);
             out.print(&row);
             self.wr = total;
             self.sr = Num::ZERO;
@@ -381,7 +424,7 @@ impl Calculator {
             self.take_entry();
         }
         self.print_operand(fresh, sw, out);
-        self.do_mul_div_equals(sw, out, Symbol::Total, None);
+        self.do_mul_div_equals(sw, out, SymB::Total, None);
     }
 
     /// Print the `=`/`M=±` second-operand row. A freshly typed entry prints at
@@ -397,7 +440,7 @@ impl Calculator {
             let _ = n.rescale(sw.dp);
             n
         };
-        out.print(&Row::number(&shown, Symbol::Equals));
+        out.print(&Row::num_a(&shown, SymA::Equals));
     }
 
     /// Execute the pending mul/div for `=`/`%`/`M=±`, print the result row with
@@ -407,7 +450,7 @@ impl Calculator {
         &mut self,
         sw: Switches,
         out: &mut P,
-        symbol: Symbol,
+        sym_b: SymB,
         pct: Option<MulOp>,
     ) -> Option<Num> {
         // Determine the concrete operation and whether a constant is reused.
@@ -487,9 +530,7 @@ impl Calculator {
             return None;
         }
         self.wr = shown;
-        let mut row = Row::number(&shown, symbol);
-        row.rounded = rounded;
-        self.lamps.negative = shown.neg;
+        let row = result_row(&shown, rounded, sym_b);
         out.print(&row);
         Some(shown)
     }
@@ -501,7 +542,7 @@ impl Calculator {
             self.take_entry();
         }
         // The entered operand prints with `%`.
-        out.print(&Row::number(&self.wr, Symbol::Percent));
+        out.print(&Row::num_a(&self.wr, SymA::Percent));
         // For percent-multiply, the operand means "× (n/100)": fold ÷100 into
         // the operand before multiplying. For percent-divide, scale ×100 after.
         let op = self.mop;
@@ -509,7 +550,7 @@ impl Calculator {
             // divide the entered operand by 100 first
             self.wr = scale_pow(&self.wr, -2);
         }
-        self.do_mul_div_equals(sw, out, Symbol::Total, Some(op));
+        self.do_mul_div_equals(sw, out, SymB::Total, Some(op));
     }
 
     // --- exchange -------------------------------------------------------
@@ -519,7 +560,7 @@ impl Calculator {
             self.take_entry();
         }
         // CR=WR, RR=DR, DR=WR, WR=RR  → swap WR and DR, CR tracks the new DR.
-        out.print(&Row::number(&self.wr, Symbol::Exchange));
+        out.print(&Row::num_b(&self.wr, SymB::Exchange));
         let tmp = self.dr;
         self.cr = self.wr;
         self.dr = self.wr;
@@ -533,22 +574,19 @@ impl Calculator {
         if self.entering {
             // Reference number / date: printed as typed, changes nothing.
             self.take_entry();
-            out.print(&Row::number(&self.wr, Symbol::Reference));
+            out.print(&Row::num_b(&self.wr, SymB::Reference));
             return;
         }
         match self.mode {
             Mode::AddSub => {
                 let (shown, rounded) = self.sr.round_at(sw.dp, sw.rounding == Rounding::Round);
-                let mut row = Row::number(&shown, Symbol::SubTotal);
-                row.rounded = rounded;
-                self.lamps.negative = shown.neg;
-                out.print(&row);
+                out.print(&subtotal_row(&shown, rounded));
                 self.sr = Num::ZERO;
             }
             Mode::New if matches!(self.mop, MulOp::Mul | MulOp::Div) => {
                 // Intermediate chain result: print the pending product/quotient.
                 if let Some(r) = self.compute() {
-                    out.print(&Row::number(&r, Symbol::SubTotal));
+                    out.print(&Row::num_a(&r, SymA::SubTotal));
                     self.wr = r;
                     self.dr = r;
                     self.cr = r;
@@ -556,7 +594,7 @@ impl Calculator {
             }
             Mode::MulDiv => {
                 // After a chain `*`/`/` the running product is in DR; print it.
-                out.print(&Row::number(&self.dr, Symbol::SubTotal));
+                out.print(&Row::num_a(&self.dr, SymA::SubTotal));
             }
             _ => {}
         }
@@ -564,15 +602,26 @@ impl Calculator {
 
     // --- memory ---------------------------------------------------------
 
-    fn memory_add<P: Printer>(&mut self, minus: bool, out: &mut P) {
+    fn memory_add<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         if self.entering {
             self.take_entry();
         }
+        // The ROM echoes a bare `M+`/`M-` key: it prints the current operand
+        // with the memory-key glyph in symbol column A (spec A7, from
+        // oracle/rom_port_trace.txt — e.g. 9-1 `6.89 M-`, 10-1 `10.00 M+`,
+        // 11-2 `2.000000 M+`). The operand is aligned to the decimal selector
+        // before printing, exactly like a `+`/`-` operand (10-1 prints the
+        // typed `10` as `10.00` at DP 2; 11-2 prints `2` as `2.000000` at DP 6).
+        let mut shown = self.wr;
+        let _ = shown.rescale(sw.dp);
+        out.print(&Row::num_a(
+            &shown,
+            if minus { SymA::MemMinus } else { SymA::MemPlus },
+        ));
         if let Some(m) = self.mr.add_signed(&self.wr, minus) {
             self.mr = m;
             self.lamps.memory = !self.mr.is_zero();
             self.mode = Mode::New;
-            let _ = out; // M+/M- print nothing on their own
         } else {
             self.overflow(out);
         }
@@ -588,11 +637,6 @@ impl Calculator {
             self.take_entry();
         }
         self.print_operand(fresh, sw, out);
-        let sym = if minus {
-            Symbol::MemMinus
-        } else {
-            Symbol::MemPlus
-        };
         let value = match self.compute_equals(out) {
             Some(v) => v,
             None => return,
@@ -616,10 +660,10 @@ impl Calculator {
             }
         }
         self.lamps.memory = !self.mr.is_zero();
-        let mut row = Row::number(&shown, sym);
-        row.rounded = rounded;
-        self.lamps.negative = shown.neg;
-        out.print(&row);
+        // The printed result goes in symbol column B (`M+`/`M-`); a rounded
+        // result adds the `^` mark in column A (spec A8).
+        let sym_b = if minus { SymB::MemMinus } else { SymB::MemPlus };
+        out.print(&result_row(&shown, rounded, sym_b));
     }
 
     /// Execute the pending mul/div for `M=±`, returning the raw floating result
@@ -669,21 +713,21 @@ impl Calculator {
         self.entering = false;
         self.mode = Mode::New;
         let (shown, _rounded) = self.mr.round_at(sw.dp, sw.rounding == Rounding::Round);
-        // RM/CM never carry the rounded-up mark (it is a recall, not a result).
-        let row = Row::number(&shown, Symbol::RecallMemory);
-        self.lamps.negative = shown.neg;
-        out.print(&row);
+        // RM prints `R` in column A and `M` in column B (spec A8); never the
+        // rounded-up mark (it is a recall, not a result). A zero register prints
+        // as the bare `0` the ROM shows (scale 0), not DP-padded.
+        out.print(&Row::number(&zero_as_bare(shown), SymA::Recall, SymB::Mem));
     }
 
     fn clear_memory<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         let value = self.mr;
         let (shown, _rounded) = value.round_at(sw.dp, sw.rounding == Rounding::Round);
-        let row = Row::number(&shown, Symbol::ClearMemory);
-        out.print(&row);
+        // CM prints `C` in column A and `M` in column B (spec A8); a zero
+        // register prints as the bare `0` (scale 0), matching the ROM.
+        out.print(&Row::number(&zero_as_bare(shown), SymA::Clear, SymB::Mem));
         self.wr = value;
         self.mr = Num::ZERO;
         self.lamps.memory = false;
-        self.lamps.negative = shown.neg;
         self.entering = false;
         self.mode = Mode::New;
     }
@@ -704,7 +748,7 @@ impl Calculator {
             let _ = n.rescale(sw.dp);
             n
         };
-        out.print(&Row::number(&radicand, Symbol::Sqrt));
+        out.print(&Row::num_a(&radicand, SymA::Sqrt));
 
         // Root precision: FL fills to ~14 significant digits; fixed modes show
         // DP fractional digits (rounded per the switch).
@@ -725,18 +769,65 @@ impl Calculator {
         self.cr = root;
         self.mop = MulOp::None;
         self.mode = Mode::New;
-        self.lamps.negative = false;
         // Square-root result rows never carry the rounded-up mark.
-        out.print(&Row::number(&root, Symbol::Sqrt));
+        out.print(&Row::num_a(&root, SymA::Sqrt));
     }
 }
 
-/// Symbol printed when a `*`/`/` operand row is emitted.
-fn sym_for(op: MulOp) -> Symbol {
-    match op {
-        MulOp::Mul | MulOp::ConstMul => Symbol::Multiply,
-        _ => Symbol::Divide,
+/// The value an operand-echo row prints (spec A6/M2-O1): a freshly typed
+/// operand keeps its entered scale; a recalled/accumulated operand (no new
+/// entry since) is aligned to the decimal selector, exactly as the ROM's
+/// operand print does (9-1 `11 ×` typed vs 10-1 `10.00 ×` recalled after M+).
+fn operand_shown(n: &Num, fresh: bool, dp: u8) -> Num {
+    if fresh {
+        *n
+    } else {
+        let mut v = *n;
+        let _ = v.rescale(dp);
+        v
     }
+}
+
+/// A number for display where a zero magnitude collapses to the bare `0` the
+/// ROM prints (scale 0), instead of being padded to the decimal selector. The
+/// original register holds a zero at scale 0, so `C`/`CM`/`RM` of an empty
+/// register print `0`, while a `+`/`-` operand of zero is DP-aligned by the
+/// add path and keeps its padding (e.g. 14-3 `0.00000000 +`).
+fn zero_as_bare(n: Num) -> Num {
+    if n.is_zero() {
+        Num::ZERO
+    } else {
+        n
+    }
+}
+
+/// Symbol printed in column A when a `*`/`/` operand row is emitted.
+fn sym_for(op: MulOp) -> SymA {
+    match op {
+        MulOp::Mul | MulOp::ConstMul => SymA::Multiply,
+        _ => SymA::Divide,
+    }
+}
+
+/// A main-total row (`=` / `ST`-total): `*` in column B, with the rounded-up
+/// `^` mark in column A when the value was rounded (spec A8).
+fn total_row(shown: &Num, rounded: bool) -> Row {
+    result_row(shown, rounded, SymB::Total)
+}
+
+/// A subtotal row: `◇` in column A. A subtotal is never rounded in the oracle
+/// (the diamond and the `^` mark are the same physical column, so they cannot
+/// coexist); the mark is therefore not printed on a subtotal.
+fn subtotal_row(shown: &Num, _rounded: bool) -> Row {
+    Row::num_a(shown, SymA::SubTotal)
+}
+
+/// A result row carrying `sym_b` (total `*`, or `M+`/`M-` for `M=±`), plus the
+/// rounded-up `^` mark in column A when `rounded` (spec A8: e.g. `56.09 ^ *`,
+/// `12.72 ^ M+`).
+fn result_row(shown: &Num, rounded: bool, sym_b: SymB) -> Row {
+    let sym_a = if rounded { SymA::Rounded } else { SymA::None };
+    Row::number(shown, sym_a, sym_b)
 }
 
 /// Multiply a number by `10^pow` (pow may be negative), truncating fractional

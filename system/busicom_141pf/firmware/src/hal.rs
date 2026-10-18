@@ -75,8 +75,16 @@ pub const RAM0_ADVANCE: u8 = 1 << 3;
 pub const RAM1_MEMORY: u8 = 1 << 0;
 /// RAM1 bit 1: Overflow lamp.
 pub const RAM1_OVERFLOW: u8 = 1 << 1;
-/// RAM1 bit 2: Negative lamp.
+/// RAM1 bit 2: Negative (minus-sign) lamp.
 pub const RAM1_NEGATIVE: u8 = 1 << 2;
+/// RAM1 bit 3: the second bit of the WR sign-status character (`WR.S0.bit1`).
+///
+/// The annotated firmware listing documents RAM1 as `bit3 = not used`, yet the
+/// status-light routine writes `WMP` with the nibble
+/// `8·WR.S0.bit1 + 4·WR.S0.bit0 + 2·overflow + (MR≠0)`, so bit 3 carries
+/// `WR.S0.bit1`. The original ROM therefore drives this "unused" bit, and the
+/// port trace captures it. See `driver_lamps` for how it is reproduced.
+pub const RAM1_STATUS: u8 = 1 << 3;
 
 /// The board as the 4004 drivers see it: four port operations and the TEST pin.
 ///

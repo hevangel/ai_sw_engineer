@@ -31,13 +31,13 @@ impl Printer for Recorder {
         } else {
             let s: String = row.cols.iter().map(|&c| c as char).collect();
             let s = s.trim().to_string();
-            (Some(s), row.symbol.as_str().to_string())
+            (Some(s), row.oracle_symbol().to_string())
         };
         self.0.push(TapeRow {
             value,
             symbol,
             red: row.red,
-            rounded: row.rounded,
+            rounded: row.rounded(),
         });
     }
 }

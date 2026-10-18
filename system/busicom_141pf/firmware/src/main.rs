@@ -79,9 +79,9 @@ fn main() {
         fn print(&mut self, row: &Row) {
             let cols: String = row.cols.iter().map(|&c| c as char).collect();
             println!(
-                "{cols} {:<4}{}{}",
-                row.symbol.as_str(),
-                if row.rounded { " ^" } else { "" },
+                "{cols} {:<2}{:<2}{}",
+                row.sym_a.glyph(),
+                row.sym_b.glyph(),
                 if row.red { " (red)" } else { "" }
             );
         }

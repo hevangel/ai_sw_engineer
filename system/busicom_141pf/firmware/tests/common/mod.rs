@@ -98,8 +98,10 @@ pub struct Board {
     line_touched: bool,
     // Finished rows handed back to the test.
     pub rows: Vec<CapturedRow>,
-    // Lamp latches.
+    // Lamp latches (bits 0/1/2 decoded) and the raw RAM1 nibble last written
+    // (all four bits, so the trace test can assert bit 3).
     pub lamps: Lamps,
+    pub lamp_nibble: u8,
 }
 
 impl Board {
@@ -123,6 +125,7 @@ impl Board {
             line_touched: false,
             rows: Vec::new(),
             lamps: Lamps::default(),
+            lamp_nibble: 0,
         }
     }
 
@@ -276,6 +279,7 @@ impl Hal for Board {
                 self.ram0_prev = value;
             }
             RAM_LAMPS => {
+                self.lamp_nibble = value & 0xF;
                 self.lamps = Lamps {
                     memory: value & RAM1_MEMORY != 0,
                     overflow: value & RAM1_OVERFLOW != 0,
