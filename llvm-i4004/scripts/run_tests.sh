@@ -33,5 +33,22 @@ echo "==> running lit on tests/mc"
 "$LIT" -v "$BACKEND_DIR/tests/mc"
 
 echo
+echo "==> running lit on tests/codegen (llc selection-pattern FileCheck tests)"
+if [[ -x $BIN/llc ]]; then
+  "$LIT" -v "$BACKEND_DIR/tests/codegen"
+else
+  echo "    (skipped: llc not built -- run build_llvm.sh with the CodeGen target)"
+fi
+
+echo
 echo "==> differential disassembler cross-check (executes every encoding on external/chips)"
 LLVM_MC="$BIN/llvm-mc" "$BACKEND_DIR/scripts/crosscheck_disasm.py"
+
+echo
+echo "==> CodeGen execution test: run llc-compiled functions on external/chips"
+if [[ -x $BIN/llc ]]; then
+  LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
+    python3 "$BACKEND_DIR/scripts/exec_fn.py"
+else
+  echo "    (skipped: llc not built)"
+fi

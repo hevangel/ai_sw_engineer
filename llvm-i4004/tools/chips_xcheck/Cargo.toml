@@ -15,5 +15,9 @@ arbitrary-int = { version = "1.2.6", features = ["num-traits"] }
 name = "chips_xcheck"
 path = "src/main.rs"
 
+[[bin]]
+name = "run_fn"
+path = "src/run_fn.rs"
+
 [profile.dev]
 panic = "unwind"

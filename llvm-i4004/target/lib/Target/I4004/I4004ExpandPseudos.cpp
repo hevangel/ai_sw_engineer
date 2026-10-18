@@ -78,9 +78,13 @@ void I4004ExpandPseudos::emitCopy(MachineBasicBlock &MBB, MachineInstr &MI) {
 }
 
 // dst = lhs (ALU) rhs over two nibbles, carry propagating low->high.
-//   CLC
-//   LD  lhs_lo ; ADD/SUB rhs_lo ; XCH dst_lo
-//   LD  lhs_hi ; ADD/SUB rhs_hi ; XCH dst_hi
+//   ADD: CLC ; (LD lhs_i ; ADD rhs_i ; XCH dst_i) low then high -- CY chains.
+//   SUB: the 4004 SUB computes {CY,ACC} <- ACC + ~rhs + ~CY (isa.md sec.7), so
+//        the carry-out's polarity is inverted relative to the borrow the next
+//        nibble needs. Start CLC, and insert CMC between nibbles to flip CY so
+//        each nibble's ~CY injects the correct borrow. Verified 8/8 on the real
+//        external/chips CPU (scripts/exec_fn.py; the earlier STC-once form was
+//        wrong on every case -- an execution-test-caught backend bug).
 void I4004ExpandPseudos::emitAddSub(MachineBasicBlock &MBB, MachineInstr &MI,
                                     unsigned AluOpc) {
   const DebugLoc &DL = MI.getDebugLoc();
@@ -90,18 +94,18 @@ void I4004ExpandPseudos::emitAddSub(MachineBasicBlock &MBB, MachineInstr &MI,
   auto [DHi, DLo] = nibbles(Dst);
   auto [LHi, LLo] = nibbles(Lhs);
   auto [RHi, RLo] = nibbles(Rhs);
+  const bool IsSub = (AluOpc == I4004::SUB);
 
-  // SUB on the 4004 uses an inverted borrow; a correct 8-bit subtract needs
-  // STC (set carry = no borrow) before the low nibble. ADD needs CLC.
-  if (AluOpc == I4004::SUB)
-    BuildMI(MBB, MI, DL, TII->get(I4004::STC));
-  else
-    BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
+  BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
 
   // Low nibble.
   BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LLo);
   BuildMI(MBB, MI, DL, TII->get(AluOpc)).addReg(RLo);
   BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DLo, RegState::Define);
+
+  // Flip the borrow polarity for the subtract chain before the high nibble.
+  if (IsSub)
+    BuildMI(MBB, MI, DL, TII->get(I4004::CMC));
 
   // High nibble (carry/borrow from the low nibble is live in CY).
   BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LHi);
