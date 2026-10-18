@@ -66,7 +66,7 @@ See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_templ
 
 | System | CPU | LLVM backend | Status |
 |---|---|---|---|
-| Busicom 141-PF calculator | Intel 4004 | `llvm-i4004` (new) | planned |
+| Busicom 141-PF calculator | Intel 4004 | `llvm-i4004` (new) | firmware in progress (M1: 7/42 manual examples on host) |
 | Micral N | Intel 8008 | `llvm-i8008` (new) | planned |
 | Apple II / IIe | MOS 6502 | `llvm-mos6502` (llvm-mos) | planned |
 | Atari 2600 | MOS 6507 | `llvm-mos6502` (llvm-mos) | planned |

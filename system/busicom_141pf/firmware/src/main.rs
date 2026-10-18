@@ -1,0 +1,107 @@
+//! Busicom 141-PF firmware entry point.
+//!
+//! * Target (`target_os = "none"`, `llvm-i4004`): the platform runtime calls
+//!   `main` after reset. The keyboard and printer drivers are milestone M3.
+//! * Host: reads key names from stdin (one per whitespace-separated token,
+//!   same names as the oracle JSON; `dp=N` and `round=FL|54|IN` change the
+//!   selectors) and prints each tape row.
+#![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(target_os = "none", no_main)]
+
+#[cfg(target_os = "none")]
+mod target {
+    use core::panic::PanicInfo;
+
+    #[no_mangle]
+    pub extern "C" fn main() -> ! {
+        // M3: scan keyboard via 4003 #0, run software::Calculator, drive the printer.
+        let _calc = software::Calculator::new();
+        loop {}
+    }
+
+    #[panic_handler]
+    fn panic(_info: &PanicInfo) -> ! {
+        loop {}
+    }
+}
+
+#[cfg(not(target_os = "none"))]
+fn main() {
+    use software::{Calculator, Key, Printer, Rounding, Row, Switches};
+    use std::io::Read;
+
+    struct Tape;
+    impl Printer for Tape {
+        fn print(&mut self, row: &Row) {
+            let cols: String = row.cols.iter().map(|&c| c as char).collect();
+            println!(
+                "{cols} {:<4}{}{}",
+                row.symbol.as_str(),
+                if row.rounded { " ^" } else { "" },
+                if row.red { " (red)" } else { "" }
+            );
+        }
+    }
+
+    let names: &[(&str, u8)] = &[
+        ("0", 156),
+        ("1", 155),
+        ("2", 151),
+        ("3", 147),
+        ("4", 154),
+        ("5", 150),
+        ("6", 146),
+        ("7", 153),
+        ("8", 149),
+        ("9", 145),
+        (".", 148),
+        ("00", 152),
+        ("+", 142),
+        ("-", 141),
+        ("*", 139),
+        ("/", 138),
+        ("=", 140),
+        ("%", 134),
+        ("ST", 137),
+        ("EX", 158),
+        ("CE", 159),
+        ("C", 160),
+        ("CM", 129),
+        ("RM", 130),
+        ("M-", 131),
+        ("M+", 132),
+        ("M=-", 135),
+        ("M=+", 136),
+        ("SIGN", 157),
+        ("SQRT", 133),
+    ];
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .expect("failed to read stdin");
+    let mut sw = Switches {
+        dp: 2,
+        rounding: Rounding::Truncate,
+    };
+    let mut calc = Calculator::new();
+    for token in input.split_whitespace() {
+        if let Some(v) = token.strip_prefix("dp=") {
+            sw.dp = v.parse().expect("dp=N");
+        } else if let Some(v) = token.strip_prefix("round=") {
+            sw.rounding = match v {
+                "FL" => Rounding::Float,
+                "54" => Rounding::Round,
+                "IN" => Rounding::Truncate,
+                _ => panic!("round=FL|54|IN"),
+            };
+        } else {
+            let code = names
+                .iter()
+                .find(|(n, _)| *n == token)
+                .unwrap_or_else(|| panic!("unknown key {token:?}"))
+                .1;
+            calc.press(Key::from_code(code).unwrap(), sw, &mut Tape);
+        }
+    }
+}
