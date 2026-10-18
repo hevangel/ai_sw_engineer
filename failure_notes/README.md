@@ -25,3 +25,8 @@ Blame-free: the question is which step let a shared assumption pass as verified.
 - `2026-10-18-busicom_141pf-clear-prints-zero.md` — `C` printed a blank row
   instead of the cleared value `0`; caught by the original ROM's port trace
   while adding `tests/port_trace.rs`.
+- `2026-10-18-busicom_141pf-partial-tape.md` — the reimplementation printed a
+  thinner tape than the ROM (missing `×`/`÷` and `M+`/`M-` operand echoes, a
+  single symbol column instead of two, and an incomplete lamp nibble); caught by
+  the original ROM's port trace and fixed by making `tests/port_trace.rs` an
+  exact full-tape comparison (spec A6–A9).

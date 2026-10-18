@@ -67,9 +67,14 @@ impl Observable {
             // a column-A glyph, so it is reported as the column-A glyph here.
             DRUM_SYMBOL_A[software::driver_printer::ROUNDED_SECTOR].to_string()
         } else {
-            c.sym_a.map(|s| DRUM_SYMBOL_A[s].to_string()).unwrap_or_default()
+            c.sym_a
+                .map(|s| DRUM_SYMBOL_A[s].to_string())
+                .unwrap_or_default()
         };
-        let b = c.sym_b.map(|s| DRUM_SYMBOL_B[s].to_string()).unwrap_or_default();
+        let b = c
+            .sym_b
+            .map(|s| DRUM_SYMBOL_B[s].to_string())
+            .unwrap_or_default();
         Observable {
             value: c.value.clone(),
             sym_a: a,
@@ -170,7 +175,12 @@ fn parse_row(line: &str) -> Observable {
     } else {
         Some(value_field.to_string())
     };
-    Observable::from_trace(value, parts[2].trim(), parts[3].trim(), parts[4].trim() == "true")
+    Observable::from_trace(
+        value,
+        parts[2].trim(),
+        parts[3].trim(),
+        parts[4].trim() == "true",
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +357,10 @@ fn drivers_match_original_rom_port_trace() {
         compared - findings.len(),
         compared
     );
-    assert_eq!(compared, 42, "must compare all 42 examples, compared {compared}");
+    assert_eq!(
+        compared, 42,
+        "must compare all 42 examples, compared {compared}"
+    );
     assert!(
         findings.is_empty(),
         "exact port-trace divergences vs original ROM (example / group / first divergent event):\n  {}",

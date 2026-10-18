@@ -75,54 +75,61 @@ and comparing the produced port events directly against `rom_port_trace.txt`.
 Both tests share ONE board model (`tests/common/mod.rs`), so neither can quietly
 validate against a different model.
 
-### What it compares (order-relevant observable events)
+### What it compares (exact, no relaxations)
 
-Grouped exactly as the trace groups them (`#RESET`, then one group per `#STEP`):
+Grouped exactly as the trace groups them (`#RESET`, then one group per `#STEP`),
+for EVERY group:
 
-- **printed rows, in order** — per row: the numeric value (hammer word ↔ drum
-  sector decode; `None` = dotted overflow line), the set of symbol-column
-  glyphs, and red ink;
-- **memory and overflow lamp bits per step** — asserted exactly.
+- **the full ordered row stream** equals the trace's — same row count, same
+  order, and per row the same numeric value string, the same symbol-column-A
+  glyph, the same symbol-column-B glyph, and the same red-ink flag (value `None`
+  = dotted overflow line; an empty value is the blank operation-correction row);
+- **the full 4-bit RAM1 lamp nibble** per step equals the trace's `LAMPS|n`,
+  including the memory (bit 0), overflow (bit 1), minus-sign (bit 2) and
+  `WR.S0.bit1` status (bit 3) bits.
 
-Cycle timing, keyboard-scan repetition, TEST poll repetition and shift-bit
-timing are deliberately NOT compared (our instruction stream is not the ROM's).
-
-### Normalisations (documented; applied to both sides)
-
-1. **Keyboard scan / idle polling** — the trace records board *output* only, so
-   there is nothing to fold on its side; our scan order is still asserted via
-   `KeyboardDriver::scan_pass` recovering the exact key + switches per press.
-2. **Zero-register value** — a value whose digits are all zero is normalised to
-   the bare `0` (the ROM prints `0`; our core formats zero to the DP width).
-   Non-zero values keep every digit (`4.000000` is not folded to `4`).
-3. **Symbol glyph set** — a row's symbol is the *set* of its two drum-column
-   glyphs (plus the rounded `^`); a row matches when value and red are equal and
-   our glyph set is a **subset** of the ROM row's (our single-`Symbol` model may
-   carry fewer glyphs, never a wrong one).
-4. **Drum half-spin granularity** — as M3-P1: one sector per `test_pin()` sample.
+There are NO value / glyph / lamp relaxations: the earlier subsequence,
+glyph-subset, zero-normalisation and lamp-mask tolerances have been removed.
+Cycle timing, keyboard-scan repetition, TEST-poll repetition and shift-bit
+timing are not part of the trace (it records board OUTPUT events only); the
+keyboard scan order is still asserted per press by `common::press_through_ports`
+(it must recover the exact key + switches), and the board advances one drum
+sector per `test_pin()` sample (ledger M3-P1), which reconstructs a row identical
+to the half-spin-paced ROM capture.
 
 ### Property asserted
 
-> For every example, our emitted rows are an **in-order subsequence** of the ROM
-> trace rows (value + red equal, our glyph set ⊆ the ROM row's), and the per-step
-> memory/overflow lamp bits match exactly.
+> For every one of the 42 examples, the full ordered stream of printed rows our
+> drivers emit is **identical** to the original ROM's trace rows (value, both
+> symbol-column glyphs, and red ink all equal), and the per-step RAM1 lamp
+> nibble matches the ROM in all four bits.
 
-This proves our port output never *contradicts* the ROM — no wrong value, wrong
-order, spurious row, or wrong memory/overflow lamp (a mutation of a single drum
-glyph fails ~22/42 examples). It is **42/42** today.
+This is **42/42 exact** today. Mutation checks confirm it bites: removing the
+`M+`/`M-` echo fails 3-6/9-1/10-1/11-2 on row count; swapping the two symbol
+columns in the printer driver fails nearly every example; clearing RAM1 bit 3
+fails every overflow row (nibble 10) and negative-total row (nibble 12).
 
-### What it deliberately does NOT prove (documented debt, gated)
+### How the ROM's full tape is now reproduced (former A6–A9 debt, closed)
 
-The original ROM prints a richer tape than our single-`Symbol`, JSON-oracle-shaped
-core emits. These are recorded as `spec/spec.md` ASSUMPTIONs and gated (not
-silently equated), not reproduced:
+The core previously emitted a thinner tape than the ROM; `spec/spec.md` ASSUMPTIONs
+A6–A9 are now **reproduced**, not gated:
 
-- **A6** recalled `×`/`÷` operand echo rows (e.g. 5-1 `12.4 ÷`, `0.55 ÷`);
-- **A7** bare `M+`/`M-` key echo rows (e.g. 9-1 `6.89 M-`, 10-1 `10.00 M+`);
-- **A8** the ROM's two independent symbol columns (`C`+`M` for CM, `R`+`M` for
-  RM, `^`+`M+` for a rounded memory result, M=± result in column B);
-- **A9** the negative lamp (bit 2) timing and an undocumented RAM1 bit 3 the ROM
-  sets on overflow (nibble 10) and negative totals (nibble 12).
+- **A6** recalled/chain/mixed `×`/`÷` operand echoes and the blank op-correction
+  row (`Calculator::mul_div_key`), with the ROM's fresh-vs-DP operand scaling;
+- **A7** the bare `M+`/`M-` key echo, DP-aligned (`Calculator::memory_add`);
+- **A8** two independent symbol columns via `print::Row { sym_a, sym_b }` (the
+  rounded `^` is `SymA::Rounded`): `C`+`M` for CM, `R`+`M` for RM, the `M=±`
+  result in column B, the rounded mark in column A beside the result in B;
+- **A9** the minus-sign lamp driven from WR's sign at idle and RAM1 bit 3
+  (`WR.S0.bit1`), both sourced to the annotated listing's status-light routine
+  (`8·WR.S0.bit1 + 4·WR.S0.bit0 + 2·overflow + (MR≠0)`).
 
-One escaped defect the trace DID catch was fixed: `C` printed a blank row instead
-of `0` (`failure_notes/2026-10-18-busicom_141pf-clear-prints-zero.md`, spec A3).
+The JSON-oracle tests (`manual_examples.rs`, `port_level.rs`) fold the two
+symbol columns back to the manual oracle's single token (`Row::oracle_symbol`),
+so the sanctioned `oracle/manual_examples.json` is unchanged and still 42/42.
+
+One escaped defect the trace earlier caught was fixed before this work: `C`
+printed a blank row instead of `0`
+(`failure_notes/2026-10-18-busicom_141pf-clear-prints-zero.md`, spec A3). The
+A6–A9 reproduction is written up in
+`failure_notes/2026-10-18-busicom_141pf-partial-tape.md`.
