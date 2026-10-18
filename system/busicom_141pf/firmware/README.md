@@ -5,7 +5,7 @@
 | Original year | 1971 (Busicom 141-PF introduction; see [system README](../README.md)) |
 | Original authors | Intel, for Busicom (firmware reverse-engineered by the Busicom 141-PF Replication Project) |
 | Machine | Busicom 141-PF — Intel 4004, 5 × 4001, 2 × 4002, 3 × 4003 |
-| Status | **M1** — host core, addition/subtraction: 7/42 manual examples match the original ROM |
+| Status | **M2** — host core complete: `* / % EX`, constants, chains, powers, mixed calc, memory keys, square root; **42/42** manual examples match the original ROM |
 
 ## History
 

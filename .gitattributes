@@ -2,6 +2,9 @@
 
 # Shell scripts run in Linux/WSL/Git-Bash and must keep LF line endings.
 *.sh text eol=lf
+# Sourced by those scripts or read by Linux tools in the container: a CR breaks paths.
+*.env text eol=lf
+*.ld text eol=lf
 
 # Oracle data and images must stay byte-exact.
 *.bin binary
