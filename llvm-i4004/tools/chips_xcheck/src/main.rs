@@ -197,7 +197,10 @@ fn full_check() -> i32 {
         let d = disasm(&mc, &bytes);
 
         // control transfers checked in the branch section
-        if matches!(d.mnemonic.as_str(), "jcn" | "jun" | "jms" | "jin" | "isz" | "fin") {
+        if matches!(
+            d.mnemonic.as_str(),
+            "jcn" | "jun" | "jms" | "jin" | "isz" | "fin"
+        ) {
             continue;
         }
 
@@ -241,8 +244,22 @@ fn full_check() -> i32 {
         // pick a harness: IO ops need an SRC pointer + presets.
         let is_io = matches!(
             d.mnemonic.as_str(),
-            "wrm" | "wmp" | "wrr" | "wpm" | "wr0" | "wr1" | "wr2" | "wr3" | "sbm" | "rdm"
-                | "rdr" | "adm" | "rd0" | "rd1" | "rd2" | "rd3"
+            "wrm"
+                | "wmp"
+                | "wrr"
+                | "wpm"
+                | "wr0"
+                | "wr1"
+                | "wr2"
+                | "wr3"
+                | "sbm"
+                | "rdm"
+                | "rdr"
+                | "adm"
+                | "rd0"
+                | "rd1"
+                | "rd2"
+                | "rd3"
         );
         let h: Harness = if is_io { io_harness() } else { std_harness() };
 
@@ -276,14 +293,23 @@ fn full_check() -> i32 {
     // ---------- operand-field sweeps ----------
     // For register ops, sweep all 16 register indices and confirm the operand
     // our disassembler printed names the register chips actually used.
-    for (op_hi, mnem) in [(0x6u8, "inc"), (0x8, "add"), (0x9, "sub"), (0xA, "ld"), (0xB, "xch")] {
+    for (op_hi, mnem) in [
+        (0x6u8, "inc"),
+        (0x8, "add"),
+        (0x9, "sub"),
+        (0xA, "ld"),
+        (0xB, "xch"),
+    ] {
         for rr in 0u8..16 {
             let b0 = (op_hi << 4) | rr;
             let d = disasm(&mc, &[b0]);
             if d.mnemonic != mnem {
                 findings.push(Finding {
                     kind: "sweep-mnemonic",
-                    msg: format!("byte {b0:#04x}: expected {mnem}, disasm said '{}'", d.mnemonic),
+                    msg: format!(
+                        "byte {b0:#04x}: expected {mnem}, disasm said '{}'",
+                        d.mnemonic
+                    ),
                 });
                 continue;
             }
@@ -304,7 +330,11 @@ fn full_check() -> i32 {
             if let Err(why) = compare(&exp, &obs) {
                 findings.push(Finding {
                     kind: "sweep-reg",
-                    msg: format!("byte {b0:#04x} '{} {}': {why}", d.mnemonic, d.operands.join(", ")),
+                    msg: format!(
+                        "byte {b0:#04x} '{} {}': {why}",
+                        d.mnemonic,
+                        d.operands.join(", ")
+                    ),
                 });
             } else {
                 checked += 1;
@@ -331,7 +361,11 @@ fn full_check() -> i32 {
             if let Err(why) = compare(&exp, &obs) {
                 findings.push(Finding {
                     kind: "sweep-imm",
-                    msg: format!("byte {b0:#04x} '{} {}': {why}", d.mnemonic, d.operands.join(", ")),
+                    msg: format!(
+                        "byte {b0:#04x} '{} {}': {why}",
+                        d.mnemonic,
+                        d.operands.join(", ")
+                    ),
                 });
             } else {
                 checked += 1;
@@ -408,11 +442,7 @@ fn full_check() -> i32 {
 }
 
 /// Control-transfer checks using the landing harness. Returns count checked.
-fn check_branches(
-    mc: &str,
-    findings: &mut Vec<Finding>,
-    test_polarity: &mut Vec<String>,
-) -> usize {
+fn check_branches(mc: &str, findings: &mut Vec<Finding>, test_polarity: &mut Vec<String>) -> usize {
     let mut n = 0usize;
 
     // JUN <addr>: always jumps to the 12-bit target. Encode JUN to 0x100.
@@ -421,13 +451,25 @@ fn check_branches(
         let probe = [0x41u8, 0x00];
         let d = disasm(mc, &probe);
         if d.mnemonic == "jun" {
-            let js = JumpSetup { init_acc: 0, init_carry: 0, init_test: false, regs: vec![], target_off: 0x100 };
+            let js = JumpSetup {
+                init_acc: 0,
+                init_carry: 0,
+                init_test: false,
+                regs: vec![],
+                target_off: 0x100,
+            };
             match js.run(&probe) {
                 Landing::Jumped => n += 1,
-                other => findings.push(Finding { kind: "jun", msg: format!("JUN 0x100 did not land at target: {other:?}") }),
+                other => findings.push(Finding {
+                    kind: "jun",
+                    msg: format!("JUN 0x100 did not land at target: {other:?}"),
+                }),
             }
         } else {
-            findings.push(Finding { kind: "jun-disasm", msg: format!("0x41 0x00 disasm '{}' not jun", d.mnemonic) });
+            findings.push(Finding {
+                kind: "jun-disasm",
+                msg: format!("0x41 0x00 disasm '{}' not jun", d.mnemonic),
+            });
         }
     }
 
@@ -436,13 +478,25 @@ fn check_branches(
         let probe = [0x51u8, 0x00]; // JMS 0x100
         let d = disasm(mc, &probe);
         if d.mnemonic == "jms" {
-            let js = JumpSetup { init_acc: 0, init_carry: 0, init_test: false, regs: vec![], target_off: 0x100 };
+            let js = JumpSetup {
+                init_acc: 0,
+                init_carry: 0,
+                init_test: false,
+                regs: vec![],
+                target_off: 0x100,
+            };
             match js.run(&probe) {
                 Landing::Jumped => n += 1,
-                other => findings.push(Finding { kind: "jms", msg: format!("JMS 0x100 did not land at target: {other:?}") }),
+                other => findings.push(Finding {
+                    kind: "jms",
+                    msg: format!("JMS 0x100 did not land at target: {other:?}"),
+                }),
             }
         } else {
-            findings.push(Finding { kind: "jms-disasm", msg: format!("0x51 0x00 disasm '{}' not jms", d.mnemonic) });
+            findings.push(Finding {
+                kind: "jms-disasm",
+                msg: format!("0x51 0x00 disasm '{}' not jms", d.mnemonic),
+            });
         }
     }
 
@@ -457,18 +511,25 @@ fn check_branches(
         let probe = [b0, 0x40u8];
         let d = disasm(mc, &probe);
         if d.mnemonic != "jcn" {
-            findings.push(Finding { kind: "jcn-disasm", msg: format!("{b0:#04x} 0x40 disasm '{}' not jcn", d.mnemonic) });
+            findings.push(Finding {
+                kind: "jcn-disasm",
+                msg: format!("{b0:#04x} 0x40 disasm '{}' not jcn", d.mnemonic),
+            });
             continue;
         }
         // our disasm should print the condition field as its first operand.
-        let printed_cond = d
-            .operands
-            .first()
-            .and_then(|s| s.strip_prefix("0x").and_then(|h| u8::from_str_radix(h, 16).ok()).or_else(|| s.parse::<u8>().ok()));
+        let printed_cond = d.operands.first().and_then(|s| {
+            s.strip_prefix("0x")
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+                .or_else(|| s.parse::<u8>().ok())
+        });
         if printed_cond != Some(cond) {
             findings.push(Finding {
                 kind: "jcn-operand",
-                msg: format!("JCN cond {cond:#x}: disasm printed condition {:?}", d.operands),
+                msg: format!(
+                    "JCN cond {cond:#x}: disasm printed condition {:?}",
+                    d.operands
+                ),
             });
             continue;
         }
@@ -476,10 +537,10 @@ fn check_branches(
         let c2 = (cond >> 2) & 1; // ACC==0
         let c3 = (cond >> 1) & 1; // CY==1
         let c4 = cond & 1; // TEST
-        // Assert the ACC/CY/invert logic only for conditions WITHOUT the TEST
-        // bit (c4==0), so the TEST-pin polarity question is isolated out. This
-        // sweeps ACC and CY and checks chips' jump against the manual formula
-        // (raw = ACC0&c2 | CY&c3 ; jump = c1 ? !raw : raw).
+                           // Assert the ACC/CY/invert logic only for conditions WITHOUT the TEST
+                           // bit (c4==0), so the TEST-pin polarity question is isolated out. This
+                           // sweeps ACC and CY and checks chips' jump against the manual formula
+                           // (raw = ACC0&c2 | CY&c3 ; jump = c1 ? !raw : raw).
         if c4 == 0 {
             let mut mismatch = None;
             'outer: for acc0 in [false, true] {
@@ -496,7 +557,9 @@ fn check_branches(
                     let land = js.run(&probe);
                     let jumped = matches!(land, Landing::Jumped);
                     if !(jumped || matches!(land, Landing::FellThrough)) {
-                        mismatch = Some(format!("neither marker ran: {land:?} (acc0={acc0} cy={cy})"));
+                        mismatch = Some(format!(
+                            "neither marker ran: {land:?} (acc0={acc0} cy={cy})"
+                        ));
                         break 'outer;
                     }
                     if jumped != want_jump {
@@ -509,7 +572,10 @@ fn check_branches(
             }
             match mismatch {
                 None => n += 1,
-                Some(m) => findings.push(Finding { kind: "jcn-cond", msg: format!("JCN cond {cond:#x}: {m}") }),
+                Some(m) => findings.push(Finding {
+                    kind: "jcn-cond",
+                    msg: format!("JCN cond {cond:#x}: {m}"),
+                }),
             }
         }
     }
@@ -519,8 +585,22 @@ fn check_branches(
     // MCS-4 manual, which says the TEST condition is "TEST pin = 0".
     {
         let probe = [0x11u8, 0x40]; // JCN 0x1, target 0x40
-        let land_hi = JumpSetup { init_acc: 3, init_carry: 0, init_test: true, regs: vec![], target_off: 0x40 }.run(&probe);
-        let land_lo = JumpSetup { init_acc: 3, init_carry: 0, init_test: false, regs: vec![], target_off: 0x40 }.run(&probe);
+        let land_hi = JumpSetup {
+            init_acc: 3,
+            init_carry: 0,
+            init_test: true,
+            regs: vec![],
+            target_off: 0x40,
+        }
+        .run(&probe);
+        let land_lo = JumpSetup {
+            init_acc: 3,
+            init_carry: 0,
+            init_test: false,
+            regs: vec![],
+            target_off: 0x40,
+        }
+        .run(&probe);
         test_polarity.push(format!(
             "JCN cond 0x1 (TEST only): TEST pin HIGH -> {:?}; TEST pin LOW -> {:?}",
             land_hi, land_lo
@@ -534,7 +614,10 @@ fn check_branches(
         let probe = [b0, 0x40u8]; // ISZ r, target offset 0x40
         let d = disasm(mc, &probe);
         if d.mnemonic != "isz" {
-            findings.push(Finding { kind: "isz-disasm", msg: format!("{b0:#04x} disasm '{}' not isz", d.mnemonic) });
+            findings.push(Finding {
+                kind: "isz-disasm",
+                msg: format!("{b0:#04x} disasm '{}' not isz", d.mnemonic),
+            });
             continue;
         }
         // reg = 0xE -> after inc = 0xF != 0 -> jump; reg = 0xF -> after inc = 0 -> fall through.
@@ -574,10 +657,16 @@ fn check_branches(
             };
             match js.run(&probe) {
                 Landing::Jumped => n += 1,
-                other => findings.push(Finding { kind: "jin", msg: format!("JIN p1 -> 0x40 landing {other:?}") }),
+                other => findings.push(Finding {
+                    kind: "jin",
+                    msg: format!("JIN p1 -> 0x40 landing {other:?}"),
+                }),
             }
         } else {
-            findings.push(Finding { kind: "jin-disasm", msg: format!("0x33 disasm '{}' not jin", d.mnemonic) });
+            findings.push(Finding {
+                kind: "jin-disasm",
+                msg: format!("0x33 disasm '{}' not jin", d.mnemonic),
+            });
         }
     }
 
@@ -599,12 +688,20 @@ fn smoke() -> i32 {
     let s = std_harness().observe(&[0xD7]); // LDM 7
     ck(&mut fails, "LDM7", s.acc, 7);
 
-    let mut h = Harness { init_regs: [0; 16], ..std_harness() };
+    let mut h = Harness {
+        init_regs: [0; 16],
+        ..std_harness()
+    };
     h.init_regs[5] = 9;
     let s = h.observe(&[0xA5]); // LD r5
     ck(&mut fails, "LDr5", s.acc, 9);
 
-    let mut h = Harness { init_acc: 0xF, init_carry: 0, init_regs: [0; 16], ..std_harness() };
+    let mut h = Harness {
+        init_acc: 0xF,
+        init_carry: 0,
+        init_regs: [0; 16],
+        ..std_harness()
+    };
     h.init_regs[4] = 1;
     let s = h.observe(&[0x84]); // ADD r4 overflow
     ck(&mut fails, "ADDovf_acc", s.acc, 0);
@@ -624,7 +721,13 @@ fn smoke() -> i32 {
     let s = h.observe(&[0xEA]); // RDR -> acc = rom port (0x6)
     ck(&mut fails, "RDR_acc", s.acc, 0x6);
 
-    let js = JumpSetup { init_acc: 0, init_carry: 0, init_test: false, regs: vec![], target_off: 0x100 };
+    let js = JumpSetup {
+        init_acc: 0,
+        init_carry: 0,
+        init_test: false,
+        regs: vec![],
+        target_off: 0x100,
+    };
     match js.run(&[0x41, 0x00]) {
         Landing::Jumped => println!("ok   JUN landing"),
         other => {

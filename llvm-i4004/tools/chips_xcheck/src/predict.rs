@@ -245,7 +245,10 @@ pub fn predict(d: &Disasm, h: &Harness) -> Option<Expect> {
         "wpm" => { /* program memory; no 4002 effect */ }
         "rdm" => e.acc = Some(h.init_ram_char0),
         "rdr" => e.acc = Some(h.init_rom_port),
-        "rd0" | "rd1" | "rd2" | "rd3" => { /* status chars default 0 */ e.acc = Some(0) }
+        "rd0" | "rd1" | "rd2" | "rd3" => {
+            /* status chars default 0 */
+            e.acc = Some(0)
+        }
         "sbm" => {
             let m = h.init_ram_char0;
             let v = acc as u16 + ((!m) & 0xF) as u16 + ((cy ^ 1) & 1) as u16;

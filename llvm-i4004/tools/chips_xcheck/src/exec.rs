@@ -273,8 +273,12 @@ impl Harness {
             board.cpu.set_test_flag(self.init_test);
             board.run_cycle();
         }
-        let reg_at =
-            |reg: usize, ch: u8| board.rams[0].registers[reg].characters.read_nibble(ch).value();
+        let reg_at = |reg: usize, ch: u8| {
+            board.rams[0].registers[reg]
+                .characters
+                .read_nibble(ch)
+                .value()
+        };
         let mut regs = [0u8; 16];
         for n in 0..16u8 {
             regs[n as usize] = reg_at(0, n);
