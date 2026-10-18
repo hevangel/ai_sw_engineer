@@ -44,10 +44,10 @@ public:
     // Keep in the same order as enum Fixups in I4004FixupKinds.h.
     // name            offset bits flags
     const static MCFixupKindInfo Infos[I4004::NumTargetFixupKinds] = {
-        {"fixup_addr12", 0, 16, 0}, // 12 bits scattered across 2 bytes
-        {"fixup_page8", 8, 8, 0},   // byte 1
-        {"fixup_imm8", 8, 8, 0},    // byte 1
-        {"fixup_fin8", 8, 8, 0},    // byte 1
+        {"fixup_addr12", 0, 16, 0}, // 12 bits scattered across 2 bytes (offset 0)
+        {"fixup_page8", 0, 8, 0},   // byte 1 (fixup offset positions it)
+        {"fixup_imm8", 0, 8, 0},    // byte 1
+        {"fixup_fin8", 0, 8, 0},    // byte 1
     };
     static_assert(std::size(Infos) == I4004::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");

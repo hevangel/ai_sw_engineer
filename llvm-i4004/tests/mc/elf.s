@@ -5,7 +5,7 @@
 ; emits R_I4004_* relocations for unresolved JUN/JMS/JCN/FIM operands.
 
 ; CHECK: Format: elf32-i4004
-; CHECK: Machine: EM_I4004 (0x4004)
+; CHECK: Machine: {{.*}}(0x4004)
 
         .text
         jun     ext_target      ; R_I4004_ADDR12

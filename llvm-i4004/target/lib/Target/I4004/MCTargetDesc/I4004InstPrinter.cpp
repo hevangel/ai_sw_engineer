@@ -30,11 +30,6 @@ void I4004InstPrinter::printInst(const MCInst *MI, uint64_t Address,
   printAnnotation(O, Annot);
 }
 
-std::pair<const char *, uint64_t>
-I4004InstPrinter::getMnemonic(const MCInst &MI) const {
-  return MCInstPrinter::getMnemonic(MI);
-}
-
 void I4004InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                     raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
@@ -77,8 +72,8 @@ void I4004InstPrinter::printCond(const MCInst *MI, unsigned OpNo,
     printOperand(MI, OpNo, O);
 }
 
-void I4004InstPrinter::printAddr8(const MCInst *MI, unsigned OpNo,
-                                  raw_ostream &O) {
+void I4004InstPrinter::printAddr8(const MCInst *MI, uint64_t Address,
+                                  unsigned OpNo, raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm())
     O << format("0x%02x", (unsigned)(Op.getImm() & 0xff));
@@ -86,8 +81,8 @@ void I4004InstPrinter::printAddr8(const MCInst *MI, unsigned OpNo,
     printOperand(MI, OpNo, O);
 }
 
-void I4004InstPrinter::printAddr12(const MCInst *MI, unsigned OpNo,
-                                   raw_ostream &O) {
+void I4004InstPrinter::printAddr12(const MCInst *MI, uint64_t Address,
+                                   unsigned OpNo, raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm())
     O << format("0x%03x", (unsigned)(Op.getImm() & 0xfff));

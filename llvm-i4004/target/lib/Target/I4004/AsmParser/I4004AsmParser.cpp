@@ -317,8 +317,25 @@ bool I4004AsmParser::parseInstruction(ParseInstructionInfo &Info,
     return false;
   }
 
-  if (parseOperand(Operands))
-    return true;
+  // JCN's first operand is a condition code (mnemonic combo or nibble); route
+  // it through the dedicated parser so Z/C/T/N... map to the right OPA bits.
+  bool First = true;
+  std::string Mnem = Name.lower();
+  if (Mnem == "jcn" && First) {
+    if (parseCond(Operands).isFailure())
+      return true;
+    First = false;
+    // Expect a comma then the address operand.
+    if (getLexer().is(AsmToken::Comma)) {
+      getParser().Lex();
+      if (parseOperand(Operands))
+        return true;
+    }
+  } else {
+    if (parseOperand(Operands))
+      return true;
+    First = false;
+  }
 
   while (getLexer().is(AsmToken::Comma)) {
     getParser().Lex(); // eat ','

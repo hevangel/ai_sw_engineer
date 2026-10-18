@@ -143,10 +143,10 @@ def main():
     )
     ensure(
         eh,
-        '#include "ELFRelocs/MSP430.def"\n};',
-        '\n// ELF Relocation types for Intel 4004\nenum {\n#include "ELFRelocs/I4004.def"\n};\n',
+        "// ELF Relocation type for VE.",
+        '// ELF Relocation types for Intel 4004\nenum {\n#include "ELFRelocs/I4004.def"\n};\n\n',
         "ELF.h R_I4004 relocs enum",
-        after=True,
+        after=False,
         once_marker='#include "ELFRelocs/I4004.def"',
     )
 
@@ -180,6 +180,18 @@ def main():
             "ELFObjectFile.h getArch",
             after=True,
             once_marker="return Triple::i4004;",
+        )
+
+    # 3f. llvm-readobj ELFDumper: give the private machine a readable name.
+    dumper = os.path.join(llvm, "tools", "llvm-readobj", "ELFDumper.cpp")
+    if os.path.exists(dumper):
+        ensure(
+            dumper,
+            'ENUM_ENT(EM_LOONGARCH,     "LoongArch"),',
+            '    ENUM_ENT(EM_I4004,         "Intel 4004 (MCS-4)"),\n',
+            "ELFDumper EM_I4004 name",
+            after=True,
+            once_marker="EM_I4004,         \"Intel 4004",
         )
 
     print("==> overlay applied OK")

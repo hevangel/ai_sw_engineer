@@ -22,7 +22,6 @@ include "I4004InstrFormats.td"
 def Imm4AsmOperand : AsmOperandClass {
   let Name = "Imm4";
   let RenderMethod = "addImmOperands";
-  let DiagnosticType = "Imm4";
   let PredicateMethod = "isImm4";
 }
 def imm4 : Operand<i8>, ImmLeaf<i8, [{ return Imm >= 0 && Imm < 16; }]> {
@@ -34,7 +33,6 @@ def imm4 : Operand<i8>, ImmLeaf<i8, [{ return Imm >= 0 && Imm < 16; }]> {
 def Imm8AsmOperand : AsmOperandClass {
   let Name = "Imm8";
   let RenderMethod = "addImmOperands";
-  let DiagnosticType = "Imm8";
   let PredicateMethod = "isImm8";
 }
 def imm8 : Operand<i8>, ImmLeaf<i8, [{ return Imm >= 0 && Imm < 256; }]> {
@@ -47,7 +45,6 @@ def imm8 : Operand<i8>, ImmLeaf<i8, [{ return Imm >= 0 && Imm < 256; }]> {
 def CondAsmOperand : AsmOperandClass {
   let Name = "Cond";
   let RenderMethod = "addImmOperands";
-  let DiagnosticType = "Cond";
   let PredicateMethod = "isCond";
   let ParserMethod = "parseCond";
 }
@@ -60,7 +57,6 @@ def condcode : Operand<i8> {
 def Addr8AsmOperand : AsmOperandClass {
   let Name = "Addr8";
   let RenderMethod = "addImmOperands";
-  let DiagnosticType = "Addr8";
   let PredicateMethod = "isAddr8";
 }
 def addr8 : Operand<i16> {
@@ -74,7 +70,6 @@ def addr8 : Operand<i16> {
 def Addr12AsmOperand : AsmOperandClass {
   let Name = "Addr12";
   let RenderMethod = "addImmOperands";
-  let DiagnosticType = "Addr12";
   let PredicateMethod = "isAddr12";
 }
 def addr12 : Operand<i16> {
@@ -84,12 +79,10 @@ def addr12 : Operand<i16> {
   let OperandType = "OPERAND_PCREL";
 }
 
-// Index-register and pair operands.
-def GR4AsmOperand : AsmOperandClass { let Name = "GR4"; }
-def PR8AsmOperand : AsmOperandClass { let Name = "PR8"; }
-
-def gr4 : RegisterOperand<GR4> { let ParserMatchClass = GR4AsmOperand; }
-def pr8 : RegisterOperand<PR8> { let ParserMatchClass = PR8AsmOperand; }
+// Index-register and pair operands. Plain register operands: TableGen derives
+// the matcher class from the register class, so no custom AsmOperandClass.
+def gr4 : RegisterOperand<GR4>;
+def pr8 : RegisterOperand<PR8>;
 
 //===----------------------------------------------------------------------===//
 // Scheduling / default properties
@@ -204,3 +197,9 @@ def DCL : AccInst<0xD, "dcl">;
 
 // JMP addr : unconditional in-page jump == JCN 0x8, addr (invert, no cond).
 def : InstAlias<"jmp\t$addr", (JCN 0x8, addr8:$addr)>;
+
+//===----------------------------------------------------------------------===//
+// Instruction-set container record (referenced by I4004.td's Target def).
+//===----------------------------------------------------------------------===//
+
+def I4004InstrInfo : InstrInfo;

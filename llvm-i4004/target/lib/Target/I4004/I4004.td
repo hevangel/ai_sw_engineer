@@ -26,6 +26,15 @@ include "I4004RegisterInfo.td"
 include "I4004InstrInfo.td"
 
 //===----------------------------------------------------------------------===//
+// Remap the target-independent pseudo-instructions that use ptr_rc onto our
+// pointer-capable register class (PR8, the 8-bit pairs that hold 16-bit
+// handles). Required by -gen-instr-info in LLVM 23.1 even for an MC-only
+// target.
+//===----------------------------------------------------------------------===//
+
+defm : RemapAllTargetPseudoPointerOperands<PR8>;
+
+//===----------------------------------------------------------------------===//
 // I4004 processor definition
 //===----------------------------------------------------------------------===//
 

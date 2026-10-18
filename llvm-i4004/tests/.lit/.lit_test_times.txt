@@ -1,0 +1,10 @@
+5.627537e-02 mc/accgroup.s
+5.622602e-02 mc/basic.s
+1.050241e-01 mc/elf.s
+5.613017e-02 mc/errors/err_imm_range.s
+5.546284e-02 mc/errors/err_pair_vs_reg.s
+5.625963e-02 mc/errors/err_undefined.s
+5.645132e-02 mc/jcn_cond.s
+5.533099e-02 mc/pairs.s
+5.530548e-02 mc/ram_rom.s
+5.701399e-02 mc/reloc.s

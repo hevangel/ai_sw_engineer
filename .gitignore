@@ -13,6 +13,7 @@ rustc-ice-*.txt
 system/*/*/build/
 llvm-*/build/
 llvm-*/install/
+llvm-*/build_llvm.out
 
 # Original software images: provenance + SHA-256 are committed, the binaries are not.
 # A freely redistributable image may be force-added and noted in provenance.md.

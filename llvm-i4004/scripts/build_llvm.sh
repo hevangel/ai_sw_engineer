@@ -40,7 +40,18 @@ fi
 mkdir -p "$BUILD_ROOT"
 if [[ "${REFRESH_SRC:-0}" == "1" || ! -d $LLVM_SRC/llvm ]]; then
   echo "==> syncing LLVM source into volume (this is slow once; cached after)"
-  rsync -a --delete --exclude='.git' "$SUBMODULE/" "$LLVM_SRC/"
+  rm -rf "$LLVM_SRC"
+  mkdir -p "$LLVM_SRC"
+  # Copy the tree except .git metadata (rsync is not in the image; tar is).
+  ( cd "$SUBMODULE" && tar --exclude='./.git' -cf - . ) | ( cd "$LLVM_SRC" && tar -xf - )
+  # The host (Windows git) may have checked the submodule out with CRLF line
+  # endings. cmake executes some of these as /bin/sh scripts (config.guess,
+  # config.sub) and a trailing CR breaks them. Strip CR from the scripts cmake
+  # runs. (Targeted: shell + autoconf helper scripts only, never binaries.)
+  echo "==> stripping CR from LLVM shell/helper scripts (Windows checkout fix)"
+  find "$LLVM_SRC" \( -name '*.sh' -o -name 'config.guess' -o -name 'config.sub' \
+       -o -name 'config.status' -o -name '*.guess' -o -name '*.sub' \) -type f \
+       -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 else
   echo "==> reusing cached LLVM source at $LLVM_SRC"
 fi
@@ -50,8 +61,14 @@ echo "==> applying I4004 overlay"
 python3 "$BACKEND/scripts/apply_overlay.py" "$LLVM_SRC"
 
 # 3. Configure + build.
-if [[ ! -f $LLVM_OBJ/build.ninja ]]; then
+if [[ "${CLEAN_OBJ:-0}" == "1" || ! -f $LLVM_OBJ/build.ninja ]]; then
   echo "==> configuring (cmake)"
+  if [[ "${CLEAN_OBJ:-0}" == "1" ]]; then
+    # Drop the stale cache so cmake reconfigures from scratch (targeted file
+    # deletes only; no recursive remove).
+    rm -f "$LLVM_OBJ/CMakeCache.txt" || true
+    find "$LLVM_OBJ" -name CMakeCache.txt -delete 2>/dev/null || true
+  fi
   cmake -G Ninja -S "$LLVM_SRC/llvm" -B "$LLVM_OBJ" \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=ON \
@@ -63,9 +80,8 @@ if [[ ! -f $LLVM_OBJ/build.ninja ]]; then
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF \
     -DLLVM_CCACHE_BUILD=ON \
-    -DCMAKE_C_COMPILER=clang \
-    -DCMAKE_CXX_COMPILER=clang++ \
-    -DLLVM_USE_LINKER=lld \
+    -DCMAKE_C_COMPILER=gcc \
+    -DCMAKE_CXX_COMPILER=g++ \
     -DCMAKE_INSTALL_PREFIX="$INSTALL"
 fi
 
