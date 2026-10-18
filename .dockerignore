@@ -1,0 +1,2 @@
+# The image is a toolchain only; the repository is bind-mounted at run time.
+*

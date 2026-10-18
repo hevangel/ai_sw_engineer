@@ -1,0 +1,32 @@
+[submodule "external/llvm-mos"]
+	path = external/llvm-mos
+	url = https://github.com/llvm-mos/llvm-mos.git
+	shallow = true
+[submodule "external/llvm-mos-sdk"]
+	path = external/llvm-mos-sdk
+	url = https://github.com/llvm-mos/llvm-mos-sdk.git
+	shallow = true
+[submodule "external/rust-mos"]
+	path = external/rust-mos
+	url = https://github.com/mrk-its/rust-mos.git
+	shallow = true
+[submodule "external/mos6502"]
+	path = external/mos6502
+	url = https://github.com/mre/mos6502.git
+	shallow = true
+[submodule "external/martypc"]
+	path = external/martypc
+	url = https://github.com/dbalsom/martypc.git
+	shallow = true
+[submodule "external/6502_65C02_functional_tests"]
+	path = external/6502_65C02_functional_tests
+	url = https://github.com/Klaus2m5/6502_65C02_functional_tests.git
+	shallow = true
+[submodule "external/busicom"]
+	path = external/busicom
+	url = https://github.com/veniamin-ilmer/busicom.git
+	shallow = true
+[submodule "external/chips"]
+	path = external/chips
+	url = https://github.com/veniamin-ilmer/chips.git
+	shallow = true
