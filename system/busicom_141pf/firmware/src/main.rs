@@ -11,12 +11,56 @@
 #[cfg(target_os = "none")]
 mod target {
     use core::panic::PanicInfo;
+    use software::driver_keyboard::{KeyBuffer, KeyboardDriver};
+    use software::driver_lamps::write_lamps;
+    use software::driver_printer::PrinterDriver;
+    use software::hal::Hal;
+    use software::Calculator;
+
+    // M4 supplies the concrete board `Hal` (SRC+WRR/RDR/WMP, JCN on TEST) via
+    // `system/busicom_141pf/platform`. Until then the target entry uses a
+    // placeholder HAL so the drivers link and `run` type-checks; the host
+    // proves the drivers against a real board model (`tests/port_level.rs`).
+
+    /// The firmware main loop, generic over the board `Hal`: scan the keyboard
+    /// 40×/s into the 8-key buffer, run each buffered key on the calculator
+    /// driving the drum printer, and push the lamps out.
+    pub fn run<H: Hal>(hal: &mut H) -> ! {
+        let mut calc = Calculator::new();
+        let mut buffer = KeyBuffer::new();
+        loop {
+            let sw = {
+                let mut kb = KeyboardDriver::new(hal);
+                kb.scan_pass(&mut buffer)
+            };
+            while let Some(key) = buffer.pop() {
+                {
+                    let mut printer = PrinterDriver::new(hal);
+                    calc.press(key, sw, &mut printer);
+                }
+                write_lamps(hal, calc.lamps());
+            }
+        }
+    }
 
     #[no_mangle]
     pub extern "C" fn main() -> ! {
-        // M3: scan keyboard via 4003 #0, run software::Calculator, drive the printer.
-        let _calc = software::Calculator::new();
-        loop {}
+        let mut hal = BoardHal;
+        run(&mut hal)
+    }
+
+    /// Placeholder board HAL; replaced by the real `platform` implementation in
+    /// M4. Present so `run` type-checks and the drivers link into the image.
+    struct BoardHal;
+    impl Hal for BoardHal {
+        fn rom_port_write(&mut self, _chip: u8, _value: u8) {}
+        fn rom_port_read(&mut self, _chip: u8) -> u8 {
+            0
+        }
+        fn ram_port_write(&mut self, _chip: u8, _value: u8) {}
+        fn test_pin(&mut self) -> bool {
+            false
+        }
     }
 
     #[panic_handler]

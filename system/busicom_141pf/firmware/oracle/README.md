@@ -14,6 +14,17 @@ Replay semantics (identical to ai_hw_engineer `scripts/replay_manual.py`): befor
 
 Rounding switch values: `0` = FL (float), `1` = 5/4 (round), `8` = IN (truncate).
 
+## Port-level (M3)
+
+- `port_level_pass.txt` — ratchet for `tests/port_level.rs`, the port-level
+  replay through the M3 drivers + host board model (42/42, mirrors
+  `expected_pass.txt`).
+- `rom_port_trace.txt` — a committed trace of the **original ROM** printing all
+  42 examples, captured on `external/chips` through the documented board wiring
+  (no ROM binary). Provenance in its header.
+- `port_level_validation.md` — how the host board model was validated against
+  that original-ROM trace (42/42 via `check_reference.py`'s `compare()`).
+
 ## Re-capture
 
 ```bash

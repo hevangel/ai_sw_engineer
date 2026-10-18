@@ -14,6 +14,9 @@
 #![no_std]
 
 pub mod bcd;
+pub mod driver_keyboard;
+pub mod driver_lamps;
+pub mod driver_printer;
 pub mod hal;
 pub mod keys;
 pub mod print;
