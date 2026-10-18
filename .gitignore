@@ -14,6 +14,8 @@ system/*/*/build/
 llvm-*/build/
 llvm-*/install/
 llvm-*/build_llvm.out
+llvm-*/tests/.lit/
+**/Output/
 
 # Original software images: provenance + SHA-256 are committed, the binaries are not.
 # A freely redistributable image may be force-added and noted in provenance.md.
