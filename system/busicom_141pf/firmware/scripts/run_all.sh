@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Full flow: lint, host replay, LLVM IR, target image, simulator compare.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
-here="$(dirname "${BASH_SOURCE[0]}")"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$here/config.sh"
 cd "$TITLE_DIR"
 
 status "fmt + clippy"
