@@ -59,3 +59,70 @@ docker run --rm -v <m3>:/workspace -v <hw>:/ai_hw_engineer \
   python3 scripts/check_reference.py --chips /workspace/external/chips \
     --profile recovered-rom'   # → 42× "PASS <id>"
 ```
+
+
+
+## Direct comparison against the original-ROM trace (`tests/port_trace.rs`)
+
+The validation above checks the host **board model** against the original ROM
+(42/42 via `check_reference.py`). It does **not** by itself re-check our Rust
+drivers against the ROM: `tests/port_level.rs` compares the driver+board round
+trip against `oracle/manual_examples.json` (the scanned manual, recovered-ROM
+profile), whose `expect.tape` is a per-step **suffix**. `tests/port_trace.rs`
+closes that gap by replaying all 42 examples through the drivers + board model
+and comparing the produced port events directly against `rom_port_trace.txt`.
+
+Both tests share ONE board model (`tests/common/mod.rs`), so neither can quietly
+validate against a different model.
+
+### What it compares (order-relevant observable events)
+
+Grouped exactly as the trace groups them (`#RESET`, then one group per `#STEP`):
+
+- **printed rows, in order** — per row: the numeric value (hammer word ↔ drum
+  sector decode; `None` = dotted overflow line), the set of symbol-column
+  glyphs, and red ink;
+- **memory and overflow lamp bits per step** — asserted exactly.
+
+Cycle timing, keyboard-scan repetition, TEST poll repetition and shift-bit
+timing are deliberately NOT compared (our instruction stream is not the ROM's).
+
+### Normalisations (documented; applied to both sides)
+
+1. **Keyboard scan / idle polling** — the trace records board *output* only, so
+   there is nothing to fold on its side; our scan order is still asserted via
+   `KeyboardDriver::scan_pass` recovering the exact key + switches per press.
+2. **Zero-register value** — a value whose digits are all zero is normalised to
+   the bare `0` (the ROM prints `0`; our core formats zero to the DP width).
+   Non-zero values keep every digit (`4.000000` is not folded to `4`).
+3. **Symbol glyph set** — a row's symbol is the *set* of its two drum-column
+   glyphs (plus the rounded `^`); a row matches when value and red are equal and
+   our glyph set is a **subset** of the ROM row's (our single-`Symbol` model may
+   carry fewer glyphs, never a wrong one).
+4. **Drum half-spin granularity** — as M3-P1: one sector per `test_pin()` sample.
+
+### Property asserted
+
+> For every example, our emitted rows are an **in-order subsequence** of the ROM
+> trace rows (value + red equal, our glyph set ⊆ the ROM row's), and the per-step
+> memory/overflow lamp bits match exactly.
+
+This proves our port output never *contradicts* the ROM — no wrong value, wrong
+order, spurious row, or wrong memory/overflow lamp (a mutation of a single drum
+glyph fails ~22/42 examples). It is **42/42** today.
+
+### What it deliberately does NOT prove (documented debt, gated)
+
+The original ROM prints a richer tape than our single-`Symbol`, JSON-oracle-shaped
+core emits. These are recorded as `spec/spec.md` ASSUMPTIONs and gated (not
+silently equated), not reproduced:
+
+- **A6** recalled `×`/`÷` operand echo rows (e.g. 5-1 `12.4 ÷`, `0.55 ÷`);
+- **A7** bare `M+`/`M-` key echo rows (e.g. 9-1 `6.89 M-`, 10-1 `10.00 M+`);
+- **A8** the ROM's two independent symbol columns (`C`+`M` for CM, `R`+`M` for
+  RM, `^`+`M+` for a rounded memory result, M=± result in column B);
+- **A9** the negative lamp (bit 2) timing and an undocumented RAM1 bit 3 the ROM
+  sets on overflow (nibble 10) and negative totals (nibble 12).
+
+One escaped defect the trace DID catch was fixed: `C` printed a blank row instead
+of `0` (`failure_notes/2026-10-18-busicom_141pf-clear-prints-zero.md`, spec A3).
