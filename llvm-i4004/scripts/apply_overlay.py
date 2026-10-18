@@ -130,6 +130,14 @@ def main():
         after=False,  # insert before the msp430 line of this block
         once_marker="case Triple::i4004:",
     )
+    ensure(
+        tc,
+        "case llvm::Triple::msp430:\n    return 16;",
+        "  case llvm::Triple::i4004:\n",
+        "Triple.cpp getArchPointerBitWidth (16-bit)",
+        after=False,  # fall through to msp430's "return 16;"
+        once_marker="case llvm::Triple::i4004:",
+    )
 
     # 3c. ELF.h: EM_I4004 + relocs enum.
     eh = os.path.join(llvm, "include", "llvm", "BinaryFormat", "ELF.h")

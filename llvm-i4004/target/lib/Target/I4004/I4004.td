@@ -24,6 +24,8 @@ include "llvm/Target/Target.td"
 
 include "I4004RegisterInfo.td"
 include "I4004InstrInfo.td"
+include "I4004CallingConv.td"
+include "I4004InstrCodeGen.td"
 
 //===----------------------------------------------------------------------===//
 // Remap the target-independent pseudo-instructions that use ptr_rc onto our

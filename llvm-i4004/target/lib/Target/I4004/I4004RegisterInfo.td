@@ -80,11 +80,17 @@ foreach n = 0-7 in {
 //===----------------------------------------------------------------------===//
 
 // General 4-bit index registers. (i8 is used as the MVT placeholder; the
-// hardware width is 4 bits, encoded 0..15.)
+// hardware width is 4 bits, encoded 0..15.) In CodeGen these are used as
+// physical nibble scratch during post-RA pseudo expansion, not as the class
+// for i8 SSA virtuals -- those live in PR8 (abi.md sec.2: "i8 fills the pair").
 def GR4 : RegisterClass<"I4004", [i8], 8, (sequence "R%u", 0, 15)>;
 
-// 8-bit register pairs.
-def PR8 : RegisterClass<"I4004", [i16], 8, (sequence "P%u", 0, 7)>;
+// 8-bit register pairs. The natural i8 register class (abi.md sec.2). The
+// allocatable pool is P1..P6; P0 (FIN/JIN scratch) and P7 (software SP) are
+// reserved in I4004RegisterInfo::getReservedRegs. An i16 is split into two i8
+// values by the type legalizer (i16 is deliberately absent from the data
+// layout's native set, abi.md sec.1.2).
+def PR8 : RegisterClass<"I4004", [i8, i16], 8, (sequence "P%u", 0, 7)>;
 
 // Fixed single-register classes (so TableGen can reference ACC/CY as implicit
 // operands and the printer/parser know their class).
