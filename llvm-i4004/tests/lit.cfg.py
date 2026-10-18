@@ -10,7 +10,7 @@ import lit.formats
 
 config.name = "llvm-i4004"
 config.test_format = lit.formats.ShTest(execute_external=False)
-config.suffixes = [".s"]
+config.suffixes = [".s", ".ll"]
 config.excludes = ["README.md"]
 
 config.test_source_root = os.path.dirname(__file__)
@@ -27,7 +27,7 @@ if os.path.isdir(bin_dir):
 # Substitutions: the RUN lines use bare tool names, which lit resolves via PATH,
 # so no explicit substitutions are strictly required. We still assert the tools
 # exist to fail fast with a clear message.
-for tool in ["llvm-mc", "FileCheck", "not", "llvm-readobj"]:
+for tool in ["llvm-mc", "llc", "FileCheck", "not", "llvm-readobj"]:
     path = os.path.join(bin_dir, tool)
     if not (os.path.isfile(path) or os.path.isfile(path + ".exe")):
         # Allow PATH fallback (e.g. tools installed system-wide in the image).
