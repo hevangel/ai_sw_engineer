@@ -91,6 +91,11 @@ pub struct Harness {
     pub init_test: bool,
     pub init_ram_char0: u8,
     pub init_rom_port: u8,
+    /// If set, append a final `SRC` after the preamble so an IO probe sees a
+    /// known pointer. The 8-bit pointer value is `src_ptr` (high nibble =
+    /// chip/reg select, low nibble = char). Uses pair7 as the pointer holder,
+    /// which clobbers R14/R15 — fine for IO probes, which read no registers.
+    pub src_ptr: Option<u8>,
 }
 
 impl Default for Harness {
@@ -102,6 +107,7 @@ impl Default for Harness {
             init_test: false,
             init_ram_char0: 0,
             init_rom_port: 0,
+            src_ptr: None,
         }
     }
 }
@@ -133,6 +139,11 @@ impl Harness {
             let lo = self.init_regs[(pair * 2 + 1) as usize];
             p.extend_from_slice(&fim_pair(pair, (hi << 4) | lo));
         }
+        // Optional final SRC so an IO probe sees a known memory pointer.
+        if let Some(ptr) = self.src_ptr {
+            p.extend_from_slice(&fim_pair(7, ptr));
+            p.push(src(7));
+        }
         // Carry, then ACC.
         p.push(if self.init_carry == 1 { STC } else { CLC });
         p.push(ldm(self.init_acc));
@@ -145,24 +156,23 @@ impl Harness {
     ///   reg1.char0   = carry      (TCC then WRM)
     /// The scratch POINTER uses pair7, so R14/R15 (pair7) are read FIRST while
     /// pair7 still holds the probe-end values; afterwards pair7 is free scratch.
-    fn readout(&self) -> Vec<u8> {
+    /// Readout using `ptr_pair` as the scratch pointer. Copies R[n] into RAM
+    /// chip0 reg0 char n for every n, and carry into reg1 char0. The two
+    /// registers that make up `ptr_pair` are CLOBBERED by the pointer FIMs, so
+    /// their recovered values are garbage — the caller runs this twice with two
+    /// different pairs and keeps each register from a pass that did not use it.
+    fn readout(&self, ptr_pair: u8) -> Vec<u8> {
         let mut r = Vec::new();
-        for &n in &[14u8, 15u8] {
+        for n in 0..=15u8 {
             r.push(ld(n)); // ACC <- R[n]
-            r.extend_from_slice(&fim_pair(7, n)); // ptr: chip0 reg0 char n (high=0)
-            r.push(src(7));
+            r.extend_from_slice(&fim_pair(ptr_pair, n)); // ptr: chip0 reg0 char n (high=0)
+            r.push(src(ptr_pair));
             r.push(WRM); // reg0.char n = R[n]
-        }
-        for n in 0..=13u8 {
-            r.push(ld(n));
-            r.extend_from_slice(&fim_pair(7, n));
-            r.push(src(7));
-            r.push(WRM);
         }
         // carry: TCC -> ACC={0,0,0,CY}; write to reg1.char0.
         r.push(TCC);
-        r.extend_from_slice(&fim_pair(7, 0x10)); // high=0x1 -> chip0 reg1 ; low=0 char0
-        r.push(src(7));
+        r.extend_from_slice(&fim_pair(ptr_pair, 0x10)); // high=0x1 -> chip0 reg1 ; low=0 char0
+        r.push(src(ptr_pair));
         r.push(WRM);
         r
     }
@@ -183,11 +193,56 @@ impl Harness {
     }
 
     /// Execute `probe`; recover ACC, carry, regs, and the probe's own RAM/ROM
-    /// memory effects. Two runs are used because reading registers clobbers
-    /// ACC: `run_acc` captures ACC first, `run` captures everything else.
+    /// memory effects. The register readout is run TWICE with two different
+    /// pointer pairs (7 and 0) because the pointer FIMs clobber their own pair;
+    /// we keep each register from a pass whose pointer pair did not include it.
     pub fn observe(&self, probe: &[u8]) -> State {
-        // ---- Run 1: full register + carry readout (+ memory effects) ----
-        let read = self.readout();
+        // Pass with pointer pair 7: R0..R13 are valid (R14/R15 clobbered).
+        let (regs7, carry, mem) = self.readout_pass(probe, 7);
+        // Pass with pointer pair 0: R2..R15 are valid (R0/R1 clobbered).
+        let (regs0, _c0, _m0) = self.readout_pass(probe, 0);
+        let mut regs = [0u8; 16];
+        regs[0] = regs7[0];
+        regs[1] = regs7[1];
+        for n in 2..16 {
+            regs[n] = regs0[n];
+        }
+
+        // ACC: dedicated run whose readout writes ACC FIRST (FIM/SRC/WRM leave
+        // ACC untouched), so the value is the true probe-end accumulator.
+        let mut acc_read = Vec::new();
+        acc_read.extend_from_slice(&fim_pair(6, 0x11)); // high=0x1 reg1 ; low=1 char1
+        acc_read.push(src(6));
+        acc_read.push(WRM);
+        let mut b2 = self.run_prog(probe, &acc_read);
+        for _ in 0..probe_cycles(probe[0]) {
+            b2.cpu.set_test_flag(self.init_test);
+            b2.run_cycle();
+        }
+        for _ in 0..count_cycles(&acc_read) {
+            b2.cpu.set_test_flag(self.init_test);
+            b2.run_cycle();
+        }
+        let acc = b2.rams[0].registers[1].characters.read_nibble(1).value();
+
+        State {
+            acc,
+            carry,
+            regs,
+            probe_ram_port: mem.0,
+            probe_rom_port: mem.1,
+            probe_ram_char0: mem.2,
+        }
+    }
+
+    /// One readout pass with `ptr_pair`; returns (regs[16], carry, memory
+    /// deltas). Registers in `ptr_pair` are invalid in the returned array.
+    fn readout_pass(
+        &self,
+        probe: &[u8],
+        ptr_pair: u8,
+    ) -> ([u8; 16], u8, (Option<u8>, Option<u8>, Option<u8>)) {
+        let read = self.readout(ptr_pair);
         let pre = self.preamble();
         let mut image = Vec::new();
         image.extend_from_slice(&pre);
@@ -209,9 +264,11 @@ impl Harness {
         let after_ram_port = board.rams[0].ports.value();
         let after_rom_port = board.roms[0].ports.value();
         let after_ram_char0 = board.rams[0].registers[0].characters.read_nibble(0).value();
-        let probe_ram_port = (after_ram_port != base_ram_port).then_some(after_ram_port);
-        let probe_rom_port = (after_rom_port != base_rom_port).then_some(after_rom_port);
-        let probe_ram_char0 = (after_ram_char0 != base_ram_char0).then_some(after_ram_char0);
+        let mem = (
+            (after_ram_port != base_ram_port).then_some(after_ram_port),
+            (after_rom_port != base_rom_port).then_some(after_rom_port),
+            (after_ram_char0 != base_ram_char0).then_some(after_ram_char0),
+        );
         for _ in 0..count_cycles(&read) {
             board.cpu.set_test_flag(self.init_test);
             board.run_cycle();
@@ -223,31 +280,29 @@ impl Harness {
             regs[n as usize] = reg_at(0, n);
         }
         let carry = reg_at(1, 0);
+        (regs, carry, mem)
+    }
 
-        // ---- Run 2: ACC-first readout (FIM/SRC/WRM do not touch ACC) ----
-        let mut acc_read = Vec::new();
-        acc_read.extend_from_slice(&fim_pair(6, 0x11)); // high=0x1 reg1 ; low=1 char1
-        acc_read.push(src(6));
-        acc_read.push(WRM);
-        let mut b2 = self.run_prog(probe, &acc_read);
-        for _ in 0..probe_cycles(probe[0]) {
-            b2.cpu.set_test_flag(self.init_test);
-            b2.run_cycle();
-        }
-        for _ in 0..count_cycles(&acc_read) {
-            b2.cpu.set_test_flag(self.init_test);
-            b2.run_cycle();
-        }
-        let acc = b2.rams[0].registers[1].characters.read_nibble(1).value();
-
-        State {
-            acc,
-            carry,
-            regs,
-            probe_ram_port,
-            probe_rom_port,
-            probe_ram_char0,
-        }
+    /// Like `observe`, but catches a chips panic (e.g. its `unreachable!` on an
+    /// unknown opcode) and reports it as `Err(message)` instead of aborting.
+    /// Used for undefined/edge encodings where chips' own behaviour is the
+    /// finding we want to record.
+    pub fn observe_catch(&self, probe: &[u8]) -> Result<State, String> {
+        let h = *self;
+        let probe = probe.to_vec();
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {})); // silence the default print
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.observe(&probe)));
+        std::panic::set_hook(prev);
+        r.map_err(|e| {
+            if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "chips panicked (non-string payload)".to_string()
+            }
+        })
     }
 }
 
@@ -276,10 +331,20 @@ impl JumpSetup {
     pub fn run(&self, probe: &[u8]) -> Landing {
         let mut img = vec![0u8; 0x200];
         let mut pre = Vec::new();
+        // Group presets by register PAIR so a FIM does not clobber the partner
+        // register set by an earlier entry. Each pair gets one FIM with both
+        // nibbles merged (unset registers default to 0).
+        let mut pair_vals: [Option<u8>; 16] = [None; 16];
         for &(r, v) in &self.regs {
-            let pair = r >> 1;
-            let (hi, lo) = if r & 1 == 0 { (v, 0) } else { (0, v) };
-            pre.extend_from_slice(&fim_pair(pair, (hi << 4) | lo));
+            pair_vals[r as usize] = Some(v);
+        }
+        for pair in 0u8..8 {
+            let hi = pair_vals[(pair * 2) as usize];
+            let lo = pair_vals[(pair * 2 + 1) as usize];
+            if hi.is_some() || lo.is_some() {
+                let data = (hi.unwrap_or(0) << 4) | lo.unwrap_or(0);
+                pre.extend_from_slice(&fim_pair(pair, data));
+            }
         }
         pre.push(if self.init_carry == 1 { STC } else { CLC });
         pre.push(ldm(self.init_acc));
