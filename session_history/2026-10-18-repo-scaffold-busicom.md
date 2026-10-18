@@ -36,3 +36,10 @@
 - Two sub-agents in separate worktrees: llvm-i4004 ISA/ABI spec ([PR #3](https://github.com/hevangel/ai_sw_engineer/pull/3), data layout `e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8`); Busicom M2 ([PR #4](https://github.com/hevangel/ai_sw_engineer/pull/4)). The M2 agent hit its 100-call limit at 40/42 and was resumed to finish at 42/42.
 - Parent fixes on PR #4: `run_all.sh` scripts-dir resolution (title + template), exec bit, `*.env`/`*.ld` LF in `.gitattributes`.
 - Validation: `run_all.sh` clean in the container (worktree and git-archive export); manual replay 42/42, 135 checkpoints. Model calls: 3 sub-agent runs; token totals not exposed.
+
+## Continuation (2026-10-18, rounds 3-4)
+
+- Merged PR #3, #4, #5 (Busicom M3 drivers) and #6 (llvm-i4004 MC layer); ABI decisions: C `int` = 16 bits, `e_machine` = 0x4004.
+- Sub-agents: port-trace test ([PR #7](https://github.com/hevangel/ai_sw_engineer/pull/7)); disassembler + cross-check ([PR #8](https://github.com/hevangel/ai_sw_engineer/pull/8)); isel plan + probe ([PR #9](https://github.com/hevangel/ai_sw_engineer/pull/9), stacked on #8).
+- Findings: `manual_examples.json` checks only the end of each step's tape, so the earlier "42/42 exact" overstated fidelity; the full ROM tape (`rom_port_trace.txt`) has operand and M+/M- echo rows and a second symbol column the firmware lacks (A6-A9). `C` printing a blank row is fixed. The disassembler cross-check compares against a Python decode table written by the sub-agent, with only structural regex checks on the chips/RTL source. No i4004 CodeGen TargetMachine yet, so no 4004 size figure.
+- Validation (parent, in container): firmware `cargo test` all green; llvm-i4004 `run_tests.sh` 16/16; `crosscheck_disasm.py` exit 0. Model calls: 2 sub-agent runs this round; token totals not exposed.
