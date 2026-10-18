@@ -1,0 +1,861 @@
+# Port-level trace of the ORIGINAL Busicom 141-PF ROM (recovered five-ROM mask).
+#
+# Captured by running the unmodified original ROM
+# (ai_hw_engineer spec/reference/rom_141pf_combined.bin, SHA-256 recorded in
+# ../original/provenance.md) on V. Ilmer MCS-4 chip models
+# (external/chips @ 1bc3d5781474ef9d7e7305af91071a723797f222, no license: run,
+# never copied) through ai_hw_engineer scripts/reference_oracle.rs, which wires
+# the board exactly as external/busicom does (keyboard 4003 #0 scan, printer
+# 4003 #1+#2 20-bit chain, RAM0 hammer/red/advance edges, RAM1 lamps, TEST/drum
+# pacing). This is the port-level behaviour the M3 drivers + host board model
+# reproduce; compare() scores it 42/42 vs oracle/manual_examples.json
+# (recovered-rom). See oracle/port_level_validation.md. No ROM binary committed.
+#
+# Format per example: "#EXAMPLE id", "#RESET"/"#STEP n", "LAMPS|n" (bit0 memory,
+# bit1 overflow, bit2 negative), and "ROW|value|symA|symB|red".
+#EXAMPLE 1-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.340|+| |false
+#STEP 0
+LAMPS|0
+ROW|34.560|-| |false
+#STEP 1
+LAMPS|0
+ROW|56.789|+| |false
+#STEP 2
+LAMPS|0
+ROW|56.789|+| |false
+#STEP 3
+LAMPS|0
+ROW|0.123|+| |false
+#STEP 4
+LAMPS|0
+ROW|91.481| |*|false
+#STEP 5
+LAMPS|0
+#EXAMPLE 1-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|1.23|+| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|+| |false
+#STEP 1
+LAMPS|0
+#STEP 2
+LAMPS|0
+ROW|5.8|^|*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 1-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|15.300|+| |false
+#STEP 0
+LAMPS|0
+ROW|56.789|-| |false
+#STEP 1
+LAMPS|0
+ROW|3.456|+| |false
+#STEP 2
+LAMPS|0
+ROW|38.033| |*|true
+#STEP 3
+LAMPS|12
+#EXAMPLE 1-4
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|1| |#|false
+#STEP 0
+LAMPS|0
+ROW|1.00|+| |false
+#STEP 1
+LAMPS|0
+ROW|2.00|+| |false
+#STEP 2
+LAMPS|0
+ROW|3.00|+| |false
+#STEP 3
+LAMPS|0
+ROW|6.00|◇| |false
+#STEP 4
+LAMPS|0
+ROW|2| |#|false
+#STEP 5
+LAMPS|0
+ROW|4.00|+| |false
+#STEP 6
+LAMPS|0
+ROW|5.00|+| |false
+#STEP 7
+LAMPS|0
+ROW|6.00|+| |false
+#STEP 8
+LAMPS|0
+ROW|15.00|◇| |false
+#STEP 9
+LAMPS|0
+ROW|3| |#|false
+#STEP 10
+LAMPS|0
+ROW|7.00|+| |false
+#STEP 11
+LAMPS|0
+ROW|8.00|+| |false
+#STEP 12
+LAMPS|0
+ROW|9.00|+| |false
+#STEP 13
+LAMPS|0
+ROW|24.00|◇| |false
+#STEP 14
+LAMPS|0
+ROW|45.00| |*|false
+#STEP 15
+LAMPS|0
+#EXAMPLE 2-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.3|×| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|=| |false
+ROW|56.088| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 2-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.3|×| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|=| |false
+ROW|56.09|^|*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 2-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.3|×| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|=| |false
+ROW|56.08| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 2-4
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.3|×| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|×| |false
+#STEP 1
+LAMPS|0
+ROW|56.088|◇| |false
+#STEP 2
+LAMPS|0
+ROW|0.789|=| |false
+ROW|44.253432| |*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 2-5
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|361.52|×| |false
+#STEP 0
+LAMPS|0
+ROW|120|=| |false
+ROW|43382.40| |*|false
+#STEP 1
+LAMPS|0
+ROW|118.6|=| |false
+ROW|42876.272| |*|false
+#STEP 2
+LAMPS|0
+ROW|98.4|=| |false
+ROW|35573.568| |*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 2-6
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|1.25|×| |false
+#STEP 0
+LAMPS|0
+ROW|12| |Ex|false
+#STEP 1
+LAMPS|0
+ROW|1.25|=| |false
+ROW|15.00| |*|false
+#STEP 2
+LAMPS|0
+ROW|3.50|=| |false
+ROW|42.00| |*|false
+#STEP 3
+LAMPS|0
+ROW|1.99|=| |false
+ROW|23.88| |*|false
+#STEP 4
+LAMPS|0
+#EXAMPLE 2-7
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|5|×| |false
+#STEP 0
+LAMPS|0
+ROW|5|=| |false
+ROW|25| |*|false
+#STEP 1
+LAMPS|0
+ROW|25|=| |false
+ROW|125| |*|false
+#STEP 2
+LAMPS|0
+ROW|125|=| |false
+ROW|625| |*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 2-8
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12.3|÷| |false
+ROW||×| |false
+ROW||÷| |false
+ROW||×| |false
+#STEP 0
+LAMPS|0
+ROW|4.56|=| |false
+ROW|56.088| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 3-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|40|÷| |false
+#STEP 0
+LAMPS|0
+ROW|6|=| |false
+ROW|6.666666666666| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 3-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|40|÷| |false
+#STEP 0
+LAMPS|0
+ROW|6|=| |false
+ROW|6.67|^|*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 3-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|40|÷| |false
+#STEP 0
+LAMPS|0
+ROW|6|=| |false
+ROW|6.66| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 3-4
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|123|÷| |false
+ROW|6|÷| |false
+#STEP 0
+LAMPS|0
+ROW|0.789|=| |false
+ROW|25.98225602027| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 3-5
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|4578|÷| |false
+#STEP 0
+LAMPS|0
+ROW|360|=| |false
+ROW|12.72|^|*|false
+#STEP 1
+LAMPS|0
+ROW|2902|=| |false
+ROW|8.06| |*|false
+#STEP 2
+LAMPS|0
+ROW|8716|=| |false
+ROW|24.21| |*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 3-6
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|123.45|M+| |false
+#STEP 0
+LAMPS|1
+ROW|123.45|÷| |false
+#STEP 1
+LAMPS|1
+ROW|36.9|=| |false
+ROW|3.35|^|*|false
+#STEP 2
+LAMPS|1
+ROW|123.45|R|M|false
+#STEP 3
+LAMPS|1
+ROW|123.45|÷| |false
+#STEP 4
+LAMPS|1
+ROW|28.4|=| |false
+ROW|4.35|^|*|false
+#STEP 5
+LAMPS|1
+ROW|123.45|R|M|false
+#STEP 6
+LAMPS|1
+ROW|123.45|÷| |false
+#STEP 7
+LAMPS|1
+ROW|31.55|=| |false
+ROW|3.91| |*|false
+#STEP 8
+LAMPS|1
+#EXAMPLE 4-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12345|×| |false
+#STEP 0
+LAMPS|0
+ROW|2|%| |false
+ROW|246.90| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 4-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|2|÷| |false
+#STEP 0
+LAMPS|0
+ROW|3|%| |false
+ROW|66.66666666666| |*|false
+#STEP 1
+LAMPS|0
+#EXAMPLE 5-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C| |false
+ROW|1.50|+| |false
+ROW|129.05|+| |false
+ROW|11.08|-| |false
+ROW|119.47|×| |false
+#STEP 0
+LAMPS|0
+ROW|12.4|÷| |false
+ROW|0.55|÷| |false
+ROW|12.96|+| |false
+ROW|3.56|-| |false
+#STEP 1
+LAMPS|0
+ROW|9.40| |*|false
+#STEP 2
+LAMPS|0
+ROW|9.40|÷| |false
+ROW|0.87|=| |false
+ROW|329.36|^|*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 6-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C| |false
+ROW|123|÷| |false
+ROW|123.00|+| |false
+ROW|456.00|+| |false
+ROW|789.00|+| |false
+#STEP 0
+LAMPS|0
+ROW|1368.00| |*|false
+#STEP 1
+LAMPS|0
+ROW|1368.00|%| |false
+ROW|8.99| |*|false
+#STEP 2
+LAMPS|0
+ROW|8.99|+| |false
+#STEP 3
+LAMPS|0
+ROW|456|%| |false
+ROW|33.33| |*|false
+#STEP 4
+LAMPS|0
+ROW|33.33|+| |false
+#STEP 5
+LAMPS|0
+ROW|789|%| |false
+ROW|57.68|^|*|false
+#STEP 6
+LAMPS|0
+ROW|57.68|+| |false
+#STEP 7
+LAMPS|0
+ROW|100.00| |*|false
+#STEP 8
+LAMPS|0
+#EXAMPLE 6-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C| |false
+ROW|1.23|×| |false
+ROW|4|=| |false
+ROW|4.92| |*|false
+#STEP 0
+LAMPS|0
+ROW|4.92|+| |false
+ROW|5.67|×| |false
+ROW|8|=| |false
+ROW|45.36| |*|false
+#STEP 1
+LAMPS|0
+ROW|45.36|+| |false
+ROW|50.28|÷| |false
+#STEP 2
+LAMPS|0
+ROW|3| |Ex|false
+#STEP 3
+LAMPS|0
+ROW|50.28|=| |false
+ROW|0.05| |*|false
+#STEP 4
+LAMPS|0
+#EXAMPLE 7-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C|M|false
+ROW|123.45|×| |false
+#STEP 0
+LAMPS|0
+ROW|23.4|=| |false
+ROW|2888.73| |M+|false
+#STEP 1
+LAMPS|1
+ROW|42.6|=| |false
+ROW|5258.97| |M-|false
+#STEP 2
+LAMPS|1
+ROW|51|=| |false
+ROW|6295.95| |M+|false
+#STEP 3
+LAMPS|1
+ROW|3925.71|C|M|false
+#STEP 4
+LAMPS|0
+#EXAMPLE 7-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C|M|false
+ROW|4578|÷| |false
+#STEP 0
+LAMPS|0
+ROW|360|=| |false
+ROW|12.72|^|M+|false
+#STEP 1
+LAMPS|1
+ROW|2902|=| |false
+ROW|8.06| |M+|false
+#STEP 2
+LAMPS|1
+ROW|8716|=| |false
+ROW|24.21| |M-|false
+#STEP 3
+LAMPS|1
+ROW|3.43|C|M|true
+#STEP 4
+LAMPS|12
+#EXAMPLE 8-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C|M|false
+ROW|0|C| |false
+ROW|123456789|÷| |false
+ROW|123|+| |false
+ROW|456|+| |false
+ROW|789|+| |false
+#STEP 0
+LAMPS|0
+ROW|1368| |*|false
+#STEP 1
+LAMPS|0
+ROW|1368|×| |false
+ROW|123|=| |false
+ROW|11100281| |M+|false
+#STEP 2
+LAMPS|1
+ROW|456|=| |false
+ROW|41152263|^|M+|false
+#STEP 3
+LAMPS|1
+ROW|789|=| |false
+ROW|71204245|^|M+|false
+#STEP 4
+LAMPS|1
+ROW|123456789|C|M|false
+#STEP 5
+LAMPS|0
+#EXAMPLE 9-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C|M|false
+ROW|11|×| |false
+ROW|1.23|=| |false
+ROW|13.53| |M+|false
+#STEP 0
+LAMPS|1
+ROW|12|×| |false
+ROW|4.11|=| |false
+ROW|49.32| |M+|false
+#STEP 1
+LAMPS|1
+ROW|3|×| |false
+ROW|2.03|=| |false
+ROW|6.09| |M+|false
+#STEP 2
+LAMPS|1
+ROW|68.94|R|M|false
+#STEP 3
+LAMPS|1
+ROW|68.94|×| |false
+ROW|10|%| |false
+ROW|6.89| |*|false
+#STEP 4
+LAMPS|1
+ROW|6.89|M-| |false
+ROW|62.05|R|M|false
+#STEP 5
+LAMPS|1
+ROW|62.05|×| |false
+ROW|5|%| |false
+ROW|3.10| |*|false
+#STEP 6
+LAMPS|1
+ROW|3.10|M+| |false
+ROW|2.50|M+| |false
+ROW|67.65|C|M|false
+#STEP 7
+LAMPS|0
+#EXAMPLE 10-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C|M|false
+ROW|0|C| |false
+ROW|10.00|M+| |false
+ROW|10.00|×| |false
+ROW|2.38|=| |false
+ROW|23.80| |*|false
+#STEP 0
+LAMPS|1
+ROW|23.80|+| |false
+ROW|20.00|M+| |false
+ROW|20.00|×| |false
+ROW|1.38|=| |false
+ROW|27.60| |*|false
+#STEP 1
+LAMPS|1
+ROW|27.60|+| |false
+ROW|15.00|M+| |false
+ROW|15.00|×| |false
+ROW|3.65|=| |false
+ROW|54.75| |*|false
+#STEP 2
+LAMPS|1
+ROW|54.75|+| |false
+ROW|106.15|÷| |false
+#STEP 3
+LAMPS|1
+ROW|45.00|C|M|false
+#STEP 4
+LAMPS|0
+ROW|45.00|=| |false
+ROW|2.35| |*|false
+#STEP 5
+LAMPS|0
+#EXAMPLE 11-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|152417543.0625|√| |false
+ROW|12345.750000000|√| |false
+#STEP 0
+LAMPS|0
+#EXAMPLE 11-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|2.000000|M+| |false
+ROW|2.000000|×| |false
+ROW|2.000000|=| |false
+ROW|4.000000| |*|false
+#STEP 0
+LAMPS|1
+ROW|4.000000|+| |false
+#STEP 1
+LAMPS|1
+ROW|3.000000|M+| |false
+ROW|3.000000|×| |false
+ROW|3.000000|=| |false
+ROW|9.000000| |*|false
+#STEP 2
+LAMPS|1
+ROW|9.000000|+| |false
+#STEP 3
+LAMPS|1
+ROW|4.000000|M+| |false
+ROW|4.000000|×| |false
+ROW|4.000000|=| |false
+ROW|16.000000| |*|false
+#STEP 4
+LAMPS|1
+ROW|16.000000|+| |false
+#STEP 5
+LAMPS|1
+ROW|5.000000|M+| |false
+ROW|5.000000|×| |false
+ROW|5.000000|=| |false
+ROW|25.000000| |*|false
+#STEP 6
+LAMPS|1
+ROW|25.000000|+| |false
+#STEP 7
+LAMPS|1
+ROW|6.000000|M+| |false
+ROW|6.000000|×| |false
+ROW|6.000000|=| |false
+ROW|36.000000| |*|false
+#STEP 8
+LAMPS|1
+ROW|36.000000|+| |false
+#STEP 9
+LAMPS|1
+ROW|90.000000|×| |false
+ROW|5|=| |false
+ROW|450.000000| |*|false
+#STEP 10
+LAMPS|1
+ROW|450.000000|+| |false
+ROW|20.000000|C|M|false
+ROW|20.000000|×| |false
+ROW|20.000000|=| |false
+ROW|400.000000| |*|false
+#STEP 11
+LAMPS|0
+ROW|400.000000|-| |false
+ROW|50.000000|÷| |false
+ROW|5|=| |false
+ROW|10.000000| |*|false
+#STEP 12
+LAMPS|0
+ROW|10.000000|=| |false
+ROW|2.000000| |*|false
+#STEP 13
+LAMPS|0
+ROW|2.000000|√| |false
+ROW|1.414214|√| |false
+#STEP 14
+LAMPS|0
+#EXAMPLE 11-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|12|×| |false
+ROW|12|=| |false
+ROW|144.000000| |M+|false
+#STEP 0
+LAMPS|1
+ROW|8|×| |false
+ROW|8|=| |false
+ROW|64.000000| |M+|false
+#STEP 1
+LAMPS|1
+ROW|208.000000|C|M|false
+#STEP 2
+LAMPS|0
+ROW|208.000000|√| |false
+ROW|14.422205|√| |false
+#STEP 3
+LAMPS|0
+#EXAMPLE 14-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|12345678.000000|+| |false
+#STEP 0
+LAMPS|0
+#EXAMPLE 14-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|...............| | |false
+#STEP 0
+LAMPS|10
+#EXAMPLE 14-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|900000.00000000|+| |false
+#STEP 0
+LAMPS|0
+ROW|100000.00000000|+| |false
+ROW|...............| | |false
+#STEP 1
+LAMPS|10
+ROW|0.00000000|+| |false
+#STEP 2
+LAMPS|0
+ROW|900000.00000000| |*|false
+#STEP 3
+LAMPS|0
+#EXAMPLE 15-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|123456789|×| |false
+ROW|100000|=| |false
+ROW|12345678900000| |*|false
+#STEP 0
+LAMPS|0
+#EXAMPLE 15-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|123456789|×| |false
+ROW|1000000|=| |false
+ROW|...............| | |false
+#STEP 0
+LAMPS|10
+#EXAMPLE 15-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|123456|×| |false
+ROW|1|=| |false
+ROW|123456.00000000| |*|false
+#STEP 0
+LAMPS|0
+#EXAMPLE 15-4
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|1234567|×| |false
+ROW|1|=| |false
+ROW|...............| | |false
+#STEP 0
+LAMPS|10
+#EXAMPLE 16-1
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|4000000|÷| |false
+ROW|0.0000003|=| |false
+ROW|13333333333333| |*|false
+#STEP 0
+LAMPS|0
+#EXAMPLE 16-2
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|40000000|÷| |false
+ROW|0.0000003|=| |false
+ROW|...............| | |false
+#STEP 0
+LAMPS|10
+#EXAMPLE 16-3
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|400000|÷| |false
+ROW|3|=| |false
+ROW|133333.33333333| |*|false
+#STEP 0
+LAMPS|0
+#EXAMPLE 16-4
+ROW|0|C| |false
+ROW|0|C|M|false
+ROW|0|C| |false
+#RESET
+ROW|4000000|÷| |false
+ROW|3|=| |false
+ROW|...............| | |false
+#STEP 0
+LAMPS|10

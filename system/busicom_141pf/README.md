@@ -22,7 +22,7 @@ The Busicom 141-PF printing calculator (Nippon Calculating Machine Corp., sold a
 
 | Title | Year | Original authors | Status | Folder |
 |---|---|---|---|---|
-| Calculator firmware | 1971 | Intel for Busicom | M1: host core, addition/subtraction | [firmware/](firmware/README.md) |
+| Calculator firmware | 1971 | Intel for Busicom | M3: host core (42/42) + port-level machine drivers (42/42) | [firmware/](firmware/README.md) |
 
 ## Sources
 
