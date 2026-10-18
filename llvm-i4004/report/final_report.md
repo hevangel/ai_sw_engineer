@@ -1,5 +1,59 @@
 # llvm-i4004 final report
 
+## Status: milestone 3b (instruction selection) — STARTED, codegen backbone not yet built
+
+The isel milestone is scoped and its acceptance harness is in place, but the
+LLVM **CodeGen backbone is not yet implemented**, so `llc -mtriple=i4004`
+cannot lower IR. This section states exactly what exists and the blocker.
+
+**Done in 3b:**
+- `plans/implementation_plan.md` now carries the full 7-step isel plan, pinned
+  to `abi.md` (data layout, C int = 16, i8 native on pairs, P0 scratch, P7 SSP,
+  args P1–P3, P4–P6 callee-saved, 3-level hw stack then software stack).
+- `scripts/isel_bcd_probe.sh` is the reproducible acceptance harness for the
+  milestone function. It transcribes the BCD digit-add from
+  `system/busicom_141pf/firmware/src/bcd.rs` (`add_mag`, plus an even smaller
+  single-digit `bcd_add_digit`) into a standalone `no_std` function — **without
+  modifying the firmware crate** — emits its LLVM IR with the pinned nightly
+  rustc (LLVM 23.1.3, the same LLVM the backend is built from), swaps in the
+  i4004 data layout + triple (`abi.md` §1), and runs `llc`.
+
+**The IR extracts cleanly.** `bcd_add_digit` lowers to i8 add/sub + a compare
+and an i16 pack; `bcd_add_mag` to a 16-iteration loop of i8 add/sub/compare
+with a pointer load/store each step — exactly the add/sub/constants/branch/
+RAM-load-store subset the isel plan targets first.
+
+**Blocker (honest):** `llc -mtriple=i4004` reports
+
+```
+llc: error: unable to get target for 'i4004', see --version and --triple.
+```
+
+because the installed toolchain registers only the **MC layer + disassembler**,
+not a CodeGen `TargetMachine`. `LLVMInitializeI4004Target` is still the MC-only
+stub that registers no TargetMachine (by design through milestone 3a). Making
+`llc` work requires the full backbone — `I4004TargetMachine` (on LLVM 23.1's
+`CodeGenTargetMachineImpl` + `buildCodeGenPipeline`), `I4004Subtarget`,
+`I4004RegisterInfo`/`I4004InstrInfo` CodeGen classes, `I4004FrameLowering`,
+`I4004ISelLowering` (legalize i8, expand i16/i32, lower ret/add/sub/setcc/
+br/load/store, and the AND/OR/XOR expansion the 4004 lacks), `I4004CallingConv`,
+`I4004ISelDAGToDAG`, `I4004AsmPrinter` + `MCInstLower` — roughly 18 inter-
+dependent files that must all compile together against LLVM 23.1's exact APIs.
+That is a multi-day backend bring-up; it was **not** completed in this session,
+and a half-written, non-compiling backbone was deliberately **not committed**
+(it would break the shared LLVM build for the whole repo, including the
+concurrent firmware worktree).
+
+**Where this stops:** at a reproducible IR → `llc` probe that pinpoints the
+missing TargetMachine. The next session resumes by building the backbone in the
+smallest-first order in the plan, re-running `isel_bcd_probe.sh` after each
+piece until it emits assembly our `llvm-mc` accepts, then reporting the BCD
+`.text` byte size. No rustc custom-target integration until then (plan step 7).
+
+---
+
+# llvm-i4004 final report
+
 ## Status: milestone 3a (disassembler + independent validation) complete
 
 Milestone 2 (MC layer) is complete and milestone 3a adds the **disassembler**,

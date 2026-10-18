@@ -1,5 +1,52 @@
 # llvm-i4004 implementation plan
 
+## Milestone 3b — instruction selection backbone (IN PROGRESS, branch `llvm/i4004-isel`)
+
+Goal: a **minimum** CodeGen backbone so `llc -mtriple=i4004` compiles small
+functions to assembly our own `llvm-mc` accepts, with a lit/FileCheck test per
+selection pattern (AGENTS.md rule). Follows `spec/abi.md` exactly: data layout
+`e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8`, C int = 16, `i8` the native
+legal integer on register pairs, P0 = FIN/JIN scratch, P7 = software SP, args
+P1–P3, P4–P6 callee-saved, 3-level hw stack then a software return stack.
+
+Components, smallest-first (each ends with a passing lit test):
+
+1. **TargetMachine + Subtarget + registration.** `I4004TargetMachine` with the
+   abi.md data-layout string; `I4004Subtarget` owning InstrInfo/RegisterInfo/
+   FrameLowering/TLI; register the TM in `LLVMInitializeI4004Target`; a
+   `I4004PassConfig` adding the DAG-to-DAG pass. Exit: `llc -mtriple=i4004
+   --filetype=null` accepts an empty function.
+2. **RegisterInfo + FrameLowering (minimal).** `I4004RegisterInfo` (TableGen
+   GPR/pair classes already exist); reserve ACC/CY/P0/P7; a trivial
+   FrameLowering with no real frame yet (leaf functions only). Exit: a leaf
+   returning a constant compiles.
+3. **ISelLowering.** `i8` legal (on PR8 pairs), `i4` a custom value width,
+   `i16`/`i32` expanded; lower `ret`, `add`/`sub` i8, constants (`LDM`/`FIM`),
+   `BR`/`BRCOND`/`setcc` via JCN+CY, `load`/`store` addrspace-0 via SRC+RDM/WRM.
+   The 4004 has **no AND/OR/XOR** — expand to NAND-free sequences or a libcall,
+   documented. Exit: one lit test per lowered node.
+4. **Calling-convention lowering** (`I4004CallingConv.td` + custom): args in
+   P1–P3 then imaginary RAM regs; return i8 in P1; `JMS`/`BBL` for depth ≤ 3.
+   Exit: a function calling a leaf compiles and `llvm-mc` re-accepts the asm.
+5. **ISelDAGToDAG + AsmPrinter.** A DAG-to-DAG matcher (TableGen patterns where
+   possible, C++ for the awkward ACC-centric ones) and an AsmPrinter emitting
+   our asm syntax. Exit: the per-pattern lit tests above pass end-to-end.
+6. **Milestone function:** compile ONE BCD digit-add from
+   `system/busicom_141pf/firmware/src/bcd.rs` (`add_mag`'s inner nibble add, or
+   a minimal extract) to a 4004 object; report byte size; compare qualitatively
+   with the original ROM's add routine if identifiable (cite, never copy).
+7. **No rustc custom-target integration** unless everything else is done;
+   recorded as the next step.
+
+Realistic risk: the 4004 is a hostile target (single 4-bit ACC, no GPR ALU, no
+addressable memory without SRC). The honest exit for this milestone is "the
+backbone selects the documented subset and compiles the largest reachable
+slice of a real BCD routine," with any blocker stated precisely.
+
+---
+
+# llvm-i4004 implementation plan (historical milestones)
+
 Milestones (each ends with passing tests):
 
 1. **ISA + ABI specs written; Rust target JSON drafted. — DONE.**
