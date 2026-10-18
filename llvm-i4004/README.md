@@ -5,8 +5,8 @@
 | Chip | Intel 4004 — announced November 15, 1971 in *Electronic News* (see ai_hw_engineer `design/README.md` for sources) |
 | Word / address width | 4-bit data, 8-bit instructions (1–2 bytes), 12-bit ROM address |
 | Strategy | new experimental LLVM target on `llvm/llvm-project` (no existing backend) |
-| Rust target | `rust/i4004-none.json` (draft) |
-| Status | scaffolded — no code yet |
+| Rust target | `rust/i4004-none.json` — data-layout `e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8` |
+| Status | **milestone 1 complete** — ISA + ABI + asm-syntax specs written, Rust target JSON finalized; no TableGen/C++ yet (specs before code) |
 
 ## Strategy
 
