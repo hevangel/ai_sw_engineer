@@ -10,6 +10,10 @@
 
 /// Digits per register (one 4002 register holds 16 main characters).
 pub const DIGITS: usize = 16;
+/// Bytes backing the packed digit array: two BCD digits (nibbles) per byte.
+/// This matches the 4002's nibble density — the original ROM stores one digit
+/// per 4-bit character, so one digit per byte would waste 2× the board RAM.
+const PACKED: usize = DIGITS / 2;
 /// Printable / storable digits (manual: "14 digits plus decimal point and sign").
 pub const CAPACITY: u8 = 14;
 /// Floating multiply/divide significant-digit budget (recovered-ROM behaviour).
@@ -20,8 +24,12 @@ const WIDE: usize = 34;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Num {
-    /// `d[0]` is the least significant digit; each entry is 0..=9.
-    pub d: [u8; DIGITS],
+    /// Digits least-significant first, **two per byte** (nibble `2*i` = digit
+    /// `i`): the low nibble of `d[i/2]` is digit `i` when `i` is even, the high
+    /// nibble when `i` is odd. Access through [`Num::digit`] / [`Num::set_digit`]
+    /// rather than indexing — the packed layout is the RAM-fit representation
+    /// (see `report/final_report.md` M4). Each nibble holds 0..=9.
+    d: [u8; PACKED],
     pub neg: bool,
     /// Number of fractional digits (position of the decimal point).
     pub scale: u8,
@@ -29,10 +37,33 @@ pub struct Num {
 
 impl Num {
     pub const ZERO: Num = Num {
-        d: [0; DIGITS],
+        d: [0; PACKED],
         neg: false,
         scale: 0,
     };
+
+    /// Digit `i` (0 = least significant), 0..=9. `i` must be `< DIGITS`.
+    #[inline]
+    pub fn digit(&self, i: usize) -> u8 {
+        let byte = self.d[i >> 1];
+        if i & 1 == 0 {
+            byte & 0x0F
+        } else {
+            byte >> 4
+        }
+    }
+
+    /// Set digit `i` (0 = least significant) to `v` (0..=9). `i < DIGITS`.
+    #[inline]
+    pub fn set_digit(&mut self, i: usize, v: u8) {
+        let idx = i >> 1;
+        let byte = self.d[idx];
+        self.d[idx] = if i & 1 == 0 {
+            (byte & 0xF0) | (v & 0x0F)
+        } else {
+            (byte & 0x0F) | (v << 4)
+        };
+    }
 
     pub fn is_zero(&self) -> bool {
         self.d.iter().all(|&x| x == 0)
@@ -41,7 +72,7 @@ impl Num {
     /// Number of significant digits (0 for zero).
     pub fn digits(&self) -> u8 {
         let mut n = DIGITS;
-        while n > 0 && self.d[n - 1] == 0 {
+        while n > 0 && self.digit(n - 1) == 0 {
             n -= 1;
         }
         n as u8
@@ -68,8 +99,9 @@ impl Num {
         let mut i = DIGITS;
         while i > 0 {
             i -= 1;
-            if self.d[i] != other.d[i] {
-                return self.d[i].cmp(&other.d[i]);
+            let (a, b) = (self.digit(i), other.digit(i));
+            if a != b {
+                return a.cmp(&b);
             }
         }
         core::cmp::Ordering::Equal
@@ -87,7 +119,7 @@ impl Num {
         let mut i = DIGITS;
         while i > 0 {
             i -= 1;
-            self.d[i] = if i >= k { self.d[i - k] } else { 0 };
+            self.set_digit(i, if i >= k { self.digit(i - k) } else { 0 });
         }
         true
     }
@@ -99,24 +131,25 @@ impl Num {
         if k == 0 {
             return (0, false);
         }
-        let first = if k <= DIGITS { self.d[k - 1] } else { 0 };
+        let first = if k <= DIGITS { self.digit(k - 1) } else { 0 };
         let mut any = false;
         for i in 0..DIGITS {
             if i < k {
-                any |= self.d[i] != 0;
+                any |= self.digit(i) != 0;
             }
-            self.d[i] = if i + k < DIGITS { self.d[i + k] } else { 0 };
+            self.set_digit(i, if i + k < DIGITS { self.digit(i + k) } else { 0 });
         }
         (first, any)
     }
 
     /// Add one unit in the last place to the magnitude. Returns `false` on carry out.
     pub fn inc_mag(&mut self) -> bool {
-        for x in self.d.iter_mut() {
-            if *x == 9 {
-                *x = 0;
+        for i in 0..DIGITS {
+            let x = self.digit(i);
+            if x == 9 {
+                self.set_digit(i, 0);
             } else {
-                *x += 1;
+                self.set_digit(i, x + 1);
                 return true;
             }
         }
@@ -142,13 +175,13 @@ impl Num {
     fn add_mag(&mut self, o: &Num) -> bool {
         let mut carry = 0u8;
         for i in 0..DIGITS {
-            let mut s = self.d[i] + o.d[i] + carry;
+            let mut s = self.digit(i) + o.digit(i) + carry;
             carry = 0;
             if s > 9 {
                 s -= 10;
                 carry = 1;
             }
-            self.d[i] = s;
+            self.set_digit(i, s);
         }
         carry == 0
     }
@@ -157,12 +190,13 @@ impl Num {
     fn sub_mag(&mut self, o: &Num) {
         let mut borrow = 0u8;
         for i in 0..DIGITS {
-            let sub = o.d[i] + borrow;
-            if self.d[i] >= sub {
-                self.d[i] -= sub;
+            let sub = o.digit(i) + borrow;
+            let di = self.digit(i);
+            if di >= sub {
+                self.set_digit(i, di - sub);
                 borrow = 0;
             } else {
-                self.d[i] = self.d[i] + 10 - sub;
+                self.set_digit(i, di + 10 - sub);
                 borrow = 1;
             }
         }
@@ -208,7 +242,9 @@ impl Num {
             }
         }
         let mut n = Num::ZERO;
-        n.d[..DIGITS].copy_from_slice(&buf[..DIGITS]);
+        for (i, &v) in buf.iter().enumerate().take(DIGITS) {
+            n.set_digit(i, v);
+        }
         n.scale = scale;
         n.neg = neg;
         if n.is_zero() {
@@ -225,19 +261,21 @@ impl Num {
     pub fn mul(&self, o: &Num) -> Option<Num> {
         let mut acc = [0u8; WIDE];
         for i in 0..DIGITS {
-            if self.d[i] == 0 {
+            let di = self.digit(i);
+            if di == 0 {
                 continue;
             }
             let mut carry = 0u8;
             for j in 0..DIGITS {
                 let pos = i + j;
+                let oj = o.digit(j);
                 if pos >= WIDE {
-                    if o.d[j] != 0 {
+                    if oj != 0 {
                         return None;
                     }
                     continue;
                 }
-                let p = self.d[i] * o.d[j] + acc[pos] + carry;
+                let p = di * oj + acc[pos] + carry;
                 acc[pos] = p % 10;
                 carry = p / 10;
             }
@@ -329,13 +367,14 @@ impl Num {
             if idx >= WIDE {
                 return None;
             }
-            divd[idx] = self.d[i];
+            divd[idx] = self.digit(i);
         }
         let mut divs = [0u8; WIDE]; // divisor (little-endian)
         let mut divs_hi = 0usize;
         for (i, cell) in divs.iter_mut().enumerate().take(d_digits) {
-            *cell = o.d[i];
-            if o.d[i] != 0 {
+            let oi = o.digit(i);
+            *cell = oi;
+            if oi != 0 {
                 divs_hi = i;
             }
         }
@@ -402,7 +441,7 @@ impl Num {
             if qi < 0 || qi as usize >= WIDE {
                 continue;
             }
-            quo.d[j] = quo_int[qi as usize];
+            quo.set_digit(j, quo_int[qi as usize]);
         }
         // Overflow: any nonzero Q digit mapping to index >= DIGITS.
         if !q_is_zero {
@@ -451,7 +490,8 @@ impl Num {
         let mut hi = 0usize;
         let base = 2 * frac as i16;
         for i in 0..DIGITS {
-            if self.d[i] == 0 {
+            let di = self.digit(i);
+            if di == 0 {
                 continue;
             }
             let idx = (i as i16 - self.scale as i16) + base;
@@ -459,14 +499,16 @@ impl Num {
                 continue;
             }
             let idx = idx as usize;
-            rad[idx] = self.d[i];
+            rad[idx] = di;
             if idx > hi {
                 hi = idx;
             }
         }
         let root = isqrt_digits(&rad, hi);
         let mut n = Num::ZERO;
-        n.d.copy_from_slice(&root[..DIGITS]);
+        for (i, &v) in root.iter().enumerate().take(DIGITS) {
+            n.set_digit(i, v);
+        }
         n.scale = frac;
         if n.is_zero() {
             n.scale = 0;
@@ -661,15 +703,24 @@ mod tests {
         // digits given most significant first
         let mut n = Num::ZERO;
         for (i, &x) in digits.iter().rev().enumerate() {
-            n.d[i] = x;
+            n.set_digit(i, x);
         }
         n.scale = scale;
         n.neg = neg;
         n
     }
 
+    /// Low `k` digits, least-significant first, for slice comparisons.
+    fn low_digits(n: &Num, k: usize) -> [u8; DIGITS] {
+        let mut out = [0u8; DIGITS];
+        for (i, slot) in out.iter_mut().enumerate().take(k) {
+            *slot = n.digit(i);
+        }
+        out
+    }
+
     fn render(n: &Num) -> (bool, u8, [u8; DIGITS]) {
-        (n.neg, n.scale, n.d)
+        (n.neg, n.scale, low_digits(n, DIGITS))
     }
 
     #[test]
@@ -730,7 +781,10 @@ mod tests {
         let r = a.div_float(&b).unwrap();
         assert_eq!(r.int_digits(), 1);
         assert_eq!(r.scale, 12);
-        assert_eq!(&r.d[..13], &[6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]);
+        assert_eq!(
+            &low_digits(&r, 13)[..13],
+            &[6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+        );
     }
 
     #[test]
@@ -741,7 +795,10 @@ mod tests {
         let r = a.div_float(&b).unwrap();
         assert_eq!(r.scale, 13);
         assert_eq!(r.int_digits(), 0);
-        assert_eq!(&r.d[..13], &[6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]);
+        assert_eq!(
+            &low_digits(&r, 13)[..13],
+            &[6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+        );
     }
 
     #[test]
@@ -764,8 +821,8 @@ mod tests {
         let a = num(&[2, 0, 8], 0, false);
         let r = a.sqrt_at(6);
         assert_eq!(r.scale, 6);
-        assert_eq!(&r.d[..8], &[5, 0, 2, 2, 2, 4, 4, 1]); // 14.422205 little-endian
-                                                          // sqrt(152417543.0625) to 9 places = 12345.750000000
+        assert_eq!(&low_digits(&r, 8)[..8], &[5, 0, 2, 2, 2, 4, 4, 1]); // 14.422205 little-endian
+                                                                        // sqrt(152417543.0625) to 9 places = 12345.750000000
         let a = num(&[1, 5, 2, 4, 1, 7, 5, 4, 3, 0, 6, 2, 5], 4, false);
         let r = a.sqrt_at(9);
         let (_neg, scale, _d) = render(&r);

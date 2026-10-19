@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Rank the operations our llc cannot yet select, across the whole firmware.
+
+`llc` aborts on the FIRST unselectable DAG node, so a single run over the whole
+module only ever names one problem. To get a ranked work list we split the
+retargeted module into one module per defined function (the shared preamble —
+target header, types, globals, `declare`s, attribute groups, metadata — plus a
+`declare` for every OTHER function, plus exactly one real `define`) and run llc
+on each in isolation, then aggregate the failures.
+
+For each function llc either succeeds (that function is already fully
+selectable) or aborts with "LLVM ERROR: Cannot select: <node>" (or a legalize /
+other backend error). We normalise each failing node to its operation
+signature (drop SSA ids, addresses, constants) and count how many functions hit
+it. The ranked list is the backlog the codegen agent burns down.
+
+Usage:
+  gen_worklist.py <firmware_i4004.ll> <llc-path> <out.md> [--triple i4004]
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+import tempfile
+from collections import Counter, defaultdict
+from pathlib import Path
+
+
+def normalise_node(msg: str) -> str:
+    """Reduce a 'Cannot select' node line to an op signature for counting."""
+    s = msg.strip()
+    s = re.sub(r"0x[0-9a-fA-F]+", "", s)
+    s = re.sub(r"\bt\d+\b", "t", s)
+    s = re.sub(r"<[^>]*>", "", s)
+    s = re.sub(r"Constant:i\d+", "Constant", s)
+    s = re.sub(r"%\S+", "%v", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def extract_failure(stderr: str):
+    """Return (category, op, normalised_signature) from an llc failure, or None."""
+    for line in stderr.splitlines():
+        if "Cannot select:" in line:
+            node = line.split("Cannot select:", 1)[1]
+            # node looks like: "tNN: <type> = <OP> <operands>" — the op is the
+            # mnemonic right after the first '='. Allow upper/lower/underscore
+            # (e.g. brcond, Constant, zero_extend, GlobalAddress).
+            m = re.search(r"=\s*([A-Za-z_][A-Za-z0-9_]*)", node)
+            op = m.group(1) if m else (node.strip().split() or ["?"])[0].rstrip(":")
+            return ("cannot-select", op, normalise_node(node))
+    low = stderr.lower()
+    if "unable to legalize" in low:
+        return ("legalize", "legalize", normalise_node(stderr))
+    # Backend assertion (e.g. SELECT/SELECT_CC expand) — an incomplete lowering,
+    # not a clean "Cannot select". Pull the asserted expression as the op.
+    for line in stderr.splitlines():
+        if "Assertion `" in line or "assert(" in line:
+            m = re.search(r"ISD::([A-Za-z_]+)", line)
+            op = f"assert:{m.group(1)}" if m else "assert"
+            return ("backend-assert", op, normalise_node(line))
+    # A hard crash with no diagnostic (e.g. missing AsmPrinter mnemonic throwing
+    # std::logic_error) — still a backend gap, bucket it so it is not lost.
+    if "terminate called" in stderr or "logic_error" in stderr:
+        return ("backend-crash", "crash:asmprinter", "std::logic_error during emission")
+    for line in stderr.splitlines():
+        if "LLVM ERROR:" in line:
+            return ("error", "llvm-error", normalise_node(line.split("LLVM ERROR:", 1)[1]))
+    return None
+
+
+def demangle_hint(sym: str) -> str:
+    """Best-effort readable hint from a Rust mangled name (no rustc needed)."""
+    s = sym.lstrip("@").strip('"')
+    toks = re.findall(r"[0-9]+([A-Za-z_][A-Za-z0-9_]*)", s)
+    hint = "::".join(t for t in toks if not t.startswith("Cs"))
+    return hint or s
+
+
+def stub_body(define_line: str, body: str) -> str:
+    """Replace a function body with a trivial, always-selectable stub.
+
+    Keeps the full `define ...` header (linkage, calling convention, attribute
+    refs, metadata) so every call site stays valid, but discards the real
+    instructions so this function never contributes an ISel failure of its own.
+    The body is a single `unreachable`, which is valid for ANY return type and
+    needs no typed return value, so no per-type value synthesis is required.
+    This keeps the module well-formed (unlike turning the define into a declare,
+    which breaks `internal`/`fastcc` call sites) while isolating the function
+    under test.
+    """
+    header = define_line.rsplit("{", 1)[0].rstrip()
+    return header + " {\nentry:\n  unreachable\n}\n"
+
+
+def split_functions(ll: str):
+    """Return (preamble_non_define_lines, [(name, define_line, body_text), ...])."""
+    lines = ll.splitlines(keepends=True)
+    bodies = []
+    preamble = []
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        if line.startswith("define "):
+            depth = line.count("{") - line.count("}")
+            j = i
+            while depth > 0 and j + 1 < n:
+                j += 1
+                depth += lines[j].count("{") - lines[j].count("}")
+            m = re.search(r'(@[A-Za-z0-9_.]+|@"[^"]+")\s*\(', line)
+            name = m.group(1) if m else f"@fn{i}"
+            bodies.append((name, line, "".join(lines[i : j + 1])))
+            i = j + 1
+        else:
+            preamble.append(line)
+            i += 1
+    return "".join(preamble), bodies
+
+
+def main() -> int:
+    if len(sys.argv) < 4:
+        sys.stderr.write(__doc__)
+        return 2
+    ll_path, llc, out_md = sys.argv[1], sys.argv[2], sys.argv[3]
+    triple = "i4004"
+    if "--triple" in sys.argv:
+        triple = sys.argv[sys.argv.index("--triple") + 1]
+
+    ll = Path(ll_path).read_text(encoding="utf-8")
+    preamble_text, bodies = split_functions(ll)
+
+    ok, failed = [], []
+    reasons = Counter()
+    ops = Counter()
+    op_funcs = defaultdict(list)
+
+    with tempfile.TemporaryDirectory() as td:
+        for idx, (name, define_line, body) in enumerate(bodies):
+            others = "".join(
+                stub_body(dl, b) for (nm, dl, b) in bodies if nm != name
+            )
+            mod = preamble_text + "\n" + others + "\n" + body
+            p = Path(td) / f"fn{idx}.ll"
+            p.write_text(mod, encoding="utf-8")
+            r = subprocess.run(
+                [llc, "-mtriple=" + triple, "-filetype=asm", str(p), "-o", str(p) + ".s"],
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode == 0:
+                ok.append(name)
+                continue
+            fx = extract_failure(r.stderr)
+            if fx is None:
+                reasons["unknown"] += 1
+                tail = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "?"
+                failed.append((name, "unknown", tail))
+            else:
+                cat, op, sig = fx
+                reasons[cat] += 1
+                ops[op] += 1
+                op_funcs[op].append(name)
+                failed.append((name, op, sig))
+
+    total = len(bodies)
+    md = []
+    md.append("# i4004 codegen work list (from the firmware whole-program IR)\n")
+    md.append(
+        "Generated by `system/busicom_141pf/firmware/scripts/gen_worklist.py`: it "
+        "splits `build/firmware_i4004.ll` into one module per defined function and "
+        "runs our `llc -mtriple=i4004` on each in isolation (llc aborts on the "
+        "first unselectable node, so per-function isolation is the only way to see "
+        "them all). The ranking is what the codegen backend must support for the "
+        "firmware to lower end to end.\n"
+    )
+    md.append(f"- Functions in module: **{total}**")
+    md.append(f"- Select cleanly today: **{len(ok)}**")
+    md.append(f"- Fail to select: **{len(failed)}**\n")
+
+    md.append("## Ranked by failing operation (functions blocked)\n")
+    md.append("| Rank | Operation (first unselected node) | Functions blocked |")
+    md.append("|---|---|---|")
+    for rank, (op, cnt) in enumerate(ops.most_common(), 1):
+        md.append(f"| {rank} | `{op}` | {cnt} |")
+    if not ops:
+        md.append("| — | (none) | 0 |")
+    md.append("")
+    md.append(
+        "> Note: each function reports only its FIRST unselected node, so an op "
+        "lower in the list can also be needed by a function blocked earlier on a "
+        "higher one. Re-run after each codegen landing to reveal the next layer.\n"
+    )
+
+    md.append("## Failure categories\n")
+    for cat, cnt in reasons.most_common():
+        md.append(f"- `{cat}`: {cnt}")
+    if not reasons:
+        md.append("- (none)")
+    md.append("")
+
+    md.append("## Per-operation detail\n")
+    for op, cnt in ops.most_common():
+        md.append(f"### `{op}` — {cnt} function(s)\n")
+        rep = next((sig for (nm, o, sig) in failed if o == op), "")
+        if rep:
+            md.append("Representative unselected node:\n")
+            md.append("```")
+            md.append(rep)
+            md.append("```\n")
+        md.append("<details><summary>functions</summary>\n")
+        for nm in op_funcs[op][:50]:
+            md.append(f"- `{demangle_hint(nm)}`")
+        md.append("\n</details>\n")
+
+    if ok:
+        md.append("## Functions that already select cleanly\n")
+        for nm in ok:
+            md.append(f"- `{demangle_hint(nm)}`")
+        md.append("")
+
+    Path(out_md).write_text("\n".join(md) + "\n", encoding="utf-8")
+    sys.stderr.write(
+        f"gen_worklist: {len(ok)}/{total} select, {len(failed)} fail; "
+        f"top ops: {', '.join(f'{o}({c})' for o, c in ops.most_common(5)) or 'none'}\n"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

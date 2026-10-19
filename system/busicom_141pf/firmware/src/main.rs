@@ -17,10 +17,26 @@ mod target {
     use software::hal::Hal;
     use software::Calculator;
 
-    // M4 supplies the concrete board `Hal` (SRC+WRR/RDR/WMP, JCN on TEST) via
-    // `system/busicom_141pf/platform`. Until then the target entry uses a
-    // placeholder HAL so the drivers link and `run` type-checks; the host
-    // proves the drivers against a real board model (`tests/port_level.rs`).
+    // The concrete board `Hal` lowers each trait method to a single 4004 port
+    // op. The port sequences themselves (SRC + WRR/RDR/WMP, JCN on TEST) live in
+    // the platform runtime, exposed here as the four C-ABI `__bus_*` functions
+    // below; the runtime's crt0 calls `main` after reset. The host still proves
+    // the drivers against a real board model (`tests/port_level.rs`), so this
+    // entry only binds the trait to those externs — no new behaviour.
+    //
+    // ASSUMPTION (M4): the runtime provides these symbols with exactly this
+    // C ABI (recorded in llvm-i4004/rust/README.md and the brief). A method is
+    // one SRC-select + one port op; only the low 4 bits of each nibble matter.
+    extern "C" {
+        /// `SRC chip` + `WRR`: write a ROM chip's 4-bit output port.
+        fn __bus_rom_port_write(chip: u8, value: u8);
+        /// `SRC chip` + `RDR`: read a ROM chip's 4-bit input port.
+        fn __bus_rom_port_read(chip: u8) -> u8;
+        /// `DCL`/`SRC chip` + `WMP`: write a RAM chip's 4-bit output port.
+        fn __bus_ram_port_write(chip: u8, value: u8);
+        /// `JCN`/`JTN` on the `TEST` pin: 1 = TEST HIGH (drum half-spin level).
+        fn __bus_test_pin() -> u8;
+    }
 
     /// The firmware main loop, generic over the board `Hal`: scan the keyboard
     /// 40×/s into the 8-key buffer, run each buffered key on the calculator
@@ -49,17 +65,21 @@ mod target {
         run(&mut hal)
     }
 
-    /// Placeholder board HAL; replaced by the real `platform` implementation in
-    /// M4. Present so `run` type-checks and the drivers link into the image.
+    /// The board HAL: each method is one `__bus_*` call into the platform
+    /// runtime (one 4004 port op). `test_pin` reads the TEST level (1 = HIGH).
     struct BoardHal;
     impl Hal for BoardHal {
-        fn rom_port_write(&mut self, _chip: u8, _value: u8) {}
-        fn rom_port_read(&mut self, _chip: u8) -> u8 {
-            0
+        fn rom_port_write(&mut self, chip: u8, value: u8) {
+            unsafe { __bus_rom_port_write(chip, value) }
         }
-        fn ram_port_write(&mut self, _chip: u8, _value: u8) {}
+        fn rom_port_read(&mut self, chip: u8) -> u8 {
+            unsafe { __bus_rom_port_read(chip) & 0xF }
+        }
+        fn ram_port_write(&mut self, chip: u8, value: u8) {
+            unsafe { __bus_ram_port_write(chip, value) }
+        }
         fn test_pin(&mut self) -> bool {
-            false
+            unsafe { __bus_test_pin() != 0 }
         }
     }
 
