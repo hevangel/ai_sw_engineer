@@ -113,6 +113,56 @@ bool I4004Peephole::runOnMachineFunction(MachineFunction &MF) {
       MachineInstr &MI = *It++;
       unsigned Op = MI.getOpcode();
 
+      // DCL changes the CM-RAM (DCL) bank. The SRC address latch is NOT a
+      // single CPU register: each 4002 chip holds its OWN {reg,char} latch, and
+      // which chip answers an RDM/WRM/RDn/WRn is gated by the CM-RAM bank line
+      // the last DCL drove (datasheet; ai_hw_engineer intel_4002.sv guards both
+      // the SRC load and the response with cm_ram_i). So a `SRC pN` issued
+      // under DCL=k latches the address ONLY into bank k's chip; after a later
+      // `DCL j` (j != k) the bank-j chip that now answers may hold a STALE/old
+      // address, and a bank-k access after returning to k relies on k's chip
+      // still holding what the elided SRC would have re-set. Tracking "SRC
+      // points at pair pN" as if it were bank-independent is therefore wrong
+      // across a bank change: a `SRC pN` after a DCL must NOT be elided even if
+      // pN is unchanged, because the newly-selected chip never received it.
+      //
+      // This is the prime suspect for the deep banked-frame corruption
+      // (failure_notes/2026-10-19-chips-4002-src-latch-ignores-dcl.md): the
+      // DCL frame brackets (I4004ExpandPseudos emits `LD bank; DCL; SRC; I/O;
+      // LDM 0; DCL`) run before this post-expansion pass, and a bank-0 SRC
+      // after a banked frame's `DCL 0` reset was being dropped because SrcPair
+      // still named the pair from before the bracket. Invalidate the SRC latch
+      // on every DCL. Register CONTENTS survive a DCL, so PairImm is untouched;
+      // only the hardware address-latch tracking (SrcPair) is cleared.
+      if (Op == I4004::DCL) {
+        SrcPair = Register();
+        continue;
+      }
+
+      // Control transfer that leaves straight-line flow mid-block:
+      //   * JMS -- a call to a leaf helper (push/pop, HAL, regops) that does its
+      //     own SRC/DCL and returns with the latch in an unknown state;
+      //   * JUN / JIN -- soft-call dispatch and the `jin p0` return stubs, which
+      //     transfer into code (__soft_ret, __push_*, restore trampolines, far
+      //     thunks) that re-SRCs and may change the DCL bank;
+      //   * BBL / RETpseudo -- return out of this function.
+      // In every case the SRC latch and any known pair immediates cannot be
+      // assumed across the transfer. This mirrors the existing isCall() clear
+      // below, extended to the i4004's non-isCall control transfers (the
+      // soft-call ABI uses JUN, not the hardware-stack JMS, for real calls --
+      // abi.md 4.4.1 -- so isCall() alone does not cover them). INLINEASM is
+      // opaque: it may issue arbitrary SRC/DCL, so treat it the same.
+      if (Op == I4004::JMS || Op == I4004::JUN || Op == I4004::JIN ||
+          Op == I4004::BBL || Op == I4004::RETpseudo ||
+          MI.isInlineAsm()) {
+        PairImm.clear();
+        SrcPair = Register();
+        // JMS/JUN with an argument pair still "uses" registers but defines
+        // nothing we track; fall through is unnecessary -- nothing below
+        // applies to these opcodes.
+        continue;
+      }
+
       if (Op == I4004::FIM) {
         // FIM pN, imm8  (operands: def pair, imm).
         Register Pair = MI.getOperand(0).getReg();
