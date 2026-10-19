@@ -6,7 +6,7 @@
 | Word / address width | 4-bit data, 8-bit instructions (1–2 bytes), 12-bit ROM address |
 | Strategy | new experimental LLVM target on `llvm/llvm-project` (no existing backend) |
 | Rust target | `rust/i4004-none.json` — data-layout `e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8` |
-| Status | **milestone 3a complete** — MC layer + **disassembler** on LLVM 23.1.3. `llvm-mc -triple=i4004 -show-encoding` assembles all 46 instructions to the `isa.md` opcode table; `llvm-mc --disassemble` / `llvm-objdump -d` decode them back (asm->disasm->re-asm is byte-identical); ELF writer emits `e_machine 0x4004` + `R_I4004_*` (incl. `R_I4004_FIN8`). Differentially cross-checked by **executing every encoding on `external/chips`** and verifying our disassembly (mnemonic + operands) predicts the observed effect — no disagreements; mutation-tested. The ai_hw_engineer RTL half is not yet run (no Verilog simulator available). 16/16 MC+disasm tests pass. Codegen is next (milestone 3b, branch `llvm/i4004-isel`). See [report](report/final_report.md). |
+| Status | **milestone 3b — `llc -mtriple=i4004` compiles 39/43 Busicom firmware functions**. Follows the AVR model: i8 in a register pair (PR8), i16/pointers in a double-pair (DR16 = two 4004 pairs), i16 arithmetic expanded to i8. Implemented: add/sub (i8 nibble + i16 4-nibble chains), RAM load/store (i8+i16, SRC+RDM/WRM), compares + conditional branches (BR_CC→SUB+JCN), select (CFG diamond), calls (JMS) with register + stack arguments, zext/trunc, i16 constants, frame-index addressing, register spill/reload to 4002 RAM, global addresses (LEA_GA), and AND/OR/XOR + shifts + mul/div/rem (i8/i16/i32) + memcpy/memset via libi4004rt libcalls. **25/25** lit (17 MC + 8 CodeGen) and **40/40** execution checks on `external/chips` (`exec_fn.py` i8 + `exec_i16.py` i16; a real subtract borrow-chain bug was caught here). The BCD digit-add compiles AND assembles (`bcd_add_digit` = 102 bytes). Open: a D2 callee-saved super-register spill (2 fns) and the linker/image packer (milestone 5) for a whole-ROM image + size. Milestone 3a (MC + disassembler, chips cross-check) complete. See [report](report/final_report.md). |
 
 ## Strategy
 
@@ -27,12 +27,15 @@ The first consumer is `system/busicom_141pf/firmware`; its 1280-byte budget is t
 | [spec/abi.md](spec/abi.md) | data layout, register classes, calling convention |
 | [spec/asm_syntax.md](spec/asm_syntax.md) | assembler syntax |
 | [plans/](plans/implementation_plan.md) | implementation and [test plan](plans/testplan.md) |
-| `target/lib/Target/I4004/` | the MC-layer backend sources (TableGen + C++), applied as an overlay onto the pinned LLVM submodule |
+| `target/lib/Target/I4004/` | the backend sources (TableGen + C++): MC layer, disassembler, and the CodeGen backbone (TargetMachine/Subtarget/RegisterInfo/InstrInfo/FrameLowering/ISelLowering/ISelDAGToDAG/AsmPrinter/MCInstLower + `I4004ExpandPseudos`), applied as an overlay onto the pinned LLVM submodule |
 | `target/llvm-include/` | the `ELFRelocs/I4004.def` installed into the LLVM tree by the overlay |
-| `scripts/apply_overlay.py` | installs the target sources + idempotent Triple/ELF infra patches onto a scratch LLVM tree |
-| `scripts/build_llvm.sh` | builds `llvm-mc` + MC tools with `LLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I4004` into a Docker volume |
-| `scripts/run_tests.sh` | runs the `tests/mc/` lit+FileCheck suite |
+| `scripts/apply_overlay.py` | installs the target sources + idempotent Triple/ELF infra patches (incl. the i4004 arch + 16-bit pointer width) onto a scratch LLVM tree |
+| `scripts/build_llvm.sh` | builds `llvm-mc` + `llc` + MC tools with `LLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I4004` into a Docker volume |
+| `scripts/run_tests.sh` | runs the `tests/mc/` + `tests/codegen/` lit suites, the MC disassembler cross-check, and the `exec_fn.py` chips execution test |
+| `scripts/exec_fn.py` | execution test: compiles functions with `llc`, runs the compiled ROM on `external/chips` via `tools/chips_xcheck/run_fn`, compares to the host |
+| `scripts/isel_bcd_probe.sh` | milestone acceptance harness: compiles the BCD digit-add (pinpoints the remaining load/store + compare selection layers) |
 | `tests/mc/` | MC encode / error / reloc / ELF tests (one CHECK per opcode) |
+| `tests/codegen/` | `llc` selection-pattern FileCheck tests (ret/add/sub/branch/elf/mc-roundtrip) |
 | `rust/`, `asm/` | Rust target JSON; assembler/linker (milestone 5) |
 | [report/](report/final_report.md) | final report |
 

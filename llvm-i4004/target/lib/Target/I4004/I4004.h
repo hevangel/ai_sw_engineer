@@ -5,12 +5,36 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Top-level interface for the Intel 4004 (MCS-4) CodeGen backend. Milestone 3b:
+// the instruction-selection backbone that makes `llc -mtriple=i4004` compile
+// real code per spec/abi.md.
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef LLVM_LIB_TARGET_I4004_I4004_H
 #define LLVM_LIB_TARGET_I4004_I4004_H
 
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/PassRegistry.h"
+#include "llvm/Support/CodeGen.h"
+
 namespace llvm {
-class Target;
+class I4004TargetMachine;
+class FunctionPass;
+class PassRegistry;
+
+// Create the ISel DAG-to-DAG pass (legacy PM).
+FunctionPass *createI4004ISelDag(I4004TargetMachine &TM,
+                                 CodeGenOptLevel OptLevel);
+
+// Post-RA pseudo expander (expands the ACC-centric pseudos into real 4004
+// instruction sequences).
+FunctionPass *createI4004ExpandPseudosPass();
+
+void initializeI4004DAGToDAGISelLegacyPass(PassRegistry &);
+void initializeI4004ExpandPseudosPass(PassRegistry &);
+
 } // namespace llvm
 
 #endif // LLVM_LIB_TARGET_I4004_I4004_H

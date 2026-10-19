@@ -118,3 +118,15 @@ class I4004InstAddr12<bits<4> opr, dag outs, dag ins, string asmstr,
   let Inst{3-0}  = addr{11-8};   // A3
   let Inst{15-8} = addr{7-0};    // A2A1
 }
+
+//===----------------------------------------------------------------------===//
+// CodeGen pseudo-instruction base (milestone 3b). No real encoding; expanded
+// post-RA into real MCS-4 instruction sequences by I4004ExpandPseudos. Size is
+// a conservative estimate used only for branch-range math before expansion.
+//===----------------------------------------------------------------------===//
+class Pseudo<dag outs, dag ins, list<dag> pattern = []>
+    : I4004Inst<outs, ins, "", pattern, 0> {
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let Inst{15-0} = 0;
+}

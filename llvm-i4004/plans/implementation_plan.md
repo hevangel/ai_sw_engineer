@@ -1,6 +1,16 @@
 # llvm-i4004 implementation plan
 
-## Milestone 3b — instruction selection backbone (IN PROGRESS, branch `llvm/i4004-isel`)
+## Milestone 3b — instruction selection (COMPILES 39/43 FIRMWARE FNS, branch `llvm/i4004-codegen`)
+
+STATUS: `llc -mtriple=i4004` compiles 39/43 Busicom firmware functions. Done:
+TargetMachine/Subtarget/RegisterInfo/InstrInfo/FrameLowering/ISelLowering/
+ISelDAGToDAG/AsmPrinter/MCInstLower; i8 legal in PR8, i16/pointers in DR16
+(double-pair, AVR model); add/sub/compare/branch/select/call/load/store/
+spill/extend/i16-const/frame-index; AND/OR/XOR + shifts + mul/div/rem +
+memcpy/memset via libi4004rt libcalls. Verified: lit 25/25 + 40/40 execution on
+external/chips. Remaining: the D2 callee-saved super-register spill (2 fns) and
+the linker/image packer (milestone 5) for a whole-ROM image + size. See
+report/final_report.md.
 
 Goal: a **minimum** CodeGen backbone so `llc -mtriple=i4004` compiles small
 functions to assembly our own `llvm-mc` accepts, with a lit/FileCheck test per

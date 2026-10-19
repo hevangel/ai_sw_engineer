@@ -59,6 +59,9 @@ foreach i = 0-15 in {
 let Namespace = "I4004" in {
   def sub_hi : SubRegIndex<4>;      // even register R(2n), high nibble
   def sub_lo : SubRegIndex<4, 4>;   // odd register  R(2n+1), low nibble
+  // Sub-register indices for the two 8-bit pairs of a 16-bit double-pair.
+  def sub_pair_lo : SubRegIndex<8>;     // low  8 bits = low pair
+  def sub_pair_hi : SubRegIndex<8, 8>;  // high 8 bits = high pair
 }
 
 //===----------------------------------------------------------------------===//
@@ -76,15 +79,47 @@ foreach n = 0-7 in {
 }
 
 //===----------------------------------------------------------------------===//
+// 16-bit double-pairs D0..D3 = {P(2k):P(2k+1)}, for pointers and i16 values
+// (abi.md sec.1.3: a 16-bit handle). This mirrors AVR's DREGS: i16 is legal in
+// a register-PAIR class while i16 arithmetic is expanded/custom-lowered to i8
+// ops on the two sub-pairs. The low pair holds the SRC address byte for AS-0
+// load/store; the high pair holds the bank/extended bits.
+//===----------------------------------------------------------------------===//
+
+class I4004Double<bits<16> Enc, string n, list<Register> subpairs>
+    : RegisterWithSubRegs<n, subpairs> {
+  let HWEncoding = Enc;
+  let Namespace = "I4004";
+  let SubRegIndices = [sub_pair_lo, sub_pair_hi];
+}
+
+foreach k = 0-3 in {
+  def D#k : I4004Double<k, "d"#k,
+                        [!cast<Register>("P"#!mul(k, 2)),
+                         !cast<Register>("P"#!add(!mul(k, 2), 1))]>;
+}
+
+//===----------------------------------------------------------------------===//
 // Register classes.
 //===----------------------------------------------------------------------===//
 
 // General 4-bit index registers. (i8 is used as the MVT placeholder; the
-// hardware width is 4 bits, encoded 0..15.)
+// hardware width is 4 bits, encoded 0..15.) In CodeGen these are used as
+// physical nibble scratch during post-RA pseudo expansion, not as the class
+// for i8 SSA virtuals -- those live in PR8 (abi.md sec.2: "i8 fills the pair").
 def GR4 : RegisterClass<"I4004", [i8], 8, (sequence "R%u", 0, 15)>;
 
-// 8-bit register pairs.
-def PR8 : RegisterClass<"I4004", [i16], 8, (sequence "P%u", 0, 7)>;
+// 8-bit register pairs. The natural i8 register class (abi.md sec.2). The
+// allocatable pool is P1..P6; P0 (FIN/JIN scratch) and P7 (software SP) are
+// reserved in I4004RegisterInfo::getReservedRegs.
+def PR8 : RegisterClass<"I4004", [i8], 8, (sequence "P%u", 0, 7)>;
+
+// 16-bit double-pairs: the i16 / pointer class (AVR DREGS analog). D0 contains
+// the reserved P0 and D3 contains the reserved P7, so the allocatable i16 pool
+// is D1 (P2:P3) and D2 (P4:P5). D2 overlaps the callee-saved pairs; its
+// callee-saved save/restore as a super-register is a known follow-up (2
+// i16-heavy firmware functions hit an undefined-$d2 verifier error).
+def DR16 : RegisterClass<"I4004", [i16], 8, (add D1, D2)>;
 
 // Fixed single-register classes (so TableGen can reference ACC/CY as implicit
 // operands and the printer/parser know their class).
