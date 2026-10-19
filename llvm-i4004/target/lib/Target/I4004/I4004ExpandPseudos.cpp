@@ -304,6 +304,20 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     return true;
   }
 
+  case I4004::LEA_GA: {
+    // dst(DR16): low pair = FIM sym (R_I4004_IMM8 low byte), high pair = 0.
+    // Backbone limitation: the symbol must lie in the low 256 bytes (the high
+    // byte is not relocated); a %hi reloc + linker lands with milestone 5.
+    Register Dst = MI.getOperand(0).getReg();
+    const MachineOperand &Sym = MI.getOperand(1);
+    Register LoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
+    Register HiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(LoP).add(Sym);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case I4004::COPYpr:
     emitCopy(MBB, MI);
     MI.eraseFromParent();

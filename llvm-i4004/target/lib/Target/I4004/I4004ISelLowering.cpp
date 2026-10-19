@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/RuntimeLibcalls.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -100,6 +101,9 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
 
   setMinFunctionAlignment(Align(1));
   setPrefFunctionAlignment(Align(1));
+
+  // mul/div/rem libcall impl names are registered in
+  // I4004Subtarget::initLibcallLoweringInfo (the LLVM 23 hook).
 
   // Variable shifts have no native 4004 instruction and no standard i8 RTLIB
   // entry, so custom-lower them (like AND/OR/XOR) to explicit libi4004rt calls

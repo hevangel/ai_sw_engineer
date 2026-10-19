@@ -95,11 +95,16 @@ let mayLoad = 1, Defs = [ACC, CY, P0] in {
   def RELOAD16 : Pseudo<(outs DR16:$dst), (ins i16imm:$fi), []>;
 }
 
-// Materialize the RAM address of a stack slot into a DR16 pointer. The frame
-// index (operand 1) is resolved to an absolute 4002 char address by
-// eliminateFrameIndex; the expander emits MOVi16 of that address.
+// Materialize the RAM address of a stack slot into a DR16 pointer.
 let isPseudo = 1, hasSideEffects = 0 in
 def LEA_FI : Pseudo<(outs DR16:$dst), (ins i16imm:$fi), []>;
+
+// Materialize a global/symbol address into a DR16 pointer (I4004ISD::WRAPPER).
+// The low byte carries an R_I4004_IMM8 relocation to the symbol; the high byte
+// is 0 (backbone limitation: globals must lie in the low 256 ROM/RAM bytes --
+// documented; a %hi relocation + linker lands with milestone 5).
+let isPseudo = 1, hasSideEffects = 0 in
+def LEA_GA : Pseudo<(outs DR16:$dst), (ins i16imm:$sym), []>;
 
 // 8-bit add/sub, result in $dst (expands to CLC;LD;ADD;XCH nibble sequences
 // with carry propagation across the two nibbles).
@@ -135,6 +140,10 @@ let isCall = 1, Uses = [P7], Defs = [ACC, CY, P0, P1, P2, P3] in {
 
 // External-symbol callee (libcalls like __orhi3) uses the same JMS path.
 def : Pat<(i4004_call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
+
+// Global / external-symbol address -> LEA_GA (I4004ISD::WRAPPER).
+def : Pat<(i4004_wrapper (i16 tglobaladdr:$sym)), (LEA_GA tglobaladdr:$sym)>;
+def : Pat<(i4004_wrapper (i16 texternalsym:$sym)), (LEA_GA texternalsym:$sym)>;
 
 //===----------------------------------------------------------------------===//
 // Extend / truncate between i8 and i16.

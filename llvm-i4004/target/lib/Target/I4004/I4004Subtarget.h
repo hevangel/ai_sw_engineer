@@ -55,6 +55,8 @@ public:
     return &TLInfo;
   }
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override;
+
+  void initLibcallLoweringInfo(LibcallLoweringInfo &Info) const override;
 };
 
 } // end namespace llvm
