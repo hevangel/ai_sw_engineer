@@ -332,23 +332,11 @@ impl Num {
         // quotient has enough low digits. The quotient's lowest power is
         //   q_low_power = (o.scale as i16 - self.scale as i16 - gen) ... in
         // units of 10. We align via `point_shift` below.
-        let mut divd = [0u8; WIDE]; // dividend * 10^gen (little-endian)
-        for i in 0..n_digits {
-            let idx = i + gen.max(0) as usize;
-            if idx >= WIDE {
-                return None;
-            }
-            divd[idx] = self.digit(i);
-        }
-        let mut divs = [0u8; WIDE]; // divisor (little-endian)
-        let mut divs_hi = 0usize;
-        for (i, cell) in divs.iter_mut().enumerate().take(d_digits) {
-            let oi = o.digit(i);
-            *cell = oi;
-            if oi != 0 {
-                divs_hi = i;
-            }
-        }
+        let (mut divd, divs, divs_hi) =
+            match build_div_operands(self, o, gen, n_digits, d_digits) {
+                Some(x) => x,
+                None => return None,
+            };
 
         // Quotient power of the final result: value = Q * 10^qp where
         //   qp = (o.scale - self.scale) - gen  (since N was scaled by 10^gen)
@@ -377,43 +365,8 @@ impl Num {
         let q_is_zero = quo_int.iter().all(|&x| x == 0);
         // Power of the quotient's most-significant digit: q_msd + qp.
         let qp = o.scale as i16 - self.scale as i16 - gen;
-        let msd_power = q_msd as i16 + qp;
-        let int_digits = (msd_power + 1).max(0);
-
-        let final_frac: u8 = match frac {
-            Some(n) => n,
-            None => (FLOAT_SIG as i16 - int_digits).max(0) as u8,
-        };
-        if final_frac as usize > DIGITS {
-            return None;
-        }
-
-        // mantissa = Q * 10^(qp + final_frac); Num digit j holds Q digit
-        // at index (j - (qp + final_frac)).
-        let shift_pow = qp + final_frac as i16;
-        let mut quo = Num::ZERO;
-        for j in 0..DIGITS {
-            let qi = j as i16 - shift_pow;
-            if qi < 0 || qi as usize >= WIDE {
-                continue;
-            }
-            quo.set_digit(j, quo_int[qi as usize]);
-        }
-        // Overflow: any nonzero Q digit mapping to index >= DIGITS.
-        if !q_is_zero {
-            let top_j = q_msd as i16 + shift_pow;
-            if top_j >= DIGITS as i16 {
-                return None;
-            }
-        }
-        quo.scale = final_frac;
-        quo.neg = self.neg != o.neg;
-
-        if quo.is_zero() {
-            quo.neg = false;
-            quo.scale = 0;
-        }
-        Some(quo)
+        assemble_quotient(&quo_int, q_msd, q_is_zero, qp, frac,
+                          self.neg != o.neg)
     }
 
     /// Round or truncate to `frac` fractional digits per the rounding switch.
@@ -472,6 +425,73 @@ impl Num {
         n
     }
 }
+/// Assemble the final quotient Num from the little-endian integer quotient
+/// `quo_int` (MSD at index `q_msd`), quotient power `qp`, and the fixed/float
+/// `frac` mode; sign `neg`. `#[inline(never)]` to keep `divide` under a bank.
+#[inline(never)]
+fn assemble_quotient(quo_int: &[u8; WIDE], q_msd: usize, q_is_zero: bool,
+                     qp: i16, frac: Option<u8>, neg: bool) -> Option<Num> {
+    let msd_power = q_msd as i16 + qp;
+    let int_digits = (msd_power + 1).max(0);
+    let final_frac: u8 = match frac {
+        Some(n) => n,
+        None => (FLOAT_SIG as i16 - int_digits).max(0) as u8,
+    };
+    if final_frac as usize > DIGITS {
+        return None;
+    }
+    let shift_pow = qp + final_frac as i16;
+    let mut quo = Num::ZERO;
+    for j in 0..DIGITS {
+        let qi = j as i16 - shift_pow;
+        if qi < 0 || qi as usize >= WIDE {
+            continue;
+        }
+        quo.set_digit(j, quo_int[qi as usize]);
+    }
+    if !q_is_zero {
+        let top_j = q_msd as i16 + shift_pow;
+        if top_j >= DIGITS as i16 {
+            return None;
+        }
+    }
+    quo.scale = final_frac;
+    quo.neg = neg;
+    if quo.is_zero() {
+        quo.neg = false;
+        quo.scale = 0;
+    }
+    Some(quo)
+}
+
+/// Build the little-endian dividend (scaled up by 10^gen) and divisor buffers
+/// for `divide`. Returns None on dividend overflow. `#[inline(never)]` to keep
+/// `divide` under a ROM bank.
+#[inline(never)]
+fn build_div_operands(dividend: &Num, divisor: &Num, gen: i16, n_digits: usize,
+                      d_digits: usize) -> Option<([u8; WIDE], [u8; WIDE], usize)> {
+    let mut divd = [0u8; WIDE];
+    for i in 0..n_digits {
+        let idx = i + gen.max(0) as usize;
+        if idx >= WIDE {
+            return None;
+        }
+        divd[idx] = dividend.digit(i);
+    }
+    let mut divs = [0u8; WIDE];
+    let mut divs_hi = 0usize;
+    for (i, cell) in divs.iter_mut().enumerate().take(d_digits) {
+        let oi = divisor.digit(i);
+        *cell = oi;
+        if oi != 0 {
+            divs_hi = i;
+        }
+    }
+    Some((divd, divs, divs_hi))
+}
+
+
+
 
 /// Restoring long division: for each position from `dividend_hi` down to 0,
 /// count how many times the (shifted) divisor fits into the remaining dividend,
