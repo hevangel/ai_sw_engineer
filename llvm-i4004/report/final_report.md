@@ -1,5 +1,34 @@
 # llvm-i4004 final report
 
+## TOP FINDING (2026-10-19): the compiled firmware overflows the 3-level hardware stack — it cannot run correctly, banking or not
+
+The 4004 has only a **3-level** hardware return stack (`JMS` pushes, `BBL`
+pops). The backend lowers EVERY compiled call to `JMS` (395 `jms` in the
+firmware `.s`), but the firmware's call graph is far deeper than 3:
+`run → press → dispatch → add_sub → add_mag → reg_add` is already 6 deep, and
+mul/div/sqrt paths go deeper. So a linked image — flat OR banked — would
+**overflow the hardware return stack at runtime and corrupt the return chain.**
+No compiled image can run correctly until this is fixed. This is now the #1
+blocker to a running image, ahead of size/banking.
+
+**The fix (already specified in `abi.md` §4.4, never implemented): the
+software-return-stack calling convention.** A compiled call pushes a 3-nibble
+12-bit return token onto the P7 software stack and `JUN`s the callee (not
+`JMS`); the callee returns via a common `__soft_ret` that pops the token and
+`JIN`s back. This bypasses the hardware stack, so arbitrary call depth works.
+`JMS`/`BBL` stay ONLY for leaf libi4004rt/HAL helpers that keep total hardware
+depth ≤ 3 (asserted in the packer). Banking folds in cleanly: a cross-bank call
+is the SAME soft-stack mechanism with a bank nibble in the token + a latch write
+in `__soft_ret`, which also removes the JMS-trampoline depth wall ("Wall 2").
+
+**Key piece — the return dispatch (indirect 12-bit jump).** `JIN` sets PC[7:0]
+from a pair but keeps the current page. So `__soft_ret` reaches an arbitrary
+return page via a page-indexed table of `JUN`s to a one-byte `JIN P0` stub
+reserved at a fixed offset on EVERY ROM page (packer-reserved). Build +
+chips-test this return-dispatch core FIRST (hand-written depth-8 chain), then
+wire the backend `CALL`→`CALLSOFT` lowering. This reframes the project: a
+RUNNING whole-firmware image is gated on the software-call convention.
+
 ## HEADLINE FINDING (2026-10-19): the compiled firmware is ~11x too big for the 4004
 
 ### Size-reduction campaign (in progress) — instruction-mix profile of the 45,714 B
