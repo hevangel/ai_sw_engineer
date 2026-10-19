@@ -103,9 +103,34 @@ force DCL=0 at the compiled-function level instead.
 - LLVM build volume `ai-sw-llvm-build` is configured; incremental llc build ~1m.
 
 ## Next step (concrete)
-Root-cause the off.lo 0x20-bit corruption: instrument the chips soft stack
-(bank 0 chip 1, SRC 0x40+) to log every write with the active DCL, run the
-banked depth-5 repro, and find the write that clears the 0x20 bit of entry's
-token. That write is the DCL-slip (or a stub touching bank-0 RAM under DCL≠0).
-Fix it, get the banked frame exec green, THEN merge wip/dcl-frames into
-system/busicom_141pf-on-4004 and proceed to the firmware relink + 42-run.
+RESOLVED the root cause (next session: 2026-10-19, continued). The off.lo
+corruption is NOT a DCL-slip in our generated code — it is a simulator
+deviation: `external/chips`' 4002 (`ram4002.rs::set_register_control`, called on
+EVERY chip by `mcs4/mod.rs::run_cycle` on an SRC) latches the SRC select code
+WITHOUT checking the CM-RAM (DCL) bank line, so a bank-1 frame SRC clobbers the
+address latch of the same-chip-select bank-0 stack chip. The ai_hw_engineer RTL
+4002 (`design/intel_4002/src/intel_4002.sv`) guards the latch AND the response
+with `cm_ram_i` and is correct. Written up in
+`failure_notes/2026-10-19-chips-4002-src-latch-ignores-dcl.md`.
+
+Remaining work to close the brief (exec gate still RED, so NOT merged):
+1. Give the exec suite + the 42-run a FAITHFUL 4-bank RAM model. A naive
+   "gate the SRC latch by DCL" patch (proven in build/patch_chips.py) makes the
+   deep chain return but REGRESSES `big-chain` — the chips model decides
+   `active` at SRC time and never re-checks cm_ram at I/O time, so faithful
+   emulation must evaluate `selected = cm_ram && addr_match` at the WRM/RDM
+   instant. `external/chips` is read-only; do it in OUR
+   `platform/scripts/chips_trace.rs` (it already owns the ROM-bank swap — add a
+   correct 16×4002 bank-gated RAM path, replacing `Board`'s RAM), and mirror it
+   in the exec-test harnesses. OR bring up the RTL 4002 as the banked-frame
+   oracle. `chips_trace.rs` also can't build >4 rams via `Board::new` today
+   (u2 page panics) — same hand-built-rams workaround as run_ramdcl_exec.
+2. Then: whole exec suite green with frames in banks 1-3, merge
+   `wip/dcl-frames` into `system/busicom_141pf-on-4004`, push both, relink the
+   firmware (report ROM banks/bytes + frame RAM per bank), run the 42 examples
+   (`run_image.sh secondary --board xl` + `compare.sh`), report N/42 + first
+   divergence, debug toward 42/42.
+
+Build hygiene DONE this session: `build_llvm.sh` now force-deletes the I4004
+target objects after the overlay so ninja cannot skip recompiling edited backend
+files (committed).
