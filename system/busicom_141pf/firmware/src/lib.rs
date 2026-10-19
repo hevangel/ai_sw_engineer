@@ -316,8 +316,7 @@ impl Calculator {
     /// reprints only the op glyph with a BLANK value (2-8 `× ÷ ×`), the operand
     /// already latched.
     #[inline(never)]
-    fn mul_div_chain<P: Printer>(&mut self, op: MulOp, entered: bool,
-                                 sw: Switches, out: &mut P) {
+    fn mul_div_chain<P: Printer>(&mut self, op: MulOp, entered: bool, sw: Switches, out: &mut P) {
         // Chain: a new op after a pending multiply/divide. Echo the operand in
         // WR with the new op glyph, then compute the pending product/quotient,
         // whose result feeds the next op. Extracted from mul_div_key so each
