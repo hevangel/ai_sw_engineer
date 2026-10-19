@@ -148,6 +148,13 @@ impl Calculator {
             self.digit(digit);
             return;
         }
+        // The non-digit key match is extracted to keep dispatch under a ROM
+        // bank (the 4004 12-bit PC caps a function at one bank window).
+        self.dispatch_key(key, sw, out);
+    }
+
+    #[inline(never)]
+    fn dispatch_key<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         match key {
             Key::D00 => {
                 self.digit(0);

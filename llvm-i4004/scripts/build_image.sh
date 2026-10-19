@@ -81,6 +81,8 @@ status "i4004_pack: link $((${#objs[@]})) objects -> $out_dir/$software.bin (max
 pack_args=( --linker-script "$link" --max "$maxrom" --pad "$maxrom" --softcall )
 if [[ -n "${BANKS:-}" ]]; then
     pack_args+=( --banks "$BANKS" )
+    [[ -n "${COMMON_BYTES:-}" ]] && pack_args+=( --common-bytes "$COMMON_BYTES" )
+    [[ -n "${BANK_BYTES:-}" ]] && pack_args+=( --bank-bytes "$BANK_BYTES" )
 fi
 timeout 180 python3 "$root/asm/i4004_pack.py" "${objs[@]}" \
     -o "$out_dir/$software.bin" -m "$out_dir/$software.map" \

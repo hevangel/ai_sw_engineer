@@ -186,16 +186,8 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
             }
             return masks;
         }
-        // Numeric columns: map each glyph to its drum sector.
-        for (c, &g) in row.cols.iter().enumerate() {
-            let sector = match g {
-                b'0'..=b'9' => (g - b'0') as usize,
-                b'.' => 10,
-                b'-' => 12,
-                _ => continue, // blank column: no hammer
-            };
-            masks[sector] |= 1 << (NUMERIC_LSB as usize + c);
-        }
+        // Numeric columns (extracted to keep sector_masks under a ROM bank).
+        Self::numeric_masks(row, &mut masks);
         // Symbol column A (includes the rounded `^` mark via SymA::Rounded).
         if let Some(sector) = sym_a_sector(row.sym_a) {
             masks[sector] |= 1 << SYMBOL_A_BIT;
@@ -205,6 +197,21 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
             masks[sector] |= 1 << SYMBOL_B_BIT;
         }
         masks
+    }
+
+    /// Map each numeric-column glyph to its drum sector bit. Split out of
+    /// `sector_masks` as `#[inline(never)]` so each stays under a 4004 ROM bank.
+    #[inline(never)]
+    fn numeric_masks(row: &Row, masks: &mut [u32; SECTORS]) {
+        for (c, &g) in row.cols.iter().enumerate() {
+            let sector = match g {
+                b'0'..=b'9' => (g - b'0') as usize,
+                b'.' => 10,
+                b'-' => 12,
+                _ => continue, // blank column: no hammer
+            };
+            masks[sector] |= 1 << (NUMERIC_LSB as usize + c);
+        }
     }
 }
 
