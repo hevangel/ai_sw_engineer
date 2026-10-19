@@ -233,7 +233,7 @@ module busicom_141pf_xl (
             for (c = 0; c < 4; c++) begin : g_chip
                 localparam int IDX = b*4 + c;
                 localparam logic V1  = (c < 2) ? 1'b1 : 1'b0;  // chips 0,1:4002-1 2,3:4002-2
-                localparam logic PO  = (c & 1) ? 1'b1 : 1'b0;  // P0 strap
+                localparam logic PO  = (c % 2 == 1) ? 1'b1 : 1'b0;  // P0 strap
                 intel_4002 #(.Variant1(V1)) u_ram (
                     .clk(clk), .rst_n(rst_n),
                     .data_i(data_bus),
@@ -252,7 +252,7 @@ module busicom_141pf_xl (
     wire [3:0] ram1_port = ram_port[1];
 
     // Full 4-bit RAM1 (lamp) output port, exposed as a declared net so the
-    // Verilator harness can read it by a stable flattened name
+    // trace harness can read it by a stable flattened name
     // (busicom_141pf_xl__DOT__ram1_port4) with --public-flat-rw. The public
     // panel port lamps_o is only 3 bits wide, so the undocumented bit 3
     // (spec A9, set on overflow/negative) is observable only here, matching

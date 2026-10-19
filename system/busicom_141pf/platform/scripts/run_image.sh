@@ -152,9 +152,17 @@ EOF
     status "building chips adapter (cargo)"
     ( cd "$WORK/chips_trace" && CARGO_TARGET_DIR="$WORK/ct_target" cargo build --release >"$WORK/cargo.log" 2>&1 ) \
         || { tail -20 "$WORK/cargo.log" >&2; fail "chips adapter build failed"; }
-    # stock = 2 x 4002 (bank 0); xl = 16 x 4002 (4 banks). rams[0]/[1] keep the
-    # printer/lamp roles either way, so the decoded tape is identical.
-    if [[ $board == xl ]]; then ram_count=16; else ram_count=2; fi
+    # RAM 4002 count. stock = 2 (bank 0 chips 0,1).
+    # xl: the external `chips` board model stores a 4002's identity in a 2-bit
+    # page_mask and selects banks by chip-index/4, but Board::new sets
+    # page_mask = u2::new(raw_index), which PANICS for index >= 4 -- so the
+    # unmodified model (we must not edit external/) can represent only ONE
+    # CM-RAM bank of up to 4 chips. We therefore run chips with ram_count=4
+    # (bank 0 fully populated: chips 0-3). The full 16-chip / 4-bank xl board
+    # is validated on the RTL (primary) simulator instead; this is a FINDING
+    # about the secondary model's capacity, documented in README. rams[0]/[1]
+    # keep the printer/lamp roles, so the decoded tape is unchanged.
+    if [[ $board == xl ]]; then ram_count=4; else ram_count=2; fi
     status "running chips (board=$board, ram_count=$ram_count)"
     "$WORK/ct_target/release/chips_trace" "$image" "$schedule" "$ram_count" > "$out"
     ;;

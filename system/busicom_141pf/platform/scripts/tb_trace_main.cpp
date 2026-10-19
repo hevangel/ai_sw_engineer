@@ -91,7 +91,7 @@ struct Sim {
     Sim() {
         const char *e = getenv("BUSICOM_SPIN");
         if (e && *e) spin_cycles = atoi(e);
-        dut = new Vbusicom_141pf;
+        dut = new VTOP;
         dut->clk = 0; dut->rst_n = 0; dut->clr_n = 0;
         dut->test_i = 0; dut->drum_idx_i = 0; dut->panel_tick_i = 0;
         dut->keys_mask_i = 0; dut->precision_i = 0; dut->rounding_i = 0;
