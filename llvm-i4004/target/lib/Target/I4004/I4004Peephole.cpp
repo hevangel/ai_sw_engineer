@@ -134,8 +134,18 @@ bool I4004Peephole::runOnMachineFunction(MachineFunction &MF) {
             SrcPair = Register();
           continue;
         }
-        // Unknown form: fall through to generic def handling.
-        handleDefs(MI, nullptr);
+        // Unknown form (e.g. FIM pN, <symbol> for a per-function frame base,
+        // abi.md 4.4): the pair now holds a relocated address we cannot track,
+        // so it is NO LONGER a known immediate AND SRC's latch for that pair is
+        // stale. FIM models its pair as an INPUT operand ((outs) is empty), so
+        // handleDefs -- which keys on isDef() -- would NOT invalidate it; do it
+        // explicitly here, else a following `SRC pN` is wrongly elided (it was,
+        // dropping the leading SRC of a symbol-addressed spill and corrupting
+        // every per-function-frame store/reload).
+        if (PR)
+          invalidatePair(PR);
+        else
+          handleDefs(MI, nullptr);
         continue;
       }
 

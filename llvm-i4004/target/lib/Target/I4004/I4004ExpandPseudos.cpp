@@ -44,6 +44,15 @@ private:
   const I4004InstrInfo *TII = nullptr;
   const TargetRegisterInfo *TRI = nullptr;
 
+  // Per-function frame symbol (abi.md 4.4 / brief decision 1). A spilling or
+  // frame-local-addressing function F uses RAM chars [__frame_F ..) assigned by
+  // the packer's call-graph overlay so that frames live simultaneously on a
+  // call path never overlap. Frames live in CM-RAM bank 0 (with the firmware's
+  // data + soft stack), so a frame pointer (LEA_FI) dereferences with a plain
+  // SRC and needs no DCL bank select -- which could not compose with the
+  // firmware's many address-taken frame locals. Set once per function.
+  std::string FrameSym;      // "__frame_<fn>"
+
   // Return the hi (sub_hi) and lo (sub_lo) nibble physical registers of a pair.
   std::pair<Register, Register> nibbles(Register Pair) const {
     Register Hi = TRI->getSubReg(Pair, I4004::sub_hi);
@@ -348,13 +357,19 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
   }
 
   case I4004::LEA_FI: {
-    // dst(DR16) = RAM address of the slot (operand1 = resolved char addr, low
-    // byte); high byte 0.
+    // dst(DR16) = RAM address of a frame slot. Operand1 is the WITHIN-FRAME
+    // char offset (set by eliminateFrameIndex); the low pair is __frame_<fn> +
+    // off (R_I4004_IMM8, packer-assigned per-function base in bank 0), high
+    // pair 0. Because frames live in bank 0 the resulting pointer dereferences
+    // with a plain SRC, so address-taken frame locals keep working.
     Register Dst = MI.getOperand(0).getReg();
-    int64_t Addr = MI.getOperand(1).getImm() & 0xFF;
+    int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     Register LoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
     Register HiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
-    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(LoP).addImm(Addr);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(LoP)
+        .addExternalSymbol(FrameSym.c_str(), Off);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
     MI.eraseFromParent();
     return true;
@@ -527,12 +542,16 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
 
   case I4004::SPILL8:
   case I4004::SPILL16: {
-    // RAM[spillslot] = src. Operand1 is the resolved char-base immediate. The
-    // chars are consecutive (Base, Base+1, ...), so materialize the address
-    // ONCE with FIM P0, Base and walk with INC between nibbles instead of a
-    // fresh FIM per char (FIM is 2 bytes and was ~33% of the image).
+    // RAM[frame + off] = src, in this function's per-function frame. Operand1 is
+    // the WITHIN-FRAME char offset (set by eliminateFrameIndex); the base char
+    // comes from the external symbol __frame_<fn> (packer-assigned by a
+    // call-graph overlay, brief decision 1) so a callee never clobbers a
+    // caller's spills. Frames live in CM-RAM bank 0 alongside the firmware's
+    // data and soft stack, so a frame POINTER (LEA_FI) dereferences with a
+    // plain SRC -- no DCL bank bracket, which could not compose with the
+    // firmware's 376 address-taken frame locals.
     Register Src = MI.getOperand(0).getReg();
-    int64_t Base = MI.getOperand(1).getImm() & 0xFF;
+    int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     const bool Wide = (MI.getOpcode() == I4004::SPILL16);
     SmallVector<Register, 2> Pairs;
     if (Wide) {
@@ -542,13 +561,14 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       Pairs.push_back(Src);
     }
     Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
-    // Flatten the nibble sequence (low then high of each pair, consecutive).
     SmallVector<Register, 4> Nibs;
     for (Register P : Pairs) {
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
     }
-    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Base);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(I4004::P0)
+        .addExternalSymbol(FrameSym.c_str(), Off);
     for (unsigned i = 0; i < Nibs.size(); ++i) {
       BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
       BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Nibs[i]);
@@ -563,7 +583,7 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
   case I4004::RELOAD8:
   case I4004::RELOAD16: {
     Register Dst = MI.getOperand(0).getReg();
-    int64_t Base = MI.getOperand(1).getImm() & 0xFF;
+    int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     const bool Wide = (MI.getOpcode() == I4004::RELOAD16);
     SmallVector<Register, 2> Pairs;
     if (Wide) {
@@ -578,7 +598,9 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
     }
-    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Base);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(I4004::P0)
+        .addExternalSymbol(FrameSym.c_str(), Off);
     for (unsigned i = 0; i < Nibs.size(); ++i) {
       BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
       BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
@@ -596,6 +618,12 @@ bool I4004ExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   const I4004Subtarget &STI = MF.getSubtarget<I4004Subtarget>();
   TII = STI.getInstrInfo();
   TRI = STI.getRegisterInfo();
+
+  // Per-function frame symbol (brief decision 1). The packer defines
+  // __frame_<fn> (RAM char base, bank 0) for every function that uses a frame;
+  // a function with no frame access emits no reference, so the packer never
+  // allocates one for it.
+  FrameSym = ("__frame_" + MF.getName()).str();
 
   bool Changed = false;
 

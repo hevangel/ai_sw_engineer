@@ -38,6 +38,7 @@ Page-local policy (abi.md sec.5.1, isa.md sec.9):
 from __future__ import annotations
 
 import argparse
+import os
 import struct
 import sys
 from dataclasses import dataclass, field
@@ -318,6 +319,19 @@ class Linker:
         return (fn.startswith("__") or fn.startswith("_start")
                 or fn.startswith("reg_") or fn in ("memset", "memcpy", "memmove")
                 or fn.startswith("__bankcall_"))
+
+    @staticmethod
+    def _is_leaf_helper(fn: str) -> bool:
+        """A hand-written leaf runtime/HAL helper that holds no RAM frame and,
+        by the abi.md 4.4.2 leaf rule (_assert_leaf_depth), makes no CALLSOFT to
+        a compiled function. Used by _alloc_frames to drop such nodes from the
+        frame call graph (they carry no frame liveness, and a widely-shared one
+        like __memcpy_ram would otherwise fabricate spurious cycles). `fn` is a
+        bare function name (no .text. prefix)."""
+        return (fn.startswith("__") or fn.startswith("_start")
+                or fn.startswith("reg_")
+                or fn in ("memset", "memcpy", "memmove"))
+
 
 
     # -- symbol resolution --------------------------------------------------
@@ -1156,6 +1170,216 @@ class Linker:
             raise LinkError(
                 f".data ROM load image overflows ROM budget ({self.data_rom_end} > {self.rom_len})")
 
+    def _alloc_frames(self):
+        """Per-function RAM frame allocation via a call-graph OVERLAY (abi.md
+        4.4 / brief decision 1). The backend addresses every spill/reload and
+        every frame-local pointer relative to an undefined symbol __frame_<fn>
+        (char offset within fn's frame). Here we:
+
+          1. discover each fn's frame SIZE = max(addend)+2 over the relocs that
+             reference its __frame_<fn> (chars; a SPILL16 walks up to 4 chars so
+             the +2 term is conservative per slot and the max already covers the
+             widest slot touched);
+          2. build the call graph (caller fn -> callee fn) from ADDR12 relocs
+             between distinct firmware .text sections -- an OVER-approximation
+             (it also counts a tail `jun`), which is SAFE: it can only force two
+             frames apart that might not strictly need to be;
+          3. topologically order and assign base(fn) = max over callers P of
+             (base(P)+size(P)); a function's frame is live across all its
+             transitive callees, so this guarantees no two simultaneously-live
+             frames overlap while letting siblings reuse the same chars;
+          4. FAIL LOUDLY on a cycle (recursion would need an SSP-relative frame,
+             which this scheme does not provide);
+          5. place all frames in CM-RAM bank 0, after the firmware data+bss and
+             clear of the soft stack, and assert the total fits.
+
+        Sets linker_syms['__frame_<fn>'] = absolute char base. Functions that
+        never touch a frame get no symbol (none is referenced)."""
+        FRAME_PREFIX = "__frame_"
+        # 1. frame sizes, and map fn-name -> its .text section id (for the graph)
+        frame_size = {}          # fn-name -> size in chars
+        for obj in self.objs:
+            for sec in obj.sections:
+                rels = obj.relocs.get(sec.index)
+                if not rels:
+                    continue
+                for rel in rels:
+                    sym = obj.symbols[rel.sym]
+                    nm = sym.name or ""
+                    if nm.startswith(FRAME_PREFIX):
+                        fn = nm[len(FRAME_PREFIX):]
+                        need = (rel.addend & 0xFF) + 2
+                        if need > frame_size.get(fn, 0):
+                            frame_size[fn] = need
+        if not frame_size:
+            return   # nothing spills / takes a frame address
+        # section base address -> fn-name (a .text.<fn> section), for edges.
+        secbase_fn = {}
+        fn_of_secid = {}
+        for obj in self.objs:
+            for sec in obj.sections:
+                if classify(sec.name) != "rom" or sec.base < 0:
+                    continue
+                nm = sec.name
+                fn = None
+                if nm.startswith(".text."):
+                    fn = nm[len(".text."):]
+                if fn is not None:
+                    secbase_fn[sec.base] = fn
+                    fn_of_secid[id(sec)] = fn
+        # 2. call-graph edges caller_fn -> callee_fn (ADDR12 between distinct fns)
+        succ = {fn: set() for fn in frame_size}
+        allfns = set(frame_size)
+        for obj in self.objs:
+            for sec in obj.sections:
+                if classify(sec.name) != "rom" or sec.base < 0:
+                    continue
+                caller = fn_of_secid.get(id(sec))
+                if caller is None:
+                    continue
+                rels = obj.relocs.get(sec.index)
+                if not rels:
+                    continue
+                for rel in rels:
+                    if rel.rtype != R_I4004_ADDR12:
+                        continue
+                    to = self._target_addr(obj, rel)
+                    callee = secbase_fn.get(to) if to is not None else None
+                    if callee is not None and callee != caller:
+                        # A leaf rt/mem helper (no __frame_ reloc of its own)
+                        # holds no frame and, by the leaf-depth invariant
+                        # (_assert_leaf_depth), makes no CALLSOFT to a compiled
+                        # function -- so it carries no frame liveness between a
+                        # caller and a callee. Excluding it as a graph node both
+                        # keeps the overlay tight and avoids spurious cycles from
+                        # a shared helper that many functions reference.
+                        if callee not in frame_size and self._is_leaf_helper(callee):
+                            continue
+                        if caller not in frame_size and self._is_leaf_helper(caller):
+                            continue
+                        allfns.add(caller); allfns.add(callee)
+                        succ.setdefault(caller, set()).add(callee)
+                        succ.setdefault(callee, set())
+                        if os.environ.get("I4004_FRAME_EDGES"):
+                            import sys as _sys
+                            print(f"[edge] {caller} ==> {callee}",
+                                  file=_sys.stderr)
+        for fn in allfns:
+            frame_size.setdefault(fn, 0)
+            succ.setdefault(fn, set())
+        # 3+4. topological order (Kahn) with cycle detection, then overlay base.
+        # 3+4. The reference graph built from ADDR12 edges OVER-approximates
+        # calls: it also captures TAIL calls (a `jun callee` that ends the
+        # caller, where the caller's frame is already dead) and the central
+        # dispatcher pattern where many helpers `jun` back into Calculator
+        # ::compute. Those back-edges are NOT frame-liveness edges (the firmware
+        # is provably non-recursive in real call depth -- a true cycle would
+        # already overflow the hardware/soft return stack). So we break cycles
+        # by DROPPING back-edges found in a DFS, leaving a DAG whose edges are
+        # the frame-liveness (caller-live-across-callee) edges, then assign
+        # base(fn)=max over DAG-predecessors P of (base(P)+size(P)).
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color = {fn: WHITE for fn in allfns}
+        dropped = 0
+        dag = {fn: set() for fn in allfns}
+        # Seed the DFS from the natural ROOTS (no incoming reference) first, so
+        # forward call edges (root -> ... -> leaf) are KEPT and only the true
+        # back-edges (a leaf/helper `jun`ing back toward the dispatcher, i.e. a
+        # tail call where the caller frame is dead) are dropped. A root-first
+        # order makes the kept DAG match the real live-across-call direction.
+        orig_indeg = {fn: 0 for fn in allfns}
+        for fn in allfns:
+            for c in succ[fn]:
+                orig_indeg[c] += 1
+        roots = sorted(allfns, key=lambda fn: (orig_indeg[fn], fn))
+        # iterative DFS to avoid recursion limits on a deep graph
+        for root in roots:
+            if color[root] != WHITE:
+                continue
+            stack = [(root, iter(sorted(succ[root])))]
+            color[root] = GRAY
+            while stack:
+                fn, it = stack[-1]
+                advanced = False
+                for c in it:
+                    if color[c] == GRAY:
+                        # back-edge -> cycle; drop it (tail call / non-live ref)
+                        dropped += 1
+                        continue
+                    dag[fn].add(c)
+                    if color[c] == WHITE:
+                        color[c] = GRAY
+                        stack.append((c, iter(sorted(succ[c]))))
+                        advanced = True
+                        break
+                if not advanced:
+                    color[fn] = BLACK
+                    stack.pop()
+        if dropped and os.environ.get("I4004_FRAME_DEBUG"):
+            import sys as _sys
+            print(f"[frames] dropped {dropped} back-edge(s) (tail calls / "
+                  f"dispatcher re-entries) to break reference cycles",
+                  file=_sys.stderr)
+        # topological base assignment over the DAG (Kahn).
+        indeg = {fn: 0 for fn in allfns}
+        for fn in allfns:
+            for c in dag[fn]:
+                indeg[c] += 1
+        from collections import deque
+        q = deque(sorted(fn for fn in allfns if indeg[fn] == 0))
+        topo = []
+        base = {fn: 0 for fn in allfns}
+        while q:
+            fn = q.popleft()
+            topo.append(fn)
+            for c in sorted(dag[fn]):
+                if base[fn] + frame_size[fn] > base[c]:
+                    base[c] = base[fn] + frame_size[fn]
+                indeg[c] -= 1
+                if indeg[c] == 0:
+                    q.append(c)
+        if len(topo) != len(allfns):
+            # Should not happen after back-edge removal; guard defensively.
+            leftover = sorted(fn for fn in allfns if indeg[fn] > 0)
+            raise LinkError(
+                "frame overlay: residual cycle after back-edge removal among "
+                f"{leftover[:8]}{'...' if len(leftover) > 8 else ''} -- a true "
+                "recursion needs an SSP-relative frame (abi.md 4.4).")
+        # 5. Place frames in CM-RAM BANK 0 (SRC-addressable low byte), after the
+        # linker's data/bss arena and clear of the firmware's reserved working
+        # set / I/O chips (handle < 0x20 on the xl board). Frames MUST be in
+        # bank 0 because the firmware reaches frame locals through POINTERs
+        # (LEA_FI -> LDRAMi8/STRAMi8) that dereference with a plain SRC under the
+        # current DCL bank; a frame in another CM-RAM bank would need every such
+        # deref to DCL-switch, which the opaque 16-bit pointer handle cannot
+        # drive. The soft stack lives in CM-RAM bank 1 (handle 0x100+) on the xl
+        # board, so it shares no physical 4002 with a bank-0 frame.
+        frame_origin = self.ram_origin + self.ram_used
+        if frame_origin < 0x20:
+            frame_origin = 0x20
+        total = max((base[fn] + frame_size[fn] for fn in allfns), default=0)
+        FRAME_RAM_LIMIT = 0x100   # CM-RAM bank 0 addressable SRC chars
+        if frame_origin + total > FRAME_RAM_LIMIT:
+            worst = max(allfns, key=lambda fn: base[fn] + frame_size[fn])
+            raise LinkError(
+                f"frame overlay: {len(allfns)} per-function frames need "
+                f"{total} chars from 0x{frame_origin:x} (deepest reaches "
+                f"0x{frame_origin+total:x} via '{worst}'), exceeding CM-RAM "
+                f"bank 0's SRC space (0x{FRAME_RAM_LIMIT:x}). Shrink spilling, "
+                f"split functions, or free bank-0 chars.")
+        for fn in allfns:
+            self.linker_syms[FRAME_PREFIX + fn] = frame_origin + base[fn]
+        self.frame_overlay_total = total
+        self.frame_overlay_origin = frame_origin
+        self.frame_count = len(allfns)
+        if os.environ.get("I4004_FRAME_DEBUG"):
+            import sys as _sys
+            print(f"[frames] {len(allfns)} fns, total {total} chars from "
+                  f"0x{frame_origin:x}", file=_sys.stderr)
+            for fn in sorted(allfns):
+                print(f"  __frame_{fn} = 0x{frame_origin+base[fn]:x} "
+                      f"size {frame_size[fn]}", file=_sys.stderr)
+
     def _linker_defined(self):
         self.linker_syms["__sstack_base"] = self.stack_origin
         self.linker_syms["__sstack_top"] = self.stack_origin + self.stack_len
@@ -1555,6 +1779,7 @@ class Linker:
         self._place_rom()
         self._place_ram()
         self._linker_defined()
+        self._alloc_frames()
         if self.banks:
             if getattr(self, "want_softcall", False):
                 # Soft-call banking: the return dispatch (__soft_ret, push

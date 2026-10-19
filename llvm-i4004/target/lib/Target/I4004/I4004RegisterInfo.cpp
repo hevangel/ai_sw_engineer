@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/IR/Function.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -62,27 +63,27 @@ bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineFunction &MF = *MI.getParent()->getParent();
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex);
 
-  // SPILL/RELOAD carry the slot as a frame index in a dedicated operand; turn
-  // it into an absolute 4002-RAM char offset (spill region base + byte offset,
-  // 2 chars per byte cell). The spill region is RAM chip0 reg3 (chars 0..15),
-  // giving 8 byte-cells (abi.md sec.2.1 reserves chip0/reg0 for the imaginary
-  // file; we use reg3 for compiler spills). Base char = 0x30 | char (chip0
-  // reg3 => SRC high nibble bits [5:4]=3). Each slot is a byte = 2 chars.
+  // SPILL/RELOAD/LEA_FI carry the slot as a frame index in a dedicated
+  // operand. Per-function frames (abi.md 4.4, brief decision 1): instead of a
+  // single fixed shared RAM region (the old 0x30/reg3 base, which every
+  // function reused so a callee clobbered its caller's spills), convert the FI
+  // to the WITHIN-FRAME char offset. I4004ExpandPseudos then emits the access
+  // against the external symbol __frame_<fn> (RAM char base, assigned
+  // per-function by the packer's call-graph overlay, bank 0). We use the frame
+  // INDEX (not getObjectOffset) as the slot number so each distinct stack
+  // object -- including a callee-saved-register spill slot -- gets its own
+  // chars; StackGrowsUp can map two distinct objects to offset 0, which would
+  // alias a CSR save with a spill in the same function.
   unsigned Op = MI.getOpcode();
   if (Op == I4004::SPILL8 || Op == I4004::SPILL16 || Op == I4004::RELOAD8 ||
-      Op == I4004::RELOAD16) {
-    int Slot = Offset < 0 ? -Offset : Offset; // normalize
-    int CharBase = 0x30 + (Slot * 2);          // reg3, 2 chars/byte
-    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
-    return false;
-  }
-  if (Op == I4004::LEA_FI) {
-    // Stack-argument / local slot area: RAM chip0 reg2 (SRC high nibble [5:4]=2
-    // => base 0x20), 2 chars per byte cell. The pointer's low byte is the SRC
-    // address; the high byte (bank/extended) is 0.
-    int Slot = Offset < 0 ? -Offset : Offset;
-    int CharBase = 0x20 + (Slot * 2);
-    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
+      Op == I4004::RELOAD16 || Op == I4004::LEA_FI) {
+    int Slot = FrameIndex < 0 ? -FrameIndex : FrameIndex; // index -> slot
+    (void)Offset;
+    if (getenv("I4004_FRAME_DEBUG"))
+      errs() << "FRAME " << MF.getName() << " op=" << Op
+             << " FI=" << FrameIndex << " off=" << Offset
+             << " -> char " << (Slot * 2) << "\n";
+    MI.getOperand(FIOperandNum).ChangeToImmediate((Slot * 2) & 0xFF);
     return false;
   }
 
