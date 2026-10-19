@@ -60,11 +60,37 @@ def store_pair(result_pair, char_lo, char_hi):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("helper", help="symbol name, e.g. __mulqi3")
-    ap.add_argument("--a", type=lambda s: int(s, 0), default=0, help="first i8 arg")
-    ap.add_argument("--b", type=lambda s: int(s, 0), default=0, help="second i8 arg")
+    ap.add_argument("--a", type=lambda s: int(s, 0), default=0, help="first arg")
+    ap.add_argument("--b", type=lambda s: int(s, 0), default=0, help="second arg")
     ap.add_argument("--two-out", action="store_true",
                     help="helper leaves a second output in P3 (div: remainder); store it too")
+    ap.add_argument("--wide", action="store_true",
+                    help="16-bit (hi3) helper: args are i16 in D1 (P2:P3) and D2 "
+                         "(P4:P5), result is i16 in D1 (P2:P3). Stores 4 result "
+                         "nibbles to RAM0/reg0 char0..3 (low byte first, each "
+                         "byte low-nibble then high-nibble).")
     args = ap.parse_args()
+
+    if args.wide:
+        a, b = args.a & 0xffff, args.b & 0xffff
+        lines = [TEMPLATE_HEAD.format(helper=args.helper, inputs=f"a={a} b={b}")]
+        body = []
+        # i16 a in D1 = P2:P3 (P2 = low byte, P3 = high byte); FIM loads a pair
+        # as 0xHHLL -> Reven=HH (pair high nibble), Rodd=LL (pair low nibble),
+        # i.e. FIM pN,0xVV sets the pair to byte value 0xVV. So the low byte of a
+        # goes in P2, the high byte in P3.
+        body.append(f"\tfim\tp2, 0x{a & 0xff:02x}")        # a low byte
+        body.append(f"\tfim\tp3, 0x{(a >> 8) & 0xff:02x}") # a high byte
+        body.append(f"\tfim\tp4, 0x{b & 0xff:02x}")        # b low byte
+        body.append(f"\tfim\tp5, 0x{(b >> 8) & 0xff:02x}") # b high byte
+        body.append(f"\tjms\t{args.helper}")
+        # result i16 in D1: low byte P2 (R4 hi, R5 lo), high byte P3 (R6 hi, R7 lo)
+        body += store_pair(("r4", "r5"), 0x00, 0x01)  # result low byte -> char0/1
+        body += store_pair(("r6", "r7"), 0x02, 0x03)  # result high byte -> char2/3
+        lines.append("\n".join(body) + "\n")
+        lines.append(TEMPLATE_TAIL)
+        sys.stdout.write("".join(lines))
+        return
 
     a, b = args.a & 0xff, args.b & 0xff
     lines = [TEMPLATE_HEAD.format(helper=args.helper, inputs=f"a={a} b={b}")]

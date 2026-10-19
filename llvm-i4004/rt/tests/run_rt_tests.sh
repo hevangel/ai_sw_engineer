@@ -143,6 +143,51 @@ if [[ -f "$RT/logic.s" ]]; then
   done; done
 fi
 
+# --- 16-bit (hi3) helpers: args in D1/D2, i16 result in D1 -------------------
+# nib k of value v (0=low .. 3=high); stored order is char0=byte0.lo,
+# char1=byte0.hi, char2=byte1.lo, char3=byte1.hi.
+nib(){ echo $(( ($1 >> (4*$2)) & 0xf )); }
+
+# run_wide <helper_src_list> <sym> <a16> <b16> <exp16>
+run_wide(){
+  local srcs="$1" sym="$2" a="$3" b="$4" exp="$5"
+  local stub="$WORK/stub.s" img="$WORK/img.bin"
+  python3 "$GEN" "$sym" --a "$a" --b "$b" --wide > "$stub"
+  local objs=()
+  $B/llvm-mc -triple i4004 --filetype=obj "$stub" -o "$WORK/stub.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble wide stub ($sym a=$a b=$b)"; }
+  objs+=("$WORK/stub.o")
+  local i=0
+  for s in $srcs; do
+    $B/llvm-mc -triple i4004 --filetype=obj "$RT/$s" -o "$WORK/hw$i.o" 2>"$WORK/mc.log" \
+        || { cat "$WORK/mc.log" >&2; fail "assemble $s"; }
+    objs+=("$WORK/hw$i.o"); i=$((i+1))
+  done
+  python3 "$PACK" "${objs[@]}" -o "$img" --pad-pages --pad 1280 >/dev/null 2>"$WORK/pk.log" \
+      || { cat "$WORK/pk.log" >&2; fail "link wide ($sym a=$a b=$b)"; }
+  local got; got=$("$HARNESS" "$img" "$CYCLES" 4)
+  local want="$(nib $exp 0) $(nib $exp 1) $(nib $exp 2) $(nib $exp 3)"
+  if [[ "$got" == "$want" ]]; then
+    pass=$((pass+1))
+  else
+    failc=$((failc+1))
+    echo "MISMATCH $sym a=$a b=$b: got [$got] want [$want]" >&2
+  fi
+}
+
+status "=== logic16: __andhi3 / __orhi3 / __xorhi3 (i16) ==="
+if [[ -f "$RT/logic16.s" ]]; then
+  for a in 0 0x00FF 0xFF00 0x5555 0xAAAA 0xFFFF 0x1234 0x8001 0x0F0F; do
+    for b in 0 0x00FF 0xFF00 0x5555 0xAAAA 0xFFFF 0xABCD 0x8000 0xF0F0; do
+      av=$(( a & 0xffff )); bv=$(( b & 0xffff ))
+      an=$(( av & bv )); orr=$(( av | bv )); xr=$(( av ^ bv ))
+      run_wide "logic16.s" __andhi3 "$av" "$bv" "$an"
+      run_wide "logic16.s" __orhi3  "$av" "$bv" "$orr"
+      run_wide "logic16.s" __xorhi3 "$av" "$bv" "$xr"
+    done
+  done
+fi
+
 echo "" >&2
 status "RESULT: $pass passed, $failc failed"
 [[ "$failc" == 0 ]] || exit 1

@@ -1,5 +1,73 @@
 # llvm-i4004 final report
 
+## Status (2026-10-19, branch `system/busicom_141pf-on-4004`): whole firmware now lowers 43/43; NOT yet linked/run
+
+### Done this session (all committed + pushed to the branch, lit 26/26 green)
+1. **Reverted the hanging cherry-pick 7f191be.** Its i16 AND/OR/XOR split
+   (TRUNCATE/SRL(i16)/SHL(i16)/ZEXT sub-nodes) re-entered the i16 shift custom
+   lowering and `llc` spun forever (the 4–6 h "hangs" the parent killed).
+   i16 bitwise now lowers directly to `__{and,or,xor}hi3`. Regression guard:
+   `llvm-i4004/tests/codegen/bitwise_noloop.ll`, and `gen_worklist.py` now wraps
+   each `llc` in a `LLC_TIMEOUT` (default 30 s) so a loop is a recorded
+   `hang:infinite-loop` failure, never an unbounded wait. **Every `llc`/`llvm-mc`
+   invocation in this work is `timeout`-wrapped; treat exit 124 as a bug.**
+2. **Fixed the `$d2` verifier abort** (`Using an undefined physical register
+   $d2`). A callee returning `{ i16, ptr }` puts its 2nd word in D2 = P4:P5, but
+   P4/P5 were callee-saved and the CALL pseudo did not define them. D1 and D2 are
+   now both **caller-saved** i16 arg/return pairs; only **P6** stays
+   callee-saved (abi.md §4.3 updated; `CSR_I4004`, `getCalleeSavedRegs`, CALL
+   `Defs` updated).
+3. **Implemented branch analysis** (`analyzeBranch`/`insertBranch`/`removeBranch`
+   on `I4004InstrInfo`) — the BranchFolder aborted with "Target didn't implement
+   insertBranch" when tail-merging. Only the unconditional `BR`(→JUN) is modelled;
+   the conditional pseudos are reported unanalyzable. Fixes `Row::number`.
+4. **Narrowed firmware `bcd::add_small` `v: u32` → `u16`** (both callers pass
+   `< 100`; the loop only shrinks it). This removed the `__udivsi3`/`__mulsi3`
+   i32 libcalls whose operands exceeded the double-pair register file
+   ("ran out of registers"). **Host tests stay 42/42 exact** (`cargo test`:
+   12 unit + manual_examples + port_level + port_trace all green).
+
+**Result: `gen_worklist.py` now reports 43/43 firmware functions select cleanly
+(was 39/43), 0 fail, 0 hang.** The whole module emits `.s` via `llc` and all
+runtime/crt0/hal `.s` files assemble with our `llvm-mc`.
+
+### The remaining path to the acceptance test (NOT done — next session resumes here)
+The end-to-end image is **not built or run yet**. Concrete blockers, in order:
+
+A. **`llvm-i4004/scripts/build_image.sh` is still the exit-2 stub.** It must chain
+   `llc -mtriple=i4004 -filetype=obj` (firmware) + `llvm-mc` (crt0.s, the runtime
+   `.s`, hal.s) → `asm/i4004_pack.py --board xl` (link_xl.ld, `--pad-pages
+   --pad 4096`). All the pieces exist; only the driver is missing.
+
+B. **libi4004rt is missing the i16 (`hi3`) arithmetic/shift helpers.** The
+   firmware references `__andhi3 __orhi3 __xorhi3 __ashlhi3 __ashrhi3 __lshrhi3
+   __mulhi3 __udivhi3`. **Done this session: the three BITWISE hi3 helpers**
+   (`llvm-i4004/rt/logic16.s`, bit-serial per byte like the qi3 forms) —
+   execution-tested on `external/chips` (`rt/tests/run_rt_tests.sh quick`:
+   **867/867 pass**, incl. 243 new i16 bitwise cases; the harness `gen_rt_test.py`
+   now supports `--wide` i16 args in D1/D2 and a 4-nibble i16 result). **Still
+   TODO:** `__ashlhi3 __ashrhi3 __lshrhi3` (i16 variable shifts — a per-bit loop
+   over 16 bits with the n-counter), `__mulhi3` (i16×i16→i16, shift-and-add over
+   16 bits), `__udivhi3` (i16 restoring division). Write each in MCS-4 asm and
+   add a `--wide` case to the harness (the shift/mul/udiv wide refs are easy to
+   compute in the bash oracle). Also: the firmware emits `memset`/`memcpy`
+   (standard RTLIB names) but the runtime defines `__memset_ram`/`__memcpy_ram`
+   — add `.set memset, __memset_ram` aliases (nibble-vs-byte count: the RTLIB
+   count is bytes, the _ram helper counts nibbles = 2×bytes, so the alias needs
+   a count-doubling shim, not a bare alias) or retarget the libcall names in
+   `Subtarget::initLibcallLoweringInfo`.
+
+C. Only then: `run_image.sh secondary --board xl` over the 42 examples, diff with
+   `platform/scripts/compare.sh` against `firmware/oracle/rom_port_trace.txt`,
+   debug divergences against the (exact) host firmware, then `run_image.sh
+   primary --board xl` on the ai_hw_engineer RTL. Then report image size vs
+   1280/4096 B and RAM use; reduce if over 4096.
+
+Nothing below this line was changed this session; it is the prior milestone-3b
+report, kept for history.
+
+---
+
 ## Status: milestone 3b — CodeGen compiles 39/43 Busicom firmware functions
 
 `llc -mtriple=i4004` lowers LLVM IR to real MCS-4 assembly our own `llvm-mc`
