@@ -14,22 +14,35 @@
 | regops block primitives (add/sub/cmp/is_zero) | 40,736 | −688 | Tier-A, chips-tested 10/10 |
 | **target** | **≤ 4,096** | | 4004 ROM max |
 
-**CRITICAL GATE now reached: far-branch relaxation.** `build_image.sh` no longer
-fails on symbols — it fails because functions exceed 256 bytes (e.g. `memory_add`
-= 760 B) and `--pad-pages` cannot keep them page-local. The 4004's `JCN`/`ISZ`
-address field is 8-bit (within the current 256-byte ROM page), so a function
-larger than a page has intra-function conditional branches that cannot be
-encoded. **No image links until this is solved**, independent of total size.
-Two implementations:
-  (a) backend: emit every conditional branch in the page-safe relaxed form
-      `JCN !cc, .skip ; JUN Dest ; .skip:` (the JCN skips a 3-byte JUN, always
-      same-page; JUN reaches the full 12-bit space). +2 bytes per branch (~716),
-      then drop `--pad-pages` (no branch is page-local any more). Done in
-      `emitBrCC` / the BRZ/BRNZ expansion, inserting the skip block.
-  (b) packer: a fixed-point layout in `i4004_pack.py` — lay out, find cross-page
-      `R_I4004_PAGE8` JCN/ISZ, rewrite each to the relaxed sequence, grow that
-      function, re-lay-out until stable. The packer already has final addresses.
-(a) is simpler to get correct and is the recommended path.
+**GATE CLEARED: far-branch relaxation DONE (option a).** `I4004BranchRelax`
+(after ExpandPseudos) rewrites every conditional branch page-independently:
+`JCN cc,Dest -> JCN !cc,.Lcont ; JUN Dest ; .Lcont:` and `ISZ Rn,Dest -> ISZ
+Rn,.Ltaken ; JUN .Lcont ; .Ltaken: JUN Dest`. build_image.sh dropped
+`--pad-pages`. lit 26/26; **execution-tested on chips** with a 647-byte
+3-page function whose loop back-edge and compares straddle pages
+(`llvm-i4004/tests/exec/run_relax_test.sh`: result correct). Cost +1,378 B
+(40,736 -> 42,114). The xl link now gets PAST the page-local error and fails
+only on TOTAL SIZE: `ROM image 43,552 bytes exceeds budget 4096`. So the whole
+firmware is now LINKABLE given enough ROM.
+
+**Item 2 (Tier-3 bank-switched ROM) — scope + a key constraint.** At 43,552 B
+the image needs ~11 x 4 KiB banks. Banking design: a bank latch on a spare 4001
+output port; bank 0's low page(s) are COMMON (crt0, HAL glue, hot libi4004rt,
+cross-bank trampolines); a cross-bank call is `JMS trampoline` in the common
+page that saves the caller bank on the P7 soft stack, sets the latch, `JMS`es
+the target, restores the latch, `BBL`s; the packer assigns functions to banks
+(call-graph-aware) and rewrites cross-bank calls. **Constraint:** the native
+4004 12-bit PC already addresses 16 x 4001 = 4096 B with NO banking, which the
+unmodified `external/chips` model supports (chip_index = addr[11:8]); banking is
+only needed ABOVE 4096 B. The chips model cannot be modified (no license), so
+chips banking must be done in the ADAPTER (`platform/scripts/chips_trace.rs`):
+intercept the latch write and reload `Board.roms[]` with the selected bank's
+4 KiB. The RTL xl top adds the latch to its ROM decode. Both then memory-tested
+(code in each bank, calls across banks) before the 42-example run.
+
+NOTE: Tiers A/B aim to shrink the image toward 4096 B; if they reach it, banking
+is unnecessary (16 native ROMs suffice) and the image runs directly. Banking is
+the fallback to get a RUNNING image before the size work completes.
 
 Still ~10x over on total size too; the structural levers (MachineOutliner via the
 SOFTWARE stack, base-pointer addressing, more regops conversions of the heavy
