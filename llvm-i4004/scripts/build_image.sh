@@ -75,9 +75,16 @@ objs+=("$out_dir/$software.o")
 status "i4004_pack: link $((${#objs[@]})) objects -> $out_dir/$software.bin (max $maxrom)"
 # No --pad-pages: I4004BranchRelax made every JCN/ISZ page-independent (JCN !cc,
 # .L; JUN Dest), so functions may freely span 256-byte ROM pages.
-timeout 120 python3 "$root/asm/i4004_pack.py" "${objs[@]}" \
+# --softcall synthesizes the software-call return dispatch (__soft_ret, __srtab,
+# per-page jin-p0 stubs, __push_off/__push_pg) and asserts the JMS leaf rule;
+# compiled calls are CALLSOFT so this is mandatory for a runnable firmware.
+pack_args=( --linker-script "$link" --max "$maxrom" --pad "$maxrom" --softcall )
+if [[ -n "${BANKS:-}" ]]; then
+    pack_args+=( --banks "$BANKS" )
+fi
+timeout 180 python3 "$root/asm/i4004_pack.py" "${objs[@]}" \
     -o "$out_dir/$software.bin" -m "$out_dir/$software.map" \
-    --linker-script "$link" --max "$maxrom" --pad "$maxrom"
+    "${pack_args[@]}"
 
 size=$(wc -c < "$out_dir/$software.bin" | tr -d ' ')
 status "image: $out_dir/$software.bin = $size bytes (budget $maxrom)"

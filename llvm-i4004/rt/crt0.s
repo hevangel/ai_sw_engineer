@@ -116,7 +116,15 @@ _start:
 	jcn	nz, .Ldata_loop
 .Ldata_skip:
 
-	; -- 5. call main --
-	jms	main
+	; -- 5. call main via the SOFTWARE-call convention --
+	; main is a compiled function: it returns via `jun __soft_ret`, which pops
+	; the P7 soft stack, so it must be ENTERED the soft way (push a return token
+	; for .Lhalt, then JUN main) -- NOT `jms main`. Use the same P0-only leaf
+	; push helpers the backend emits (abi.md 4.4.1).
+	fim	p0, %lo8(.Lhalt)
+	jms	__push_off
+	fim	p0, %page(.Lhalt)
+	jms	__push_pg
+	jun	main
 .Lhalt:
 	jun	.Lhalt			; main returned: spin forever
