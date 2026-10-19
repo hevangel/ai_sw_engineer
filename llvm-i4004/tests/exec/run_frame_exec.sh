@@ -35,20 +35,25 @@ path="src/main.rs"
 [dependencies]
 chips = { path = "$CHIPS_DIR" }
 arbitrary-int = "=1.3.0"
+log = "0.4"
 EOF
+cp "$ROOT/llvm-i4004/tests/exec/src_dcl_assert.rs" "$WORK/h/src/src_dcl_assert.rs"
 cat > "$WORK/h/src/main.rs" <<RS
 use chips::mcs4::Board; use arbitrary_int::{u2,u4};
+#[path = "src_dcl_assert.rs"] mod src_dcl_assert;
 const COMMON: usize = $COMMONI; const BANKW: usize = $BANKI;
 fn view(c:&[u8],b:&[u8],bk:usize)->Vec<u8>{let mut v=vec![0u8;0x1000];let n=c.len().min(COMMON);v[..n].copy_from_slice(&c[..n]);let o=bk*BANKW;if o<b.len(){let m=(b.len()-o).min(BANKW);v[COMMON..COMMON+m].copy_from_slice(&b[o..o+m]);}v}
-fn main(){let a:Vec<String>=std::env::args().collect();let img=std::fs::read(&a[1]).unwrap();let cyc:usize=a[2].parse().unwrap();let nch:usize=a[3].parse().unwrap();
+fn main(){src_dcl_assert::src_dcl_install();let a:Vec<String>=std::env::args().collect();let img=std::fs::read(&a[1]).unwrap();let cyc:usize=a[2].parse().unwrap();let nch:usize=a[3].parse().unwrap();
 let c=&img[..COMMON.min(img.len())];let bk=if img.len()>COMMON{&img[COMMON..]}else{&[][..]};let fb=COMMON/0x100;let mut bank=0usize;let mut b=Board::new(view(c,bk,bank),0);
 // 16 RAM chips = 4 CM-RAM banks x 4 chips; page_mask = chip-within-bank = i%4
 // (Board::new can only build <=4, so build the 4-bank layout by hand).
 b.rams.clear();for i in 0..16u8{b.rams.push(chips::mcs4::ram4002::RAM::new(u2::new(i%4)));}
 let mut prev=0u8;
-for _ in 0..cyc{b.run_cycle();let lo=b.roms[3].ports.value();if lo!=prev{prev=lo;let l=((((b.roms[4].ports.value() as usize)&0xF)<<4)|((lo as usize)&0xF)) as usize;if l!=bank{bank=l;let v=view(c,bk,bank);for i in fb..16{if i<b.roms.len(){let s=i*0x100;let ch:[u8;0x100]=v[s..s+0x100].try_into().unwrap();b.roms[i]=chips::mcs4::rom4001::ROM::new(ch,u4::new(i as u8));}}}}}
+for _ in 0..cyc{b.run_cycle();src_dcl_assert::src_dcl_tick(&b);let lo=b.roms[3].ports.value();if lo!=prev{prev=lo;let l=((((b.roms[4].ports.value() as usize)&0xF)<<4)|((lo as usize)&0xF)) as usize;if l!=bank{bank=l;let v=view(c,bk,bank);for i in fb..16{if i<b.roms.len(){let s=i*0x100;let ch:[u8;0x100]=v[s..s+0x100].try_into().unwrap();b.roms[i]=chips::mcs4::rom4001::ROM::new(ch,u4::new(i as u8));}}}}}
 let mut out=Vec::new();for ch in 0..nch{out.push(b.rams[0].registers[0].characters.read_nibble(ch as u8).value().to_string());}
-println!("{}",out.join(" "));}
+let v = src_dcl_assert::src_dcl_report();
+println!("{}",out.join(" "));
+if v>0 { std::process::exit(3); }}
 RS
 ( cd "$WORK/h" && CARGO_TARGET_DIR="$WORK/ct" cargo build --release >"$WORK/c.log" 2>&1 ) \
     || { tail -25 "$WORK/c.log" >&2; fail "harness build"; }
