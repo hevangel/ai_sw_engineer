@@ -335,6 +335,71 @@ class Linker:
                 f"ROM image {addr} bytes exceeds budget {self.rom_len} "
                 f"(0x{self.rom_len:x}); add 4001s / raise --max")
 
+
+    def _page_align_section(self, obj, sec, base):
+        """Insert NOP padding so no PAGE8/FIN8-relocated 2-byte instruction in
+        `sec` straddles a 256-byte page or targets a different page than its
+        operand byte. After far-branch relaxation a conditional branch is
+        `JCN !cc,.Lcont ; JUN far`; the near JCN still uses an 8-bit page-local
+        field, so if the JCN sits in the last few bytes of a page its +N target
+        rolls onto the next page. We pad (0x00 == NOP) BEFORE such an
+        instruction to push the whole thing onto the next page.
+
+        Operates on `sec.data`/its relocs in place, shifting reloc offsets for
+        every reloc at/after an insertion. Only same-section (local) PAGE8/FIN8
+        targets are checked here; cross-section ones are caught at resolve time.
+        Returns True if it changed anything (so the caller re-runs placement).
+
+        `base` is sec's assigned ROM address. PAGE8/FIN8 reloc.offset points at
+        the OPERAND byte; the opcode is at offset-1.
+        """
+        rels = obj.relocs.get(sec.index)
+        if not rels:
+            return False
+        # Build S (target) for a reloc if its symbol is local to THIS section.
+        def local_target(rel):
+            sym = obj.symbols[rel.sym]
+            STT_SECTION = 3
+            if (sym.info & 0xf) == STT_SECTION or sym.name == "":
+                if sym.shndx == sec.index:
+                    return sec.base + rel.addend  # section-relative
+                return None
+            if sym.shndx == sec.index:
+                return sec.base + sym.value + rel.addend
+            return None
+        changed = False
+        # Process relocs in increasing offset so earlier inserts shift later ones.
+        page_relocs = sorted((r for r in rels
+                              if r.rtype in (R_I4004_PAGE8, R_I4004_FIN8)),
+                             key=lambda r: r.offset)
+        for rel in page_relocs:
+            operand_addr = base + rel.offset
+            operand_page = operand_addr // PAGE
+            opcode_page = (operand_addr - 1) // PAGE
+            tgt = local_target(rel)
+            tgt_page = (tgt // PAGE) if tgt is not None else operand_page
+            # ok iff opcode, operand and (local) target share one page
+            if operand_page == opcode_page and operand_page == tgt_page:
+                continue
+            # pad the 2-byte instruction (opcode at rel.offset-1) to the next
+            # page start: insert (PAGE - opcode_offset_in_page) NOPs before it.
+            op_off = rel.offset - 1
+            pad = PAGE - ((base + op_off) % PAGE)
+            if pad == 0 or pad >= PAGE:
+                continue
+            ins_at = op_off
+            sec.data = sec.data[:ins_at] + b"\x00" * pad + sec.data[ins_at:]
+            sec.size += pad
+            for r in rels:
+                if r.offset >= ins_at:
+                    r.offset += pad
+            # local symbols defined after ins_at in this section shift too
+            for s in obj.symbols:
+                if s.shndx == sec.index and s.value >= ins_at:
+                    s.value += pad
+            changed = True
+        return changed
+
     def _place_rom_banked(self):
         """xl bank-switched placement. Common ROM sections (.reset/.rodata +
         runtime/HAL/trampoline helpers) go in the common region [0,common_bytes)
@@ -378,27 +443,40 @@ class Linker:
                 f"(0x{self.common_bytes:x}); common holds .reset/crt0/HAL/rt + "
                 f"trampolines -- shrink the hot-runtime set or enlarge the common region")
 
-        # Banked region: greedy first-fit bin-pack by descending size.
-        base = self.common_bytes
-        bank_fill = [0] * self.banks  # bytes used in each bank's banked region
-        for obj, sec in sorted(banked_items, key=lambda it: -it[1].size):
-            if sec.size > self.bank_bytes:
-                raise LinkError(
-                    f"{obj.path}:{sec.name} is {sec.size} bytes > one bank's "
-                    f"banked region {self.bank_bytes}; split the function")
-            placed_ok = False
-            for k in range(self.banks):
-                if bank_fill[k] + sec.size <= self.bank_bytes:
-                    sec.base = base + bank_fill[k]
-                    self.sec_bank[id(sec)] = k
-                    self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
-                    bank_fill[k] += sec.size
-                    placed_ok = True
-                    break
-            if not placed_ok:
-                raise LinkError(
-                    f"no bank has room for {obj.path}:{sec.name} "
-                    f"({sec.size} B); raise --banks")
+        # Banked region: greedy first-fit bin-pack by descending size. Then run
+        # the page-align pass (NOP-pad page-local instructions off page ends) and
+        # RE-PACK to a fixed point, since padding grows sections and moves bases.
+        for _iter in range(8):
+            base = self.common_bytes
+            bank_fill = [0] * self.banks
+            # drop prior banked placements (keep common ones)
+            self.placed = [p for p in self.placed
+                           if self.sec_bank.get(id(p.sec), -1) == -1]
+            for obj, sec in sorted(banked_items, key=lambda it: -it[1].size):
+                if sec.size > self.bank_bytes:
+                    raise LinkError(
+                        f"{obj.path}:{sec.name} is {sec.size} bytes > one bank's "
+                        f"banked region {self.bank_bytes}; split the function")
+                placed_ok = False
+                for k in range(self.banks):
+                    if bank_fill[k] + sec.size <= self.bank_bytes:
+                        sec.base = base + bank_fill[k]
+                        self.sec_bank[id(sec)] = k
+                        self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
+                        bank_fill[k] += sec.size
+                        placed_ok = True
+                        break
+                if not placed_ok:
+                    raise LinkError(
+                        f"no bank has room for {obj.path}:{sec.name} "
+                        f"({sec.size} B); raise --banks")
+            # page-align each banked section at its assigned base
+            changed = False
+            for obj, sec in banked_items:
+                if self._page_align_section(obj, sec, sec.base):
+                    changed = True
+            if not changed:
+                break
         self.bank_fill = bank_fill
         # rom_used = common + the largest bank (image size per bank is uniform).
         self.rom_used = self.common_bytes + self.bank_bytes

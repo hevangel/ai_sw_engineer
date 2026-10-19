@@ -75,5 +75,28 @@ python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" "$W/tr.o" $TB --rewrite-cross-
 chk "rewrite-cross-bank link succeeds" '[[ -f "$W/tr.bin" ]]'
 chk "without trampolines, cross-bank still errors" '! python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" $TB -o "$W/no.bin" >/dev/null 2>&1'
 
+# Test 6: page-align. A banked function whose relaxed conditional branch
+# (JCN !cc,.L ; JUN far) is positioned so the near JCN straddles a 256-byte page
+# -- the packer must NOP-pad it off the page end and link cleanly. We force this
+# with a filler to push the branch near a page boundary, using the real
+# relaxation the backend emits. (A pure-asm JCN-at-0xFE: PAGE8 to a same-section
+# label one byte into the next page.)
+cat > "$W/pg.s" <<'EOF'
+	.section .text._RNvPg,"ax"
+	.globl _RNvPg
+_RNvPg:
+	.space 0xfd
+	jcn	0x4, .Lt   ; opcode at 0xfd, operand 0xfe, target .Lt one byte into next page
+	jun	_RNvPg
+.Lt:
+	bbl 0
+EOF
+$B/llvm-mc -triple i4004 --filetype=obj "$W/pg.s" -o "$W/pg.o" 2>"$W/e6"
+chk "page-straddle test obj assembles" '[[ -f "$W/pg.o" ]]'
+# bank it (1 KB bank so it is in the banked region, > 256 B so it spans pages);
+# the page-align pass must pad the JCN off 0xfd and the link must succeed.
+python3 "$PACK" "$W/common.o" "$W/pg.o" --banks 1 --common-bytes 0x100 --bank-bytes 0x400 -o "$W/pg.bin" >/dev/null 2>"$W/e6b"
+chk "page-align lets a page-straddling JCN link" '[[ -f "$W/pg.bin" ]]'
+
 echo "PACK-BANK UNIT: $pass passed, $fail failed" >&2
 [[ "$fail" -eq 0 ]]
