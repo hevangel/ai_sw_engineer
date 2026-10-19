@@ -11,13 +11,30 @@
 | baseline (43/43 lower) | 45,714 | — | |
 | redundant FIM/SRC peephole | 45,320 | −394 | block-local dedupe |
 | spill/reload FIM-once + INC | 41,424 | −3,896 | biggest single win so far |
+| regops block primitives (add/sub/cmp/is_zero) | 40,736 | −688 | Tier-A, chips-tested 10/10 |
 | **target** | **≤ 4,096** | | 4004 ROM max |
 
-Still ~10x over; the structural levers (MachineOutliner, base-pointer addressing
-for LDRAMi8/STRAMi8, JMS helpers for the repeated load/store + nibble-chain
-sequences, and the Tier-A firmware/runtime co-design that stores each `Num` in
-one 4002 register) are what close the gap. `size_profile.py` over the whole
-firmware `.s` is re-run after each step; the original baseline mix was:
+**CRITICAL GATE now reached: far-branch relaxation.** `build_image.sh` no longer
+fails on symbols — it fails because functions exceed 256 bytes (e.g. `memory_add`
+= 760 B) and `--pad-pages` cannot keep them page-local. The 4004's `JCN`/`ISZ`
+address field is 8-bit (within the current 256-byte ROM page), so a function
+larger than a page has intra-function conditional branches that cannot be
+encoded. **No image links until this is solved**, independent of total size.
+Two implementations:
+  (a) backend: emit every conditional branch in the page-safe relaxed form
+      `JCN !cc, .skip ; JUN Dest ; .skip:` (the JCN skips a 3-byte JUN, always
+      same-page; JUN reaches the full 12-bit space). +2 bytes per branch (~716),
+      then drop `--pad-pages` (no branch is page-local any more). Done in
+      `emitBrCC` / the BRZ/BRNZ expansion, inserting the skip block.
+  (b) packer: a fixed-point layout in `i4004_pack.py` — lay out, find cross-page
+      `R_I4004_PAGE8` JCN/ISZ, rewrite each to the relaxed sequence, grow that
+      function, re-lay-out until stable. The packer already has final addresses.
+(a) is simpler to get correct and is the recommended path.
+
+Still ~10x over on total size too; the structural levers (MachineOutliner via the
+SOFTWARE stack, base-pointer addressing, more regops conversions of the heavy
+mul/div/sqrt WIDE=34 scratch) continue after the gate. `size_profile.py` over the
+whole firmware `.s` is re-run after each step; the original baseline mix was:
 
 **Where the remaining ~41 KB is (post-spill-fix analysis).** After the FIM
 reductions, `fim` fell from 7,301 to 3,405 (p0 5,340 -> 1,444); the residual
