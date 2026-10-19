@@ -229,6 +229,41 @@ if [[ -f "$RT/arith16.s" ]]; then
   done; done
 fi
 
+status "=== mem: __memset_ram / __memcpy_ram across a 4002 register boundary ==="
+MEMGEN="$RT/tests/gen_mem_test.py"
+# run_mem <mode> <addr> <extra:val|src> <count> <nprobe> <probe_base> <expected nprobe nibbles...>
+run_mem(){
+  local mode="$1" addr="$2" extra="$3" count="$4" nprobe="$5" pbase="$6"; shift 6
+  local exp=("$@")
+  local stub="$WORK/memstub.s" img="$WORK/memimg.bin"
+  if [[ "$mode" == memset ]]; then
+    python3 "$MEMGEN" memset --addr "$addr" --val "$extra" --count "$count" --nprobe "$nprobe" --probe-base "$pbase" > "$stub"
+  else
+    python3 "$MEMGEN" memcpy --addr "$addr" --src "$extra" --count "$count" --nprobe "$nprobe" --probe-base "$pbase" > "$stub"
+  fi
+  $B/llvm-mc -triple i4004 --filetype=obj "$stub" -o "$WORK/memstub.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble mem stub ($mode)"; }
+  $B/llvm-mc -triple i4004 --filetype=obj "$RT/mem.s" -o "$WORK/mem.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble mem.s"; }
+  python3 "$PACK" "$WORK/memstub.o" "$WORK/mem.o" -o "$img" --pad-pages --pad 1280 >/dev/null 2>"$WORK/pk.log" \
+      || { cat "$WORK/pk.log" >&2; fail "link mem ($mode addr=$addr)"; }
+  local got; got=$("$HARNESS" "$img" "$CYCLES" "$nprobe")
+  local want="${exp[*]}"
+  if [[ "$got" == "$want" ]]; then pass=$((pass+1));
+  else failc=$((failc+1)); echo "MISMATCH mem $mode addr=$addr count=$count probe=$pbase: got [$got] want [$want]" >&2; fi
+}
+
+# memset 20 nibbles of 0x5 at 0x08 (spans reg0 chars 8-15 + reg1 chars 0-11);
+# probe 0x08..0x0f (reg0 side of the fill) -> all 5.
+run_mem memset 0x08 0x5 20 8 0x08  5 5 5 5 5 5 5 5
+# same fill, probe 0x10..0x17 (reg1, PAST the 0x10 register boundary) -> all 5.
+run_mem memset 0x08 0x3 20 8 0x10  3 3 3 3 3 3 3 3
+# memcpy: seed src ramp at 0x20, copy 20 nibbles to 0x08; probe dst 0x08..0x0f
+# -> ramp 0..7 (reg0 side).
+run_mem memcpy 0x08 0x20 20 8 0x08  0 1 2 3 4 5 6 7
+# same copy, probe 0x10..0x17 (dst nibbles 8..15, PAST the boundary) -> 8..15.
+run_mem memcpy 0x08 0x20 20 8 0x10  8 9 10 11 12 13 14 15
+
 echo "" >&2
 status "RESULT: $pass passed, $failc failed"
 [[ "$failc" == 0 ]] || exit 1
