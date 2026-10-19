@@ -71,6 +71,15 @@ let Defs = [ACC, CY] in {
                      [(set PR8:$dst, (i8 (sub PR8:$lhs, PR8:$rhs)))]>;
 }
 
+// 16-bit add/sub over a DR16 (four nibbles, carry chained low->high). Lowered
+// post-RA into the LD/ADD/XCH nibble sequence across both sub-pairs.
+let Defs = [ACC, CY] in {
+  def ADDi16 : Pseudo<(outs DR16:$dst), (ins DR16:$lhs, DR16:$rhs),
+                      [(set DR16:$dst, (i16 (add DR16:$lhs, DR16:$rhs)))]>;
+  def SUBi16 : Pseudo<(outs DR16:$dst), (ins DR16:$lhs, DR16:$rhs),
+                      [(set DR16:$dst, (i16 (sub DR16:$lhs, DR16:$rhs)))]>;
+}
+
 // Return (expands to BBL 0 on the hardware stack).
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RETpseudo : Pseudo<(outs), (ins), [(i4004_ret)]>;
@@ -111,5 +120,15 @@ let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
 // Extra selection patterns.
 //===----------------------------------------------------------------------===//
 
-// A small immediate (0..15) can also be materialized; MOVi8 covers 0..255 and
-// is sufficient for the backbone, so no separate i4 path yet.
+// addrspace-0 (4002 RAM) i8 load/store. The pointer is an i16 in a DR16
+// double-pair; its low sub-pair holds the SRC address byte [chip:2][reg:2]
+// [char:4] (abi.md sec.1.3). The expander emits SRC <lo-pair>; RDM/WRM for the
+// low nibble, advances the char, and RDM/WRM for the high nibble (two 4002
+// cells per byte, low first -- abi.md sec.1.2).
+let isPseudo = 1, mayLoad = 1, hasSideEffects = 0, Defs = [ACC, CY] in
+def LDRAMi8 : Pseudo<(outs PR8:$dst), (ins DR16:$ptr),
+                     [(set PR8:$dst, (i8 (load DR16:$ptr)))]>;
+
+let isPseudo = 1, mayStore = 1, hasSideEffects = 0, Defs = [ACC, CY] in
+def STRAMi8 : Pseudo<(outs), (ins PR8:$val, DR16:$ptr),
+                     [(store (i8 PR8:$val), DR16:$ptr)]>;

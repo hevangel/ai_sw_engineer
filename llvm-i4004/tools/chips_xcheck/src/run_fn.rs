@@ -47,10 +47,18 @@ fn main() {
     // Readout region is RAM chip0 reg0: char0 = result low nibble, char1 = high.
     let lo = board.rams[0].registers[0].characters.read_nibble(0).value();
     let hi = board.rams[0].registers[0].characters.read_nibble(1).value();
+    let c2 = board.rams[0].registers[0].characters.read_nibble(2).value();
+    let c3 = board.rams[0].registers[0].characters.read_nibble(3).value();
     let port = board.rams[0].ports.value();
     let result = ((hi as u16) << 4 | lo as u16) & 0xFF;
+    // 16-bit little-endian reconstruction for i16 tests: byte0 = (c1<<4|c0),
+    // byte1 = (c3<<4|c2); value = byte1<<8 | byte0.
+    let byte0 = ((hi as u16) << 4) | lo as u16;
+    let byte1 = ((c3 as u16) << 4) | c2 as u16;
+    let result16 = (byte1 << 8) | byte0;
 
     println!("result={}", result);
+    println!("result16={}", result16);
     println!("port={}", port);
     println!("r3={}", lo);
     println!("r2={}", hi);

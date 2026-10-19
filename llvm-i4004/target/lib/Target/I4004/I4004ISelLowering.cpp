@@ -33,47 +33,77 @@ using namespace llvm;
 I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
                                          const I4004Subtarget &STI)
     : TargetLowering(TM, STI), Subtarget(STI) {
-  // i8 is the only legal integer, held in PR8 pairs (abi.md sec.1.2, sec.2).
+  // Legal integer types: i8 in a register pair (PR8), i16 in a double-pair
+  // (DR16). This follows AVR (i8 in GPR8, i16 in DREGS): i16 is legal so
+  // pointers stay a single value, but i16 ARITHMETIC is expanded to i8 ops on
+  // the two sub-pairs (abi.md sec.1.2: i16 is not a native width).
   addRegisterClass(MVT::i8, &I4004::PR8RegClass);
+  addRegisterClass(MVT::i16, &I4004::DR16RegClass);
 
   computeRegisterProperties(STI.getRegisterInfo());
 
   setStackPointerRegisterToSaveRestore(I4004::P7);
   setBooleanContents(ZeroOrOneBooleanContent);
 
-  // i1 promotes to i8.
   setOperationAction(ISD::Constant, MVT::i8, Legal);
 
-  // Global addresses are 16-bit handles wrapped by our WRAPPER node. Not yet
-  // selectable to real instructions in the backbone -> custom, documented.
+  // Global/block addresses are 16-bit handles wrapped by our WRAPPER node.
   setOperationAction(ISD::GlobalAddress, MVT::i16, Custom);
+  setOperationAction(ISD::BlockAddress, MVT::i16, Custom);
 
-  // No native bitwise ALU on the 4004 (abi.md sec.3 / plan): expand to libcalls
-  // / sequences later. For the backbone, make them Expand so the legalizer
-  // turns them into something or a libcall rather than ICE.
-  for (MVT VT : {MVT::i8}) {
-    setOperationAction(ISD::MUL, VT, LibCall);
-    setOperationAction(ISD::SDIV, VT, LibCall);
-    setOperationAction(ISD::UDIV, VT, LibCall);
-    setOperationAction(ISD::SREM, VT, LibCall);
-    setOperationAction(ISD::UREM, VT, LibCall);
+  // Loads and stores: selected by TableGen patterns over a DR16 pointer
+  // (LDRAMi8/STRAMi8 pseudos -> SRC+RDM/WRM). Only i8 access is legal; wider
+  // and extending/truncating forms reduce to i8.
+  for (MVT VT : MVT::integer_valuetypes()) {
+    setLoadExtAction(ISD::EXTLOAD, VT, MVT::i8, Expand);
+    setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i8, Expand);
+    setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i8, Expand);
+  }
+  setTruncStoreAction(MVT::i16, MVT::i8, Expand);
+
+  // i8 ALU the 4004 lacks natively -> libcalls (libi4004rt, abi.md sec.6) or
+  // expand. AND/OR/XOR are expanded via nibble sequences in the post-RA pass
+  // (no native bitwise ALU); here they are Expand so DAG tries the generic
+  // route, with i8 MUL/DIV/shift as libcalls.
+  setOperationAction(ISD::MUL, MVT::i8, LibCall);
+  setOperationAction(ISD::SDIV, MVT::i8, LibCall);
+  setOperationAction(ISD::UDIV, MVT::i8, LibCall);
+  setOperationAction(ISD::SREM, MVT::i8, LibCall);
+  setOperationAction(ISD::UREM, MVT::i8, LibCall);
+  setOperationAction(ISD::SHL, MVT::i8, LibCall);
+  setOperationAction(ISD::SRL, MVT::i8, LibCall);
+  setOperationAction(ISD::SRA, MVT::i8, LibCall);
+  for (MVT VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::ROTL, VT, Expand);
+    setOperationAction(ISD::ROTR, VT, Expand);
+  }
+
+  // i16 arithmetic/bitwise: expand to i8 ops on the two sub-pairs. ADD/SUB
+  // expand to ADDC/SUBC chains over the legal i8 (which our ADDi8/SUBi8
+  // pseudos select). MUL/DIV/shift -> libcalls.
+  setOperationAction(ISD::MUL, MVT::i16, LibCall);
+  setOperationAction(ISD::SDIV, MVT::i16, LibCall);
+  setOperationAction(ISD::UDIV, MVT::i16, LibCall);
+  setOperationAction(ISD::SREM, MVT::i16, LibCall);
+  setOperationAction(ISD::UREM, MVT::i16, LibCall);
+  setOperationAction(ISD::SHL, MVT::i16, LibCall);
+  setOperationAction(ISD::SRL, MVT::i16, LibCall);
+  setOperationAction(ISD::SRA, MVT::i16, LibCall);
+
+  // AND/OR/XOR: the 4004 has no native bitwise ALU. Expand so the DAG breaks
+  // them down; the actual nibble-table / libcall lowering is a later step.
+  for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::AND, VT, Expand);
     setOperationAction(ISD::OR, VT, Expand);
     setOperationAction(ISD::XOR, VT, Expand);
-    setOperationAction(ISD::SHL, VT, LibCall);
-    setOperationAction(ISD::SRL, VT, LibCall);
-    setOperationAction(ISD::SRA, VT, LibCall);
-    setOperationAction(ISD::ROTL, VT, Expand);
-    setOperationAction(ISD::ROTR, VT, Expand);
   }
 
   setMinFunctionAlignment(Align(1));
   setPrefFunctionAlignment(Align(1));
 
-  // Control flow. BRCOND is handled by our TableGen patterns (BRZ/BRNZ on
-  // eq/ne-with-0). Expand the CC-folded forms into SETCC + BRCOND / SELECT so
-  // they funnel through the supported predicates; general SETCC lowering to
-  // the 4004's single ACC==0 / CY test is a later step (documented).
+  // Control flow (this increment): unconditional branch works via the BR
+  // pseudo. Compares/conditional branches are Expand here and lowered to the
+  // 4004's ACC==0 / CY test in the next increment (SETCC/BR_CC custom).
   setOperationAction(ISD::BR_CC, MVT::i8, Expand);
   setOperationAction(ISD::BR_CC, MVT::i16, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i8, Expand);
@@ -132,7 +162,10 @@ SDValue I4004TargetLowering::LowerFormalArguments(
 
   for (CCValAssign &VA : ArgLocs) {
     if (VA.isRegLoc()) {
-      Register VReg = RegInfo.createVirtualRegister(&I4004::PR8RegClass);
+      const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
+                                          ? (const TargetRegisterClass *)&I4004::DR16RegClass
+                                          : (const TargetRegisterClass *)&I4004::PR8RegClass;
+      Register VReg = RegInfo.createVirtualRegister(RC);
       RegInfo.addLiveIn(VA.getLocReg(), VReg);
       SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, VReg, VA.getLocVT());
       if (VA.getLocVT() != VA.getValVT())

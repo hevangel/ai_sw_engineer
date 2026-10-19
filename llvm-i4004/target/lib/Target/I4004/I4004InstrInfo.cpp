@@ -28,8 +28,18 @@ void I4004InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  const DebugLoc &DL, Register DestReg,
                                  Register SrcReg, bool KillSrc,
                                  bool RenamableDest, bool RenamableSrc) const {
-  // Pair-to-pair copy: emit the COPYpr pseudo, expanded later into two nibble
-  // moves (LD/XCH). The backbone only ever copies PR8 registers.
+  // 16-bit double-pair copy: copy each 8-bit sub-pair via COPYpr.
+  if (I4004::DR16RegClass.contains(DestReg, SrcReg)) {
+    Register DLo = RI.getSubReg(DestReg, I4004::sub_pair_lo);
+    Register DHi = RI.getSubReg(DestReg, I4004::sub_pair_hi);
+    Register SLo = RI.getSubReg(SrcReg, I4004::sub_pair_lo);
+    Register SHi = RI.getSubReg(SrcReg, I4004::sub_pair_hi);
+    BuildMI(MBB, MI, DL, get(I4004::COPYpr), DLo).addReg(SLo);
+    BuildMI(MBB, MI, DL, get(I4004::COPYpr), DHi)
+        .addReg(SHi, getKillRegState(KillSrc));
+    return;
+  }
+  // Pair-to-pair copy: COPYpr, expanded later into two nibble moves.
   BuildMI(MBB, MI, DL, get(I4004::COPYpr), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
 }

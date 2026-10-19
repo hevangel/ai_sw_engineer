@@ -143,6 +143,18 @@ So the **general allocatable pool** is R2–R13 (twelve 4-bit registers = six
 hardware resources the scheduler models as implicit defs/uses, not allocatable
 GPRs.
 
+**CodeGen register classes (implementation, matching this ABI).** `i8` is the
+legal integer in class `PR8` (the pairs P0–P7). `i16` and pointers are legal in
+class `DR16`, a **double-pair** D0..D3 where `Dk = {P(2k):P(2k+1)}` — four
+nibbles / 16 bits (this mirrors AVR's `GPR8`/`DREGS`: a 16-bit value is legal in
+a register pair-of-pairs, but 16-bit arithmetic is expanded to i8 ops on the two
+sub-pairs). D0 contains the reserved P0 and D3 contains the reserved P7, so the
+allocatable i16 pool is effectively D1 (P2:P3) and D2 (P4:P5). A pointer's low
+sub-pair holds the `SRC` address byte `[chip:2][reg:2][char:4]` (§1.3); the high
+sub-pair holds the bank/extended bits. This is the "software handle the backend
+decomposes into an SRC pair + bank select" named above, made concrete — no ABI
+value changes, so `rust/i4004-none.json` is unaffected.
+
 ### 2.1 Imaginary (memory-backed) registers
 
 Like llvm-mos's zero-page imaginary registers, the 4004 backend defines a bank

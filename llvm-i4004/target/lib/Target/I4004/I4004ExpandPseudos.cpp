@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include <array>
 
 using namespace llvm;
 
@@ -50,6 +51,7 @@ private:
 
   bool expandMI(MachineBasicBlock &MBB, MachineInstr &MI);
   void emitAddSub(MachineBasicBlock &MBB, MachineInstr &MI, unsigned AluOpc);
+  void emitAddSub16(MachineBasicBlock &MBB, MachineInstr &MI, unsigned AluOpc);
   void emitCopy(MachineBasicBlock &MBB, MachineInstr &MI);
 };
 
@@ -111,6 +113,36 @@ void I4004ExpandPseudos::emitAddSub(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LHi);
   BuildMI(MBB, MI, DL, TII->get(AluOpc)).addReg(RHi);
   BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DHi, RegState::Define);
+}
+
+// 16-bit add/sub over a DR16: four nibbles low->high, carry chained. SUB flips
+// the carry polarity with CMC between every nibble (same reason as emitAddSub).
+void I4004ExpandPseudos::emitAddSub16(MachineBasicBlock &MBB, MachineInstr &MI,
+                                      unsigned AluOpc) {
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register Dst = MI.getOperand(0).getReg();
+  Register Lhs = MI.getOperand(1).getReg();
+  Register Rhs = MI.getOperand(2).getReg();
+  const bool IsSub = (AluOpc == I4004::SUB);
+
+  auto nibsOf = [&](Register D) -> std::array<Register, 4> {
+    Register LoP = TRI->getSubReg(D, I4004::sub_pair_lo);
+    Register HiP = TRI->getSubReg(D, I4004::sub_pair_hi);
+    return {TRI->getSubReg(LoP, I4004::sub_lo),
+            TRI->getSubReg(LoP, I4004::sub_hi),
+            TRI->getSubReg(HiP, I4004::sub_lo),
+            TRI->getSubReg(HiP, I4004::sub_hi)};
+  };
+  auto DN = nibsOf(Dst), LN = nibsOf(Lhs), RN = nibsOf(Rhs);
+
+  BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
+  for (int i = 0; i < 4; ++i) {
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LN[i]);
+    BuildMI(MBB, MI, DL, TII->get(AluOpc)).addReg(RN[i]);
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DN[i], RegState::Define);
+    if (IsSub && i != 3)
+      BuildMI(MBB, MI, DL, TII->get(I4004::CMC));
+  }
 }
 
 bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
@@ -179,6 +211,60 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     emitAddSub(MBB, MI, I4004::SUB);
     MI.eraseFromParent();
     return true;
+
+  case I4004::ADDi16:
+    emitAddSub16(MBB, MI, I4004::ADD);
+    MI.eraseFromParent();
+    return true;
+
+  case I4004::SUBi16:
+    emitAddSub16(MBB, MI, I4004::SUB);
+    MI.eraseFromParent();
+    return true;
+
+  case I4004::LDRAMi8: {
+    // dst(i8) = RAM[ptr]. ptr is a DR16; its low sub-pair (sub_pair_lo) is the
+    // SRC address byte, whose low nibble (sub_lo) is the char index.
+    Register Dst = MI.getOperand(0).getReg();
+    Register Ptr = MI.getOperand(1).getReg();
+    Register LoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    Register CharReg = TRI->getSubReg(LoPair, I4004::sub_lo);
+    auto [DHi, DLo] = nibbles(Dst);
+    BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
+    BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DLo, RegState::Define);
+    BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(CharReg);
+    BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
+    BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DHi, RegState::Define);
+    // Restore the char index (DAC = ACC-1) so the pointer is unchanged.
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(CharReg);
+    BuildMI(MBB, MI, DL, TII->get(I4004::DAC));
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(CharReg, RegState::Define);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case I4004::STRAMi8: {
+    // RAM[ptr] = val(i8). Same addressing as LDRAMi8.
+    Register Val = MI.getOperand(0).getReg();
+    Register Ptr = MI.getOperand(1).getReg();
+    Register LoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    Register CharReg = TRI->getSubReg(LoPair, I4004::sub_lo);
+    auto [VHi, VLo] = nibbles(Val);
+    BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(VLo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+    BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(CharReg);
+    BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(VHi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(CharReg);
+    BuildMI(MBB, MI, DL, TII->get(I4004::DAC));
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(CharReg, RegState::Define);
+    MI.eraseFromParent();
+    return true;
+  }
   }
 }
 

@@ -75,3 +75,9 @@ bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 Register I4004RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   return I4004::P7;
 }
+
+const TargetRegisterClass *
+I4004RegisterInfo::getPointerRegClass(unsigned Kind) const {
+  // Pointers are 16-bit handles in a double-pair (abi.md sec.1.3).
+  return &I4004::DR16RegClass;
+}

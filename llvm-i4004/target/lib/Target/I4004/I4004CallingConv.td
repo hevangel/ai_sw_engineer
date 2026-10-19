@@ -25,14 +25,20 @@ def CC_I4004 : CallingConv<[
   // i8 (and legalized i16 halves) go in P1..P3.
   CCIfType<[i8], CCAssignToReg<[P1, P2, P3]>>,
 
-  // Everything else: byte slot on the (RAM-backed) stack.
-  CCIfType<[i8], CCAssignToStack<1, 1>>
+  // i16 / pointers go in a double-pair D1 or D2 (D0 holds reserved P0, D3 holds
+  // reserved P7). abi.md sec.4.1: a 16-bit handle takes two pairs.
+  CCIfType<[i16], CCAssignToReg<[D1, D2]>>,
+
+  // Everything else: byte slot(s) on the (RAM-backed) stack.
+  CCIfType<[i8], CCAssignToStack<1, 1>>,
+  CCIfType<[i16], CCAssignToStack<2, 1>>
 ]>;
 
 def RetCC_I4004 : CallingConv<[
   CCIfType<[i1], CCPromoteToType<i8>>,
-  // i8 return in P1; a split i16 returns in P1:P2.
-  CCIfType<[i8], CCAssignToReg<[P1, P2]>>
+  // i8 return in P1; i16 return in D1 (abi.md sec.4.2).
+  CCIfType<[i8], CCAssignToReg<[P1, P2]>>,
+  CCIfType<[i16], CCAssignToReg<[D1, D2]>>
 ]>;
 
 // Callee-saved pairs (abi.md sec.4.3): P4, P5, P6.

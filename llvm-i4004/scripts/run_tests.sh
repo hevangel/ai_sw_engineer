@@ -49,6 +49,8 @@ echo "==> CodeGen execution test: run llc-compiled functions on external/chips"
 if [[ -x $BIN/llc ]]; then
   LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
     python3 "$BACKEND_DIR/scripts/exec_fn.py"
+  LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
+    python3 "$BACKEND_DIR/scripts/exec_i16.py"
 else
   echo "    (skipped: llc not built)"
 fi

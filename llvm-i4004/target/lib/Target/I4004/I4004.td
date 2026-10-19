@@ -34,7 +34,7 @@ include "I4004InstrCodeGen.td"
 // target.
 //===----------------------------------------------------------------------===//
 
-defm : RemapAllTargetPseudoPointerOperands<PR8>;
+defm : RemapAllTargetPseudoPointerOperands<DR16>;
 
 //===----------------------------------------------------------------------===//
 // I4004 processor definition
