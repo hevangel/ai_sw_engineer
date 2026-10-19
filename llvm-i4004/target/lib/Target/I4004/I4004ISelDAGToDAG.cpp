@@ -71,13 +71,11 @@ void I4004DAGToDAGISel::Select(SDNode *N) {
 
   switch (N->getOpcode()) {
   case ISD::FrameIndex: {
-    // Materialize a frame index as a target frame index; the backbone's
-    // eliminateFrameIndex later rewrites it to the soft-SP register.
+    // Materialize a frame-index address into a DR16 pointer via LEA_FI; the
+    // backbone's eliminateFrameIndex rewrites the slot to a RAM address.
     int FI = cast<FrameIndexSDNode>(N)->getIndex();
     SDValue TFI = CurDAG->getTargetFrameIndex(FI, MVT::i16);
-    // No lea-equivalent yet; wrap in a COPY so later passes see a def. Fall
-    // through to generic selection would fail, so replace directly.
-    CurDAG->SelectNodeTo(N, TargetOpcode::COPY, MVT::i16, TFI);
+    CurDAG->SelectNodeTo(N, I4004::LEA_FI, MVT::i16, TFI);
     return;
   }
   default:

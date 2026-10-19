@@ -95,6 +95,12 @@ let mayLoad = 1, Defs = [ACC, CY, P0] in {
   def RELOAD16 : Pseudo<(outs DR16:$dst), (ins i16imm:$fi), []>;
 }
 
+// Materialize the RAM address of a stack slot into a DR16 pointer. The frame
+// index (operand 1) is resolved to an absolute 4002 char address by
+// eliminateFrameIndex; the expander emits MOVi16 of that address.
+let isPseudo = 1, hasSideEffects = 0 in
+def LEA_FI : Pseudo<(outs DR16:$dst), (ins i16imm:$fi), []>;
+
 // 8-bit add/sub, result in $dst (expands to CLC;LD;ADD;XCH nibble sequences
 // with carry propagation across the two nibbles).
 let Defs = [ACC, CY] in {
@@ -234,3 +240,12 @@ def LDRAMi8 : Pseudo<(outs PR8:$dst), (ins DR16:$ptr),
 let isPseudo = 1, mayStore = 1, hasSideEffects = 0, Defs = [ACC, CY] in
 def STRAMi8 : Pseudo<(outs), (ins PR8:$val, DR16:$ptr),
                      [(store (i8 PR8:$val), DR16:$ptr)]>;
+
+// i16 RAM load/store: four 4002 chars (low byte first). Pointer in DR16.
+let isPseudo = 1, mayLoad = 1, hasSideEffects = 0, Defs = [ACC, CY, P0] in
+def LDRAMi16 : Pseudo<(outs DR16:$dst), (ins DR16:$ptr),
+                      [(set DR16:$dst, (i16 (load DR16:$ptr)))]>;
+
+let isPseudo = 1, mayStore = 1, hasSideEffects = 0, Defs = [ACC, CY, P0] in
+def STRAMi16 : Pseudo<(outs), (ins DR16:$val, DR16:$ptr),
+                      [(store (i16 DR16:$val), DR16:$ptr)]>;

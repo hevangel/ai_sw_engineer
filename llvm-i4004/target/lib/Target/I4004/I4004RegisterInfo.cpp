@@ -74,6 +74,15 @@ bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
     return false;
   }
+  if (Op == I4004::LEA_FI) {
+    // Stack-argument / local slot area: RAM chip0 reg2 (SRC high nibble [5:4]=2
+    // => base 0x20), 2 chars per byte cell. The pointer's low byte is the SRC
+    // address; the high byte (bank/extended) is 0.
+    int Slot = Offset < 0 ? -Offset : Offset;
+    int CharBase = 0x20 + (Slot * 2);
+    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
+    return false;
+  }
 
   // Generic case (none emitted by the backbone yet): point the FI operand at
   // the soft-SP register with the object offset.

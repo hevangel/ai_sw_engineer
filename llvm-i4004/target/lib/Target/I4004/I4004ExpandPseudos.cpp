@@ -291,6 +291,19 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     return true;
   }
 
+  case I4004::LEA_FI: {
+    // dst(DR16) = RAM address of the slot (operand1 = resolved char addr, low
+    // byte); high byte 0.
+    Register Dst = MI.getOperand(0).getReg();
+    int64_t Addr = MI.getOperand(1).getImm() & 0xFF;
+    Register LoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
+    Register HiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(LoP).addImm(Addr);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case I4004::COPYpr:
     emitCopy(MBB, MI);
     MI.eraseFromParent();
@@ -387,6 +400,47 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(CharReg);
     BuildMI(MBB, MI, DL, TII->get(I4004::DAC));
     BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(CharReg, RegState::Define);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case I4004::LDRAMi16:
+  case I4004::STRAMi16: {
+    // i16 RAM access: four consecutive chars, low byte first. Copy the pointer
+    // byte into P0 so we can INC it 0..3 without disturbing the pointer, then
+    // SRC P0 / RDM|WRM each char. Value halves: low pair = chars 0,1; high pair
+    // = chars 2,3 (nibble order low,hi within each byte).
+    const bool IsLoad = (MI.getOpcode() == I4004::LDRAMi16);
+    Register ValDR = MI.getOperand(0).getReg();
+    Register Ptr = MI.getOperand(1).getReg();
+    Register PtrLoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    // P0 = copy of the pointer's low byte (address), via LD/XCH nibble moves.
+    Register P0Hi = TRI->getSubReg(I4004::P0, I4004::sub_hi);
+    Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
+    Register PHi = TRI->getSubReg(PtrLoPair, I4004::sub_hi);
+    Register PLo = TRI->getSubReg(PtrLoPair, I4004::sub_lo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PHi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(P0Hi, RegState::Define);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PLo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(P0Lo, RegState::Define);
+    Register ValLoPair = TRI->getSubReg(ValDR, I4004::sub_pair_lo);
+    Register ValHiPair = TRI->getSubReg(ValDR, I4004::sub_pair_hi);
+    Register Nib[4] = {TRI->getSubReg(ValLoPair, I4004::sub_lo),
+                       TRI->getSubReg(ValLoPair, I4004::sub_hi),
+                       TRI->getSubReg(ValHiPair, I4004::sub_lo),
+                       TRI->getSubReg(ValHiPair, I4004::sub_hi)};
+    for (int i = 0; i < 4; ++i) {
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
+      if (IsLoad) {
+        BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
+        BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(Nib[i], RegState::Define);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Nib[i]);
+        BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+      }
+      if (i != 3)
+        BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
+    }
     MI.eraseFromParent();
     return true;
   }

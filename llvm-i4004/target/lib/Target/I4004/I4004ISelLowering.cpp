@@ -343,14 +343,30 @@ I4004TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
   SmallVector<std::pair<Register, SDValue>, 4> RegsToPass;
+  SmallVector<SDValue, 4> MemOpChains;
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
     SDValue Arg = OutVals[i];
     if (VA.getLocVT() != VA.getValVT())
       Arg = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Arg);
-    assert(VA.isRegLoc() && "backbone supports register args only");
-    RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
+    if (VA.isRegLoc()) {
+      RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
+    } else {
+      // Stack argument: store into the outgoing-arg RAM area via a fixed frame
+      // object (abi.md sec.4.1; non-reentrant firmware shares the area).
+      assert(VA.isMemLoc() && "unexpected arg location");
+      MachineFunction &MF = DAG.getMachineFunction();
+      int FI = MF.getFrameInfo().CreateFixedObject(
+          VA.getLocVT() == MVT::i16 ? 2 : 1, VA.getLocMemOffset(),
+          /*IsImmutable=*/false);
+      SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+      MemOpChains.push_back(
+          DAG.getStore(Chain, DL, Arg, FIN,
+                       MachinePointerInfo::getFixedStack(MF, FI)));
+    }
   }
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOpChains);
 
   SDValue Glue;
   for (auto &R : RegsToPass) {
