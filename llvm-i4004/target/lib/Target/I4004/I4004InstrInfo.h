@@ -72,6 +72,9 @@ public:
 
   unsigned removeBranch(MachineBasicBlock &MBB,
                         int *BytesRemoved = nullptr) const override;
+
+  bool reverseBranchCondition(
+      SmallVectorImpl<MachineOperand> &Cond) const override;
 };
 
 } // end namespace llvm

@@ -8,6 +8,7 @@
 
 #include "I4004InstrInfo.h"
 #include "I4004.h"
+#include "I4004ISelLowering.h"
 #include "I4004Subtarget.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -113,8 +114,7 @@ bool I4004InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   if (I == MBB.end() || !isUnpredicatedTerminator(*I))
     return false; // falls through; no terminator to analyze.
 
-  // Walk back over the terminators. If we see any terminator other than the
-  // unconditional BR we cannot represent, bail (unanalyzable).
+  // Find the first terminator in the run of trailing terminators.
   MachineBasicBlock::iterator FirstTerm = I;
   while (FirstTerm != MBB.begin()) {
     auto Prev = std::prev(FirstTerm);
@@ -123,19 +123,69 @@ bool I4004InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
     FirstTerm = Prev;
   }
 
+  // Classify each terminator. We model two conditional shapes exactly so the
+  // generic BranchFolder / MachineBlockPlacement keep the CFG consistent (an
+  // unmodelled conditional branch let BlockPlacement delete a block still
+  // targeted by a JCN, producing dangling .LBB labels):
+  //   BRCCi8/BRCCi16 <lhs>,<rhs>,<cc>,<tgt>   -> conditional
+  //   BR <tgt>                                -> unconditional
+  // Cond encoding: [opcode, ccimm, lhs, rhs] (4 operands).
+  auto isCondBr = [](unsigned Op) {
+    return Op == I4004::BRCCi8 || Op == I4004::BRCCi16;
+  };
+
   for (auto T = FirstTerm; T != MBB.end(); ++T) {
-    if (T->getOpcode() == I4004::BR) {
-      // Unconditional branch: its target is the (new) TBB. A BR must be the
-      // last terminator; anything after it is dead.
-      TBB = T->getOperand(0).getMBB();
+    unsigned Op = T->getOpcode();
+    if (T->isDebugInstr())
+      continue;
+    if (Op == I4004::BR) {
+      // Unconditional branch. If a conditional was already recorded, this is
+      // the false-path target (FBB); otherwise it is TBB.
+      if (Cond.empty())
+        TBB = T->getOperand(0).getMBB();
+      else
+        FBB = T->getOperand(0).getMBB();
       continue;
     }
-    // A conditional pseudo (BRCC*/BRZ/BRNZ) or anything else: not modeled.
+    if (isCondBr(Op)) {
+      // Only one conditional branch per block is modelled.
+      if (!Cond.empty())
+        return true;
+      // Operands: lhs(0), rhs(1), cc-imm(2), target MBB(3).
+      TBB = T->getOperand(3).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(Op));               // [0] opcode
+      Cond.push_back(MachineOperand::CreateImm(T->getOperand(2).getImm())); // [1] cc
+      Cond.push_back(T->getOperand(0));                            // [2] lhs
+      Cond.push_back(T->getOperand(1));                            // [3] rhs
+      continue;
+    }
+    // Any other terminator (BRZ/BRNZ, indirect, etc.): not modelled.
     return true;
   }
 
-  // Only an unconditional BR (or none) remained. If we found one, TBB is set
-  // and Cond is empty (unconditional). Fall-through otherwise.
+  // Consistency: a recorded conditional with no explicit BR falls through to
+  // the layout successor (FBB stays null, which the generic code reads as
+  // "fall through"). Pure-unconditional or fall-through are already set.
+  return false;
+}
+
+bool I4004InstrInfo::reverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const {
+  if (Cond.size() != 4)
+    return true; // cannot reverse
+  // Cond[1] is the I4004CC code; flip to its complement.
+  int CC = Cond[1].getImm();
+  int Rev;
+  switch (CC) {
+  case I4004CC::EQ:  Rev = I4004CC::NE;  break;
+  case I4004CC::NE:  Rev = I4004CC::EQ;  break;
+  case I4004CC::ULT: Rev = I4004CC::UGE; break;
+  case I4004CC::UGE: Rev = I4004CC::ULT; break;
+  case I4004CC::UGT: Rev = I4004CC::ULE; break;
+  case I4004CC::ULE: Rev = I4004CC::UGT; break;
+  default: return true;
+  }
+  Cond[1].setImm(Rev);
   return false;
 }
 
@@ -146,15 +196,36 @@ unsigned I4004InstrInfo::insertBranch(MachineBasicBlock &MBB,
                                       const DebugLoc &DL,
                                       int *BytesAdded) const {
   assert(TBB && "insertBranch must have a true destination");
-  // We only ever model unconditional branches (Cond empty, no FBB). A target
-  // that reports its conditional branches unanalyzable is never asked to
-  // re-insert them, so a non-empty Cond here would be a logic error.
-  assert(Cond.empty() && !FBB &&
-         "i4004 only inserts unconditional branches (conditionals are opaque)");
-  BuildMI(&MBB, DL, get(I4004::BR)).addMBB(TBB);
+  int Bytes = 0;
+  unsigned Count = 0;
+
+  if (Cond.empty()) {
+    // Unconditional branch to TBB.
+    assert(!FBB && "unconditional branch cannot have a false target");
+    BuildMI(&MBB, DL, get(I4004::BR)).addMBB(TBB);
+    Bytes += 2;
+    ++Count;
+  } else {
+    // Conditional: Cond = [opcode, cc, lhs, rhs]. Emit the BRCC to TBB.
+    assert(Cond.size() == 4 && "malformed i4004 branch condition");
+    unsigned Op = Cond[0].getImm();
+    BuildMI(&MBB, DL, get(Op))
+        .add(Cond[2])            // lhs
+        .add(Cond[3])            // rhs
+        .addImm(Cond[1].getImm()) // cc
+        .addMBB(TBB);
+    Bytes += 2;
+    ++Count;
+    // A false target needs a trailing unconditional branch.
+    if (FBB) {
+      BuildMI(&MBB, DL, get(I4004::BR)).addMBB(FBB);
+      Bytes += 2;
+      ++Count;
+    }
+  }
   if (BytesAdded)
-    *BytesAdded = 2; // JUN is a two-byte instruction.
-  return 1;
+    *BytesAdded = Bytes;
+  return Count;
 }
 
 unsigned I4004InstrInfo::removeBranch(MachineBasicBlock &MBB,
@@ -166,8 +237,10 @@ unsigned I4004InstrInfo::removeBranch(MachineBasicBlock &MBB,
     --I;
     if (I->isDebugInstr())
       continue;
-    // Only remove branches we model; stop at the first non-(modeled)-terminator.
-    if (I->getOpcode() != I4004::BR)
+    // Only remove branches we model (BR and the conditional BRCC pseudos);
+    // stop at the first non-(modeled)-terminator.
+    unsigned Op = I->getOpcode();
+    if (Op != I4004::BR && Op != I4004::BRCCi8 && Op != I4004::BRCCi16)
       break;
     Bytes += 2;
     I->eraseFromParent();
