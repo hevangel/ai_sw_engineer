@@ -69,6 +69,18 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
 
   setMinFunctionAlignment(Align(1));
   setPrefFunctionAlignment(Align(1));
+
+  // Control flow. BRCOND is handled by our TableGen patterns (BRZ/BRNZ on
+  // eq/ne-with-0). Expand the CC-folded forms into SETCC + BRCOND / SELECT so
+  // they funnel through the supported predicates; general SETCC lowering to
+  // the 4004's single ACC==0 / CY test is a later step (documented).
+  setOperationAction(ISD::BR_CC, MVT::i8, Expand);
+  setOperationAction(ISD::BR_CC, MVT::i16, Expand);
+  setOperationAction(ISD::SELECT_CC, MVT::i8, Expand);
+  setOperationAction(ISD::SELECT_CC, MVT::i16, Expand);
+  setOperationAction(ISD::BRCOND, MVT::Other, Legal);
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  setOperationAction(ISD::BRIND, MVT::Other, Expand);
 }
 
 const char *I4004TargetLowering::getTargetNodeName(unsigned Opcode) const {

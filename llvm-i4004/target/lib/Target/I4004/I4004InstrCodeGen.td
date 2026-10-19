@@ -78,6 +78,36 @@ def RETpseudo : Pseudo<(outs), (ins), [(i4004_ret)]>;
 } // isPseudo
 
 //===----------------------------------------------------------------------===//
+// Control flow (milestone 3b: unconditional + zero/nonzero conditional).
+//===----------------------------------------------------------------------===//
+
+// A basic-block branch target. Printed as a 12-bit absolute address; lowered to
+// JUN (unconditional) or JCN (conditional) by the expander, with the MC layer's
+// addr12/addr8 relocations resolving the label.
+def brtarget : Operand<OtherVT> {
+  let PrintMethod = "printAddr12";
+}
+
+// Unconditional branch -> JUN target.
+let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
+    isBarrier = 1 in
+def BR : Pseudo<(outs), (ins brtarget:$dst), [(br bb:$dst)]>;
+
+// Conditional branch on an i8 being zero / nonzero. The 4004 JCN tests ACC==0
+// (Z). The expander loads the operand's nibbles into ACC and emits JCN Z / NZ.
+let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
+    Defs = [ACC, CY], Uses = [ACC] in {
+  def BRZ  : Pseudo<(outs), (ins PR8:$val, brtarget:$dst), []>;
+  def BRNZ : Pseudo<(outs), (ins PR8:$val, brtarget:$dst), []>;
+}
+
+// brcond selection (BRZ/BRNZ on a boolean i8) will be added together with the
+// SETCC lowering step; for now only the unconditional BR carries a pattern.
+// BRZ/BRNZ are defined above so the expander and a later custom BR_CC lowering
+// can emit them, but no isel Pat references them yet (that needs working
+// setcc, a documented later milestone).
+
+//===----------------------------------------------------------------------===//
 // Extra selection patterns.
 //===----------------------------------------------------------------------===//
 

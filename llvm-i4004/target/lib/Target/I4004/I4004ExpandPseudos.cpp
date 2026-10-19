@@ -139,6 +139,37 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     MI.eraseFromParent();
     return true;
 
+  case I4004::BR: {
+    // Unconditional branch -> JUN target (reaches the whole 12-bit space;
+    // page-range checking is a linker concern -- abi.md sec.5).
+    BuildMI(MBB, MI, DL, TII->get(I4004::JUN)).add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case I4004::BRZ:
+  case I4004::BRNZ: {
+    // JCN condition nibble bits (isa.md sec.4): C1=invert, C2=ACC==0(Z). So
+    // Z -> 0x4 (branch if ACC==0), NZ -> 0xC (invert|Z).
+    const bool BrNZ = (MI.getOpcode() == I4004::BRNZ);
+    Register Val = MI.getOperand(0).getReg();
+    MachineOperand Dst = MI.getOperand(1);
+    auto [Hi, Lo] = nibbles(Val);
+    if (BrNZ) {
+      // Taken if any nibble nonzero: JCN NZ on lo, then JCN NZ on hi.
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Lo);
+      BuildMI(MBB, MI, DL, TII->get(I4004::JCN)).addImm(0xC).add(Dst);
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Hi);
+      BuildMI(MBB, MI, DL, TII->get(I4004::JCN)).addImm(0xC).add(Dst);
+    } else {
+      // Backbone BRZ assumes a boolean i8 (0/1): the low nibble suffices.
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Lo);
+      BuildMI(MBB, MI, DL, TII->get(I4004::JCN)).addImm(0x4).add(Dst);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
   case I4004::ADDi8:
     emitAddSub(MBB, MI, I4004::ADD);
     MI.eraseFromParent();
