@@ -61,13 +61,23 @@ To unblock, one of (ranked by cleanliness):
       PAGE4), and local MBB symbol in that section, and must iterate with
       placement to a fixed point (a same-bank call can become cross-bank as the
       section grows). Per-function budget is now < 1792 B so the growth fits.
-  (b) Move the `__tobank` stubs OUT of common into the BANKED region, one copy
-      per (callee, calling-bank), placed during `_place_rom_banked` and reached
-      by a same-bank `jun`. Avoids byte-rewriting; common keeps only runtime +
-      dispatch; banked region (spare at ~25 banks) absorbs the stubs.
+  (b) [TRIED, WRONG] Move the `__tobank` stubs into the BANKED region (one copy
+      per calling bank, in that bank's reserved tail). This LINKS the whole
+      firmware (verified: 40 banks, 83,968 B, common 2048/2048) BUT IS
+      INCORRECT: the stub sets the latch to the callee's bank, and the chips
+      bank-reload (and real hardware) then swaps the banked chips -- including
+      the page holding the stub's OWN remaining `jun callee` -- out from under
+      the running stub. A stub that switches the bank MUST live in COMMON (never
+      swapped). The banked exec test returned garbage; reverted.
   (c) Reclaim the ~340 B of common function-padding (pad only where a JCN/ISZ
-      actually crosses a page), freeing ~34 slots for the current 12-B stubs.
-Option (a) is the user's choice and the most compact; (b) is the lowest-risk.
+      actually crosses a page), freeing ~34 slots for the current 12-B COMMON
+      stubs. Correct but only buys a one-time ~34 slots (<65 needed), so pair
+      with fewer cross-bank callees.
+CONCLUSION: option (a) is the UNIQUE fully-correct unblock, because the forward
+switch must run in COMMON and __soft_ret already does exactly latch-set +
+cross-bank `jin` dispatch there. The firmware FIT is proven achievable (option b
+linked it); the only remaining work is option (a)'s in-place call-site rewrite,
+which keeps common holding just runtime + __soft_ret + __srtab + 3 push helpers.
 
 ## Item 2 — static per-call frame allocation (spill-corruption fix): DESIGNED
 The backend spills to a FIXED shared RAM region (chip0/reg3 @ 0x30) for EVERY
