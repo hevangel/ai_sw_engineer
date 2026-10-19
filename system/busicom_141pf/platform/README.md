@@ -4,12 +4,19 @@ Memory map, I/O, linker script and the **image runner** that executes any 4004
 ROM image on a whole-machine simulator and captures the printed tape.
 
 - [memory_map.md](memory_map.md) — ROM/RAM spaces and the 1280-byte budget
+  (plus the **Extended (xl) board** section: 16 × 4001 ROM + 16 × 4002 RAM)
 - [io_map.md](io_map.md) — ports, keyboard matrix, printer hammer word
 - [link.ld](link.ld) — target-image linker script (ROM 0x000–0x4FF, 4002 RAM
   arena + software-stack region; see the memory map below)
-- `runtime/` — reset code and the port-level drivers (milestone M3)
+- [link_xl.ld](link_xl.ld) — **xl**-board linker script (ROM 0x000–0xFFF;
+  `.data`/`.bss` on bank-0 chips 2–3, software stack on bank 1)
+- [rtl/busicom_141pf_xl.sv](rtl/busicom_141pf_xl.sv) — the extended RTL board
+  top, derived from the ai_hw_engineer `busicom_141pf.sv`
+- `runtime/` — reset code and the port-level drivers (milestone M3);
+  `runtime/tests/` includes the xl-board memory self-test
 - `scripts/run_image.sh` — runs an image on the RTL board (primary) or
-  `external/chips` (secondary) and emits the `rom_port_trace.txt` tape
+  `external/chips` (secondary) and emits the `rom_port_trace.txt` tape;
+  `--board stock|xl` selects the hardware variant
 
 ## The image runner
 
@@ -96,7 +103,55 @@ AI_HW_ENGINEER=/ai_hw_engineer BUSICOM_SPIN=1481 \
 scripts/compare.sh /tmp/t_rtl.txt           # PASS 42/42
 ```
 
-## JCN TEST-pin polarity (backend tie-breaker)
+## Extended (xl) board variant
+
+The compiled Rust firmware does not fit the stock board (runtime+crt0+HAL ≈ 697
+of 1280 ROM bytes, and the firmware's static state exceeds the stock 64-byte
+main RAM). The **xl** board keeps every Busicom I/O role identical and only adds
+memory, to the architectural maximum: **16 × 4001** ROM (4096 B) and **16 ×
+4002** RAM (640 B, 4 CM-RAM banks). See `memory_map.md` "Extended (xl) board"
+for the chip complement and map, `link_xl.ld` for the regions, and
+`rtl/busicom_141pf_xl.sv` for the RTL top (derived from the ai_hw_engineer
+`busicom_141pf.sv`, instantiating the same `intel_400x` modules by path; the
+front-panel capture and ROM-port select translator are copied verbatim).
+
+Select it with `run_image.sh --board xl` (default `stock`). The same runner,
+harness and chips adapter serve both boards:
+
+- **primary (RTL):** splits the image into 16 masks, Verilates the `*_xl` top
+  via a generated `board_sel.h` (so `tb_trace_main.cpp` compiles for either
+  board with no `-D` quote mangling), reads the 4-bit RAM1 lamp port from the
+  xl top's `ram1_port4` net.
+- **secondary (chips):** runs with `ram_count=4`. **FINDING:** the unmodified
+  external `chips` model stores a 4002 identity in a 2-bit `page_mask` and
+  `Board::new` panics for a chip index ≥ 4, so it can model only **one** CM-RAM
+  bank (≤ 4 chips). Bank 0 (4 chips) is the common ground both simulators run;
+  banks 1–3 are validated on the RTL board only. We do not edit `external/`.
+
+### xl verification
+
+Original 1280-byte ROM on the xl board (extra chips are invisible to it — it
+never fetches past 0x4FF or selects a RAM chip it was not wired to use):
+
+| Simulator | Result |
+|---|---|
+| secondary (chips, ram_count=4) | **846/846 payload lines identical, 42/42** |
+| primary (RTL, spin=1481) | **42/42** (full run) · 2/2 head confirmed at spin=760 |
+
+Added-memory self-test (`runtime/tests/`, verdict on the RAM1 lamp port,
+`LAMPS|7` = PASS):
+
+| Test | Simulator | Verdict |
+|---|---|---|
+| bank-0 256 cells (4 × 4002, incl. added chips 2,3) | chips | **PASS** |
+| bank-0 256 cells | RTL | **PASS** |
+| full 4-bank 1024 cells (all 16 × 4002, DCL per bank) | RTL | **PASS** |
+
+Negative control: the same bank-0 test with only 2 RAM chips present (added
+chips 2,3 absent) reports `LAMPS|1` = FAIL — the probe genuinely distinguishes
+present from absent memory. Build/run details: `runtime/tests/README_memtest_xl.md`.
+
+
 
 **Question (from the llvm-i4004 agent):** `external/chips` jumps on a `JCN` with
 condition bit C4 set when its internal TEST flag is HIGH; the MCS-4 manual says

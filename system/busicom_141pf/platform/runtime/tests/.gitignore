@@ -1,0 +1,3 @@
+# Generated memory-test images and maps (built by build_memtest_xl.sh in the
+# ai-sw-engineer container; not committed -- rebuild on demand).
+build/

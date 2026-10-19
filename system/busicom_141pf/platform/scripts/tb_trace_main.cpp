@@ -35,8 +35,37 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
-#include "Vbusicom_141pf.h"
-#include "Vbusicom_141pf___024root.h"
+// Board selection (default: stock five-ROM/two-RAM board). The xl build writes
+// a tiny generated header (board_sel.h) into the Verilator build dir and passes
+//   -DBOARD_SEL_HEADER
+// so this harness includes it; that header #defines BOARD_TOP / BOARD_HDR /
+// BOARD_ROOT_HDR / LAMP_MEMBER. Using a generated header instead of -D string
+// literals avoids the quote-mangling that happens when a "..."-valued -D is
+// threaded through Verilator -> make -> shell. With no defines at all this file
+// is byte-identical to the stock build. BOARD_TOP names the Verilated top;
+// V##BOARD_TOP is its class; BOARD_HDR/BOARD_ROOT_HDR are its generated headers;
+// LAMP_MEMBER is the --public-flat-rw root member holding the full 4-bit RAM1
+// lamp port (incl. spec-A9 bit 3).
+#ifdef BOARD_SEL_HEADER
+#include "board_sel.h"
+#endif
+#ifndef BOARD_TOP
+#define BOARD_TOP busicom_141pf
+#endif
+#ifndef BOARD_HDR
+#define BOARD_HDR "Vbusicom_141pf.h"
+#endif
+#ifndef BOARD_ROOT_HDR
+#define BOARD_ROOT_HDR "Vbusicom_141pf___024root.h"
+#endif
+#ifndef LAMP_MEMBER
+#define LAMP_MEMBER busicom_141pf__DOT__ram1_port
+#endif
+#define VCAT2(a,b) a##b
+#define VCAT(a,b) VCAT2(a,b)
+#define VTOP VCAT(V, BOARD_TOP)
+#include BOARD_HDR
+#include BOARD_ROOT_HDR
 #include "verilated.h"
 
 static const char *DIGITS[13] = {"0","1","2","3","4","5","6","7","8","9",".",".","-"};
@@ -51,7 +80,7 @@ struct Row {
 };
 
 struct Sim {
-    Vbusicom_141pf *dut;
+    VTOP *dut;
     int spin_cnt = 0;      // half-spin counter (tb_top spin_cnt)
     int drum_pos = 0;      // 0..12 position reported to the board
     Row row;
@@ -62,7 +91,7 @@ struct Sim {
     Sim() {
         const char *e = getenv("BUSICOM_SPIN");
         if (e && *e) spin_cycles = atoi(e);
-        dut = new Vbusicom_141pf;
+        dut = new VTOP;
         dut->clk = 0; dut->rst_n = 0; dut->clr_n = 0;
         dut->test_i = 0; dut->drum_idx_i = 0; dut->panel_tick_i = 0;
         dut->keys_mask_i = 0; dut->precision_i = 0; dut->rounding_i = 0;
@@ -160,7 +189,7 @@ struct Sim {
         // -- spec A9. The board's lamps_o port is only 3 bits wide (memory /
         // overflow / negative), so bit 3 is NOT observable there; we read the
         // internal 4-bit ram1_port (Verilator --public-flat-rw) to see it.
-        return dut->rootp->busicom_141pf__DOT__ram1_port & 0xF;
+        return dut->rootp->LAMP_MEMBER & 0xF;
     }
 };
 

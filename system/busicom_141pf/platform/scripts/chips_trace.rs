@@ -27,7 +27,16 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let image = std::fs::read(&args[1]).unwrap();
     let schedule = std::fs::read_to_string(&args[2]).unwrap();
-    let mut b = Board::new(image.clone(), 2);
+    // RAM 4002 count: stock board = 2 (bank 0 chips 0,1). The xl board passes
+    // a larger count as argv[3] (or $CHIPS_RAM_COUNT) to model the added 4002s
+    // across the four CM-RAM banks (chips grouped in banks of 4). rams[0]/[1]
+    // keep the printer/lamp roles regardless, so the tape decode is unchanged.
+    let ram_count: u8 = args
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .or_else(|| std::env::var("CHIPS_RAM_COUNT").ok().and_then(|s| s.parse().ok()))
+        .unwrap_or(2);
+    let mut b = Board::new(image.clone(), ram_count);
     let mut shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
     let mut spin = 0usize;
     let mut previous = 0;
@@ -38,7 +47,7 @@ fn main() {
     let sb = ["#","*","Ⅰ","Ⅱ","Ⅲ","M+","M-","T","K","E","Ex","C","M"];
     for line in schedule.lines() {
         if line.starts_with("#EXAMPLE") {
-            b = Board::new(image.clone(), 2);
+            b = Board::new(image.clone(), ram_count);
             shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
             spin = 0; previous = 0; red = false; row.fill(" ");
         }
