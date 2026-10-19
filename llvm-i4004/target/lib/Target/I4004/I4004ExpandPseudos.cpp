@@ -181,13 +181,17 @@ void I4004ExpandPseudos::emitBrCC(MachineBasicBlock &MBB, MachineInstr &MI,
 
   if (CC == I4004CC::EQ || CC == I4004CC::NE) {
     // Per-nibble independent equality. NE: branch if ANY nibble differs.
-    // EQ: branch only if ALL nibbles equal -> for all but the last, a nonzero
-    // nibble means "not equal" so jump to the fall-through successor; the last
-    // uses JCN Z to dest.
+    // EQ: for all but the last nibble, a nonzero nibble means "not equal" so
+    // jump to the fall-through successor; the last uses JCN Z to dest.
     MachineBasicBlock *FallThru = nullptr;
     for (MachineBasicBlock *S : MBB.successors())
       if (S != Dest)
         FallThru = S;
+    // These MBBs are reached by our late-inserted JCNs; force their labels so
+    // the AsmPrinter emits them even when one is the layout fall-through.
+    Dest->setLabelMustBeEmitted();
+    if (FallThru)
+      FallThru->setLabelMustBeEmitted();
     for (unsigned i = 0; i < N; ++i) {
       BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
       BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LN[i]);
