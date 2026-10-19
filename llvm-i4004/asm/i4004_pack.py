@@ -353,21 +353,25 @@ class Linker:
     def _soft_ret_bytes(self, srtab_lo):
         """Return the __soft_ret instruction bytes (verified encodings) that pop
         the 3-nibble return token off the P7 soft stack and dispatch through
-        __srtab (placed at page offset `srtab_lo`, which must be 0x80 so the
-        0x80 + 2*page add never carries out of the byte). The one in-body
-        jcn-nc relocation targets `.Lnocar` = the `iac` (byte index 27)."""
+        the __srtab (placed at page offset `srtab_lo`, which must be 0x80 so the
+        0x80 + 2*page add never carries out of the byte). The jin pointer is
+        built in P4 (R8:R9), the page temp is R10, so the return-value register
+        D1 = P2:P3 (i8 in P1, i16 in D1) is NOT clobbered. P0 = R0:R1 carries the
+        return OFFSET on to the per-page `jin p0` stub. The one case this
+        disturbs is a two-word aggregate return in D2 = P4:P5, which the firmware
+        does not use. The in-body jcn-nc relocation targets `.Lnocar` = `jin p4`
+        (body index 29)."""
         assert srtab_lo == 0x80, "synthesis pins __srtab at page offset 0x80"
-        # index:                0   1   2   3    4    5    6   7   8   9  10 ...
-        b = [0xaf,0xf8,0xbf,0x2f,0xe9,0xb8,   # 0-5   SSP--; rdm -> R8 (page)
+        b = [0xaf,0xf8,0xbf,0x2f,0xe9,0xba,   # 0-5   SSP--; rdm -> R10 (page)
              0xaf,0xf8,0xbf,0x2f,0xe9,0xb0,   # 6-11  SSP--; rdm -> R0 (off hi)
              0xaf,0xf8,0xbf,0x2f,0xe9,0xb1,   # 12-17 SSP--; rdm -> R1 (off lo)
-             0xa8,0xf1,0xf5,0xb5,             # 18-21 ld r8; clc; ral; xch r5
-             0xd8,0xb4,                       # 22-23 ldm 8; xch r4
-             0xa4,                            # 24    ld r4
+             0xaa,0xf1,0xf5,0xb9,             # 18-21 ld r10; clc; ral; xch r9
+             0xd8,0xb8,                       # 22-23 ldm 8; xch r8
+             0xa8,                            # 24    ld r8
              0x1a,0x00,                       # 25-26 jcn nc, .Lnocar (byte26 patched)
-             0xf2,0xb4,                       # 27-28 iac; xch r4
-             0x35]                            # 29    jin p2                <- .Lnocar
-        # jcn-nc skips the iac/xch when there is no carry, landing on `jin p2`
+             0xf2,0xb8,                       # 27-28 iac; xch r8
+             0x39]                            # 29    jin p4                <- .Lnocar
+        # jcn-nc skips the iac/xch when there is no carry, landing on `jin p4`
         # (body index 29). The jcn operand byte is index 26.
         return b, 29, 26  # bytes, .Lnocar index, jcn-operand index
 
