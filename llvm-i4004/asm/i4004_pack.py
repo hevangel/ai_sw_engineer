@@ -57,6 +57,7 @@ PUSH_OFF_SYM = "__push_off"
 PUSH_PG_SYM = "__push_pg"
 PUSH_PB_SYM = "__push_pb"
 PUSH1_SYM = "__push1"
+SAVE_P4P5_SYM = "__save_p4p5"
 
 # e_machine and relocation numbers -- must match the MC backend
 # (I4004ELFObjectWriter.cpp / ELFRelocs/I4004.def).
@@ -477,7 +478,19 @@ class Linker:
         p1 = []
         p1 += [0x2f,0xa0,0xe0]; p1 += inc_ssp()     # src p7; ld r0; wrm; SSP++
         p1 += [0xc0]                                # bbl 0
-        return off, pg, pb, p1
+        # __save_p4p5: save P4:P5 (R8..R11) to the FWD_SAVE RAM chars. A COMMON
+        # leaf (JMS/BBL, hardware depth 1) so the far thunk does not carry the
+        # 20-byte inline save -- halving the thunk (40->~20 B) so it fits a
+        # nearly-full bank's tail and rarely spills to the small common region.
+        # Clobbers only P0 + ACC; args in P1-P3 and the pair being saved survive.
+        S = self.FWD_SAVE
+        sv = []
+        sv += [0x20, S,   0x21, 0xa8, 0xe0]   # fim p0,S  ; src p0; ld r8 ; wrm
+        sv += [0x20, S+1, 0x21, 0xa9, 0xe0]   # fim p0,S+1; src p0; ld r9 ; wrm
+        sv += [0x20, S+2, 0x21, 0xaa, 0xe0]   # fim p0,S+2; src p0; ld r10; wrm
+        sv += [0x20, S+3, 0x21, 0xab, 0xe0]   # fim p0,S+3; src p0; ld r11; wrm
+        sv += [0xc0]                          # bbl 0
+        return off, pg, pb, p1, sv
 
     def _synth_softcall(self):
         """Flat-image synthesis: reserve the per-page `jin p0` stub at STUB_OFF
@@ -506,6 +519,7 @@ class Linker:
         self.push1_base = sr_base + 0x6a
         self.push_pg_base = sr_base + 0xa0
         self.push_pb_base = sr_base + 0xd0
+        self.save_p4p5_base = sr_base + 0xe6
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
@@ -513,6 +527,7 @@ class Linker:
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
         self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
         self.linker_syms[PUSH1_SYM] = self.push1_base
+        self.linker_syms[SAVE_P4P5_SYM] = self.save_p4p5_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         # the synthesized page occupies the whole 256 bytes (stub at 0xFC too)
         self.rom_used = max(self.rom_used, sr_base + PAGE)
@@ -552,6 +567,7 @@ class Linker:
         self.push1_base = sr_base + 0x6a
         self.push_pg_base = sr_base + 0xa0
         self.push_pb_base = sr_base + 0xd0
+        self.save_p4p5_base = sr_base + 0xe6
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
@@ -559,6 +575,7 @@ class Linker:
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
         self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
         self.linker_syms[PUSH1_SYM] = self.push1_base
+        self.linker_syms[SAVE_P4P5_SYM] = self.save_p4p5_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         self.common_used = max(self.common_used, sr_base + PAGE)
         # pages per bank image = common_bytes + bank_bytes, all 256-byte pages.
@@ -610,7 +627,7 @@ class Linker:
                 common_pairs.add((addr, to))
             else:
                 banked_pairs.add((addr, to, frm))
-        THUNK = 40   # 20 B inline save-P4:P5 + 16 B push/dispatch (8-bit bank) + slack
+        THUNK = 24   # jms __save_p4p5 (2) + 18 B push/dispatch (8-bit bank) + slack
         self._common_thunk_slots = None   # lazily opened _common_free_slots gen
         # banked-caller thunks: prefer the caller's own bank tail; fall back to
         # a common slot (always mapped, equally correct) when the bank is full.
@@ -740,13 +757,9 @@ class Linker:
             page = (tramp >> 8) & 0x0F         # trampoline page nibble
             bank_lo = callee_bank & 0x0F
             bank_hi = (callee_bank >> 4) & 0x0F
-            # inline save of P4:P5 (R8..R11) to the FWD_SAVE RAM chars.
-            b = []
-            b += [0x20, S,   0x21, 0xa8, 0xe0]   # fim p0,S  ; src p0; ld r8 ; wrm
-            b += [0x20, S+1, 0x21, 0xa9, 0xe0]   # fim p0,S+1; src p0; ld r9 ; wrm
-            b += [0x20, S+2, 0x21, 0xaa, 0xe0]   # fim p0,S+2; src p0; ld r10; wrm
-            b += [0x20, S+3, 0x21, 0xab, 0xe0]   # fim p0,S+3; src p0; ld r11; wrm
-            b += [
+            save = self.save_p4p5_base
+            b = [
+                0x50 | ((save >> 8) & 0xF), save & 0xFF,          # jms __save_p4p5
                 0x20, off,                              # fim p0, off   (R0=off.hi,R1=off.lo)
                 0x50 | ((push_off >> 8) & 0xF), push_off & 0xFF,  # jms __push_off
                 0x20, (page << 4) & 0xF0,               # fim p0, page<<4 (R0.hi nibble=page)
@@ -794,7 +807,7 @@ class Linker:
         # push_pg 0xa0..0xc9, push_pb 0xd0..0xe5. Reserve generously.
         used_on_srp = set()
         for a, b in [(0x00, 0x54), (0x54, 0x6a), (0x6a, 0x76),
-                     (0x80, 0xa0), (0xa0, 0xca), (0xd0, 0xe6)]:
+                     (0x80, 0xa0), (0xa0, 0xca), (0xd0, 0xe6), (0xe6, 0xfc)]:
             used_on_srp.update(range(a, b))
         start = self._common_used_fns
         for page_base in range(0, self.common_bytes, PAGE):
@@ -884,7 +897,7 @@ class Linker:
         # __push_off / __push_pg / __push_pb / __push1 leaf helpers (8-bit SSP
         # advance; no relocations). __push_pb + __push1 push the far-call
         # forward-token page + bank.lo + bank.hi (8-bit bank latch).
-        off_b, pg_b, pb_b, p1_b = self._push_tok_bytes()
+        off_b, pg_b, pb_b, p1_b, sv_b = self._push_tok_bytes()
         for i, byte in enumerate(off_b):
             img[self.push_off_base + i] = byte
         for i, byte in enumerate(pg_b):
@@ -893,6 +906,8 @@ class Linker:
             img[self.push_pb_base + i] = byte
         for i, byte in enumerate(p1_b):
             img[self.push1_base + i] = byte
+        for i, byte in enumerate(sv_b):
+            img[self.save_p4p5_base + i] = byte
         # __srtab: 16 entries `jun <stub on page k>` = 0x4<k>, 0xFC
         st = self.srtab_base
         for k in range(16):

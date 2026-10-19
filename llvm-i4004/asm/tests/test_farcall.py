@@ -121,10 +121,12 @@ __halt:\tjun __halt
         all_thunks.append((base, ca, cb, ln.bank_images[0] if isc else ln.bank_images[hb]))
     for (addr, cbk), (base, ca, cb) in ln.far_thunks_common.items():
         all_thunks.append((base, ca, cb, ln.bank_images[0]))
+    save = ln.linker_syms["__save_p4p5"]
     for base, ca, cb, im in all_thunks:
-        assert im[base] == 0x20 and im[base + 1] == S, "thunk[0] not `fim p0,FWD_SAVE`"
-        assert im[base + 34] == (0x40 | ((soft >> 8) & 0xF)), "thunk tail not jun __soft_ret hi"
-        assert im[base + 35] == (soft & 0xFF), "thunk tail not jun __soft_ret lo"
+        assert im[base] == (0x50 | ((save >> 8) & 0xF)) and im[base + 1] == (save & 0xFF), \
+            "thunk[0] not `jms __save_p4p5`"
+        assert im[base + 16] == (0x40 | ((soft >> 8) & 0xF)), "thunk tail not jun __soft_ret hi"
+        assert im[base + 17] == (soft & 0xFF), "thunk tail not jun __soft_ret lo"
         tramp = ln.far_restore[(ca, cb)]
         tb = tramp[0]
         timg = ln.bank_images[0] if tramp[3] else ln.bank_images[cb]
