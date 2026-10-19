@@ -359,6 +359,36 @@ exercised by the first consumer** — the firmware uses only `u8`/nibble
 arithmetic (`firmware/README.md`), so these are untested until a title needs
 them (Open Questions / testplan).
 
+### 6.1 Implemented runtime (`llvm-i4004/rt/`, branch `llvm/i4004-runtime`)
+
+The runtime now exists in 4004 assembly and is **execution-verified on
+`external/chips`** against a host reference (624 arithmetic/shift/logic cases +
+HAL/mem/stack suites, all green). Implemented: `__mulqi3`, `__udivqi3`,
+`__umodqi3` (+ internal `__udivmod`), `__negqi2`, `__ashlqi3`/`__lshrqi3`/
+`__ashrqi3`, `__andqi3`/`__orqi3`/`__xorqi3` (bit-serial, no ROM table),
+`__memset_ram`/`__memcpy_ram`/`__memmove_ram` (over 4002 **nibbles**), the BCD
+wrappers `__bcd_adjust`/`__key_decode`/`__tens_comp`/`__dec`, and the
+software-stack helpers `__push_byte`/`__pop_byte`/`__push3`/`__pop3`. Signed
+`__divqi3`/`__modqi3` are deliberately deferred (the firmware never needs them;
+shipping unverified would break "prove it"). Full register contracts and sizes:
+`llvm-i4004/rt/README.md`. Library + crt0 + HAL = 697 bytes of the 1280 budget.
+
+**Two ABI points the backend's codegen must honour (both load-bearing,
+discovered while verifying the runtime on `chips`):**
+
+1. **Multi-nibble subtract needs `CMC` between nibbles.** `SUB`/`SBM` compute
+   `ACC + ~R + ~CY` (isa.md §7). A multi-nibble (`i8`/`i16`) subtract must do
+   `CLC` once, `SUB` the low nibble, then **`CMC` before each higher nibble's
+   `SUB`**; otherwise the borrow propagates with the wrong sense and every
+   nibble above the lowest is off by one. The final `CY = 1` means "no borrow"
+   (`a >= b`). Verified on `chips`.
+2. **`BBL` clobbers the `i4` ACC return.** `BBL DDDD` loads `ACC ← DDDD` on
+   return, so a `JMS`/`BBL` callee **cannot** return an `i4` in ACC — the i4/i8
+   return register for an out-of-line call is **P1** (low nibble for i4). §4.2's
+   "ACC for i4" applies only to inlined / `JUN`-tail code. The backend should
+   prefer inlining the single-instruction BCD ops (keeping the result in ACC)
+   over calling the wrappers.
+
 ## 7. Open questions
 
 These are explicit unknowns, **not** guesses baked into the spec:
