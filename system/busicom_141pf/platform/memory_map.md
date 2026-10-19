@@ -108,6 +108,64 @@ Same AS-0 handle model `[bank:2][chip:2][reg:2][char:4]` as the stock script.
   banks**, so a deep call graph cannot corrupt live variables.
 - `link_xl.ld` ends with `ASSERT(. <= 0x1000, …)`, the 4096-byte ceiling.
 
+## Extended (xl+bank) ROM bank switching — a DEVIATION from the original hardware
+
+The Rust firmware compiled by `llvm-i4004` is far larger than the 4096-byte
+architectural ROM maximum (the 4004's 12-bit program counter addresses only
+16 × 4001 = 4 KiB). To run it at all we add a **ROM bank latch**, which the
+original Busicom 141-PF did NOT have. This is an explicit, documented hardware
+deviation; the original ROM never switches banks and runs identically with the
+latch tied to bank 0.
+
+### The latch
+- A 1-nibble latch on **4001 chip #3's output port** (`SRC` chip 3 then `WRR`).
+  Chips #0–#2 keep their Busicom port roles; chip #3's port is unwired on both
+  the stock and the plain-xl board, so writing it perturbs nothing on the
+  original ROM. The latch value (0..15) selects the active ROM **bank**.
+- **Reset** clears the latch to bank 0.
+
+### Address map (common + banked)
+- **Common region: ROM chips #0–#3 (addresses 0x000–0x3FF, 1 KiB).** Always
+  mapped from bank 0 regardless of the latch. Holds `.reset`/crt0, the HAL
+  glue, the hot libi4004rt helpers, and the **cross-bank call trampolines**, so
+  the code that performs a bank switch never unmaps itself.
+- **Banked region: ROM chips #4–#15 (addresses 0x400–0xFFF, 3 KiB per bank).**
+  Mapped from the bank the latch selects. Total ROM = 1 KiB common + N × 3 KiB.
+
+### Cross-bank call ABI (trampoline in the common region)
+A call whose target is in a different bank does NOT `JMS` the target directly
+(the target is not mapped until the latch is set, and setting it would unmap the
+caller). Instead the packer rewrites it to `JMS __bankcall_<target>` where the
+trampoline lives in the common region and does:
+1. push the caller's current bank nibble onto the P7 software stack;
+2. set the latch to the target's bank (`SRC p(chip3); LDM bank; WRR`);
+3. `JMS target` (now mapped);
+4. on return, pop the caller bank and restore the latch (`WRR`);
+5. `BBL` back to the caller.
+The hardware return stack is still ≤3 deep logically; the trampoline adds one
+level, so a cross-bank call costs one extra hardware-stack slot — the packer
+accounts for this when it refuses to deepen a graph past 3 (else it routes the
+subtree through the §4.4 software return stack).
+
+### Packer bank assignment
+`i4004_pack.py --banks N` assigns each function to a bank (call-graph aware:
+keep a callee in the same bank as its hot caller where it fits; the common
+region is bank-agnostic), lays out 1 KiB common + N × 3 KiB banked, emits the
+trampolines, and rewrites cross-bank `JMS`/`JUN` to the trampoline. The image
+file is `common(1KiB) || bank0_hi(3KiB) || bank1_hi(3KiB) || …`.
+
+### Simulator support (both must honour the latch)
+- **chips adapter** (`platform/scripts/chips_trace.rs`): the unmodified
+  `external/chips` model has no bank concept, so the adapter watches
+  `b.roms[3].ports`; on a change it rebuilds `b.roms[4..16]` (public `Vec`,
+  `ROM::new` is public) from the selected bank's 3 KiB. Chips #0–#3 stay bank 0.
+- **RTL xl top** (`platform/rtl/busicom_141pf_xl.sv`): a latch register captures
+  `WRR` to chip #3's port and gates the ROM chip-select / data-mux for chips
+  #4–#15 to read the selected bank's mask. Chips #0–#3 are unbanked.
+
+The original ROM (1280 B) never touches chip #3's port, so both runners reproduce
+`rom_port_trace.txt` byte-for-byte with the latch present (it stays at bank 0).
+
 Sources: MCS-4 data sheet (Nov 1971); 4002 chip-select (metal option + P0 + CM-RAM
 line) and DCL bank decode from `../ai_hw_engineer/design/intel_4002/src/intel_4002.sv`
 and `.../intel_4004/src/intel_4004.sv`; derived xl board top
