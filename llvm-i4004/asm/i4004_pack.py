@@ -1430,40 +1430,93 @@ class Linker:
                 "frame overlay: residual cycle after back-edge removal among "
                 f"{leftover[:8]}{'...' if len(leftover) > 8 else ''} -- a true "
                 "recursion needs an SSP-relative frame (abi.md 4.4).")
-        # 5. Place frames in CM-RAM BANK 0 (SRC-addressable low byte), after the
-        # linker's data/bss arena and clear of the firmware's reserved working
-        # set / I/O chips (handle < 0x20 on the xl board). Frames MUST be in
-        # bank 0 because the firmware reaches frame locals through POINTERs
-        # (LEA_FI -> LDRAMi8/STRAMi8) that dereference with a plain SRC under the
-        # current DCL bank; a frame in another CM-RAM bank would need every such
-        # deref to DCL-switch, which the opaque 16-bit pointer handle cannot
-        # drive. The soft stack lives in CM-RAM bank 1 (handle 0x100+) on the xl
-        # board, so it shares no physical 4002 with a bank-0 frame.
-        frame_origin = self.ram_origin + self.ram_used
-        if frame_origin < 0x20:
-            frame_origin = 0x20
+        # 5. Place frames across CM-RAM banks (DCL frame scheme). Each frame
+        # lives in ONE bank; the backend brackets every spill/reload/deref with
+        # `LD __framebank_<fn>; DCL ... LDM 0; DCL`, so a frame may sit in any
+        # bank 0..3 provided it does not straddle a 256-char bank boundary (an
+        # access INCs the char within one bank). The overlay gives each fn a
+        # LINEAR base so that simultaneously-live frames are disjoint; we remap
+        # that linear axis onto the usable bank WINDOWS with monotone,
+        # boundary-snapping shifts (gaps only inserted at a boundary, order
+        # never changed), which preserves disjointness. __framebank_<fn> is the
+        # DCL ACC code for the chosen bank (0->bank0, 1->1, 2->2, 4->bank3).
+        #
+        # Usable windows: by default banks 1,2,3 (each full 0x00..0xFF, 256
+        # chars = 768 total), leaving bank 0 entirely for the firmware working
+        # set + I/O + data/bss + soft stack. `self.frame_banks` overrides this
+        # (e.g. a flat single-bank test uses bank 0 only). A window is
+        # (bank_number, dcl_code, lo, hi).
+        DCL_CODE = {0: 0, 1: 1, 2: 2, 3: 4}
+        windows = getattr(self, "frame_banks", None)
+        if not windows:
+            windows = [(1, 0x00, 0x100), (2, 0x00, 0x100), (3, 0x00, 0x100)]
+        # normalise to (bank, dcl, lo, hi)
+        norm_windows = []
+        for w in windows:
+            if len(w) == 3:
+                bk, lo, hi = w
+            else:
+                bk, _dcl, lo, hi = w
+            norm_windows.append((bk, DCL_CODE[bk], lo, hi))
         total = max((base[fn] + frame_size[fn] for fn in allfns), default=0)
-        FRAME_RAM_LIMIT = 0x100   # CM-RAM bank 0 addressable SRC chars
-        if frame_origin + total > FRAME_RAM_LIMIT:
-            worst = max(allfns, key=lambda fn: base[fn] + frame_size[fn])
-            raise LinkError(
-                f"frame overlay: {len(allfns)} per-function frames need "
-                f"{total} chars from 0x{frame_origin:x} (deepest reaches "
-                f"0x{frame_origin+total:x} via '{worst}'), exceeding CM-RAM "
-                f"bank 0's SRC space (0x{FRAME_RAM_LIMIT:x}). Shrink spilling, "
-                f"split functions, or free bank-0 chars.")
+        # Order distinct frames by linear base, then size, for a stable monotone
+        # remap. We assign each a (bank_index, within-bank offset).
+        order = sorted(allfns, key=lambda fn: (base[fn], frame_size[fn], fn))
+        win_i = 0                 # current window index
+        win_cursor = norm_windows[0][2]  # next free offset in current window
+        last_lin = 0              # linear base already consumed
+        placed_bank = {}          # fn -> (bank, dcl, offset)
+        for fn in order:
+            sz = frame_size[fn]
+            # advance the window cursor by the gap since the previous frame's
+            # base (preserves the overlay's relative spacing / disjointness).
+            gap = base[fn] - last_lin
+            last_lin = base[fn]
+            win_cursor += gap
+            # find a window that can hold [cursor, cursor+sz) without straddle.
+            while True:
+                bk, dcl, lo, hi = norm_windows[win_i]
+                if win_cursor < lo:
+                    win_cursor = lo
+                if win_cursor + sz <= hi:
+                    break
+                # does not fit in this window -> move to the next, snapping the
+                # cursor to its base (a boundary gap; disjointness preserved as
+                # order is unchanged and no earlier frame is revisited).
+                win_i += 1
+                if win_i >= len(norm_windows):
+                    worst = max(allfns, key=lambda f: frame_size[f])
+                    raise LinkError(
+                        f"frame overlay: {len(allfns)} per-function frames "
+                        f"(total {total} chars, deepest path) do not fit the "
+                        f"usable CM-RAM frame windows "
+                        f"{[(b,hex(l),hex(h)) for b,_d,l,h in norm_windows]}; "
+                        f"largest single frame is '{worst}' "
+                        f"({frame_size[worst]} chars). Add a frame bank or "
+                        f"shrink spilling.")
+                win_cursor = norm_windows[win_i][2]
+            placed_bank[fn] = (bk, dcl, win_cursor)
+            win_cursor += sz
         for fn in allfns:
-            self.linker_syms[FRAME_PREFIX + fn] = frame_origin + base[fn]
+            bk, dcl, off = placed_bank[fn]
+            self.linker_syms[FRAME_PREFIX + fn] = off
+            self.linker_syms["__framebank_" + fn] = dcl
         self.frame_overlay_total = total
-        self.frame_overlay_origin = frame_origin
+        self.frame_overlay_origin = 0
         self.frame_count = len(allfns)
+        self.frame_placement = placed_bank
         if os.environ.get("I4004_FRAME_DEBUG"):
             import sys as _sys
-            print(f"[frames] {len(allfns)} fns, total {total} chars from "
-                  f"0x{frame_origin:x}", file=_sys.stderr)
+            per_bank = {}
+            for fn, (bk, _d, off) in placed_bank.items():
+                per_bank.setdefault(bk, 0)
+                per_bank[bk] = max(per_bank[bk], off + frame_size[fn])
+            print(f"[frames] {len(allfns)} fns, overlay total {total} chars; "
+                  f"per-bank high-water {per_bank}", file=_sys.stderr)
             for fn in sorted(allfns):
-                print(f"  __frame_{fn} = 0x{frame_origin+base[fn]:x} "
-                      f"size {frame_size[fn]}", file=_sys.stderr)
+                bk, dcl, off = placed_bank[fn]
+                print(f"  __frame_{fn} = bank{bk}:0x{off:02x} "
+                      f"(dcl {dcl}) size {frame_size[fn]}", file=_sys.stderr)
 
     def _linker_defined(self):
         self.linker_syms["__sstack_base"] = self.stack_origin
@@ -2034,7 +2087,32 @@ def main(argv=None):
     ap.add_argument("--no-far-calls", dest="far_calls", action="store_false",
                     help="restore the legacy common __tobank set-latch stubs "
                          "instead of far-call thunks (for A/B comparison).")
+    ap.add_argument("--frame-banks", dest="frame_banks", default="1,2,3",
+                    help="comma-separated CM-RAM banks (0..3) to place per-"
+                         "function frames in (DCL frame scheme). Each bank "
+                         "contributes its full 256 chars. Default '1,2,3' keeps "
+                         "bank 0 for the firmware working set + soft stack; pass "
+                         "'0' for a flat single-bank (bank-0) layout.")
     args = ap.parse_args(argv)
+
+    def _parse_frame_banks(spec):
+        wins = []
+        for tok in str(spec).split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            bk = int(tok, 0)
+            if bk < 0 or bk > 3:
+                raise SystemExit(f"--frame-banks: bank {bk} out of range 0..3")
+            # Bank 0 shares the chip with the firmware working set / I/O
+            # (0x00..0x1f), the data/bss arena and the soft stack (0x80..0xff);
+            # only 0x20..0x7f is free for frames there. Banks 1..3 are entirely
+            # free (the xl board's added 4002 quads), full 0x00..0xff.
+            if bk == 0:
+                wins.append((0, 0x20, 0x80))
+            else:
+                wins.append((bk, 0x00, 0x100))
+        return wins
 
     rom_len = args.max
     ram_origin, ram_len = 0x0000, 0x0040
@@ -2066,6 +2144,7 @@ def main(argv=None):
         ln.rewrite_cross_bank = args.rewrite_cross_bank
         ln.want_softcall = args.softcall
         ln.far_calls = args.far_calls
+        ln.frame_banks = _parse_frame_banks(args.frame_banks)
         if args.emit_trampolines:
             # pass 1: placement only, then write the trampoline source.
             if not args.banks:

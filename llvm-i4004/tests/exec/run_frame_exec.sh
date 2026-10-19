@@ -41,7 +41,7 @@ use chips::mcs4::Board; use arbitrary_int::u4;
 const COMMON: usize = $COMMONI; const BANKW: usize = $BANKI;
 fn view(c:&[u8],b:&[u8],bk:usize)->Vec<u8>{let mut v=vec![0u8;0x1000];let n=c.len().min(COMMON);v[..n].copy_from_slice(&c[..n]);let o=bk*BANKW;if o<b.len(){let m=(b.len()-o).min(BANKW);v[COMMON..COMMON+m].copy_from_slice(&b[o..o+m]);}v}
 fn main(){let a:Vec<String>=std::env::args().collect();let img=std::fs::read(&a[1]).unwrap();let cyc:usize=a[2].parse().unwrap();let nch:usize=a[3].parse().unwrap();
-let c=&img[..COMMON.min(img.len())];let bk=if img.len()>COMMON{&img[COMMON..]}else{&[][..]};let fb=COMMON/0x100;let mut bank=0usize;let mut b=Board::new(view(c,bk,bank),2);let mut prev=0u8;
+let c=&img[..COMMON.min(img.len())];let bk=if img.len()>COMMON{&img[COMMON..]}else{&[][..]};let fb=COMMON/0x100;let mut bank=0usize;let mut b=Board::new(view(c,bk,bank),16);let mut prev=0u8;
 for _ in 0..cyc{b.run_cycle();let lo=b.roms[3].ports.value();if lo!=prev{prev=lo;let l=((((b.roms[4].ports.value() as usize)&0xF)<<4)|((lo as usize)&0xF)) as usize;if l!=bank{bank=l;let v=view(c,bk,bank);for i in fb..16{if i<b.roms.len(){let s=i*0x100;let ch:[u8;0x100]=v[s..s+0x100].try_into().unwrap();b.roms[i]=chips::mcs4::rom4001::ROM::new(ch,u4::new(i as u8));}}}}}
 let mut out=Vec::new();for ch in 0..nch{out.push(b.rams[0].registers[0].characters.read_nibble(ch as u8).value().to_string());}
 println!("{}",out.join(" "));}
@@ -149,8 +149,13 @@ build_run () {  # $1 = extra pack args ; $2 = label
 }
 
 rc=0
-status "=== large bank (functions co-located; isolates frame correctness) ==="
-build_run "--banks 16 --common-bytes 0x800 --bank-bytes 0x800" "same-bank" || rc=1
-status "=== small bank (every call cross-bank; frames + DCL + far-calls) ==="
-build_run "--banks 16 --common-bytes $COMMON --bank-bytes $BANKW" "banked" || rc=1
+# --- flat frame bank (bank 0): baseline, frames share the firmware RAM bank ---
+status "=== large ROM bank, frames in CM-RAM bank 0 (flat frame layout) ==="
+build_run "--banks 16 --common-bytes 0x800 --bank-bytes 0x800 --frame-banks 0" "flat-frame" || rc=1
+# --- DCL-banked frames (banks 1-3), functions co-located (isolates frame DCL) -
+status "=== large ROM bank, frames in CM-RAM banks 1-3 (DCL frame scheme) ==="
+build_run "--banks 16 --common-bytes 0x800 --bank-bytes 0x800 --frame-banks 1,2,3" "banked-frame" || rc=1
+# --- DCL-banked frames AND every call cross-ROM-bank (frames + far-calls) -----
+status "=== small ROM bank (every call cross-bank) + frames in banks 1-3 ==="
+build_run "--banks 16 --common-bytes $COMMON --bank-bytes $BANKW --frame-banks 1,2,3" "banked-frame+farcall" || rc=1
 exit $rc

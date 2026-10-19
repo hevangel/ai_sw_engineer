@@ -53,11 +53,52 @@ private:
   // firmware's many address-taken frame locals. Set once per function.
   std::string FrameSym;      // "__frame_<fn>"
 
+  // DCL-banked frames (DCL frame scheme). A function's frame may live in any
+  // CM-RAM bank 0..3; the packer places it and defines __framebank_<fn> as an
+  // ABSOLUTE linker symbol whose value is the DCL ACC code for that bank
+  // (0->bank0, 1->bank1, 2->bank2, 4->bank3; code 3 = banks 1+2 at once and is
+  // never emitted). Because the firmware's soft stack, __cur_bank mirror and
+  // every soft-call push/pop helper live in CM-RAM bank 0 and address it with a
+  // plain SRC assuming DCL==0, EVERY banked frame access MUST bracket itself
+  // with `LD <bank>; DCL` before and `LDM 0; DCL` after, so DCL is always
+  // restored to 0 before control can reach a bank-0-assuming helper (including
+  // the CALLSOFT prologue push that runs between two spills in this function).
+  std::string FrameBankSym;  // "__framebank_<fn>"
+
   // Return the hi (sub_hi) and lo (sub_lo) nibble physical registers of a pair.
   std::pair<Register, Register> nibbles(Register Pair) const {
     Register Hi = TRI->getSubReg(Pair, I4004::sub_hi);
     Register Lo = TRI->getSubReg(Pair, I4004::sub_lo);
     return {Hi, Lo};
+  }
+
+  // Emit `FIM P0, __framebank_<fn> ; LD r1 ; DCL` -- select this function's
+  // frame bank. The IMM8 reloc on __framebank_<fn> lands the DCL code (<=4) in
+  // the FIM low byte, so R0(hi)=0, R1(lo)=code; LD R1 loads it into ACC and DCL
+  // commits it. Clobbers P0 + ACC (both already in the pseudo's Defs).
+  void emitFrameDcl(MachineBasicBlock &MBB, MachineInstr &MI) {
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(I4004::P0)
+        .addExternalSymbol(FrameBankSym.c_str(), 0);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(P0Lo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::DCL));
+  }
+
+  // Emit `LDM 0 ; DCL` -- restore DCL to bank 0 (the firmware's canonical bank
+  // for the soft stack, data arena and __cur_bank mirror). Clobbers ACC.
+  void emitFrameDclReset(MachineBasicBlock &MBB, MachineInstr &MI) {
+    const DebugLoc &DL = MI.getDebugLoc();
+    BuildMI(MBB, MI, DL, TII->get(I4004::LDM)).addImm(0);
+    BuildMI(MBB, MI, DL, TII->get(I4004::DCL));
+  }
+
+  // Load a DCL code value held in a register nibble into ACC and commit it.
+  void emitDclFromReg(MachineBasicBlock &MBB, MachineInstr &MI, Register Nib) {
+    const DebugLoc &DL = MI.getDebugLoc();
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Nib);
+    BuildMI(MBB, MI, DL, TII->get(I4004::DCL));
   }
 
   bool expandMI(MachineBasicBlock &MBB, MachineInstr &MI);
@@ -357,11 +398,14 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
   }
 
   case I4004::LEA_FI: {
-    // dst(DR16) = RAM address of a frame slot. Operand1 is the WITHIN-FRAME
-    // char offset (set by eliminateFrameIndex); the low pair is __frame_<fn> +
-    // off (R_I4004_IMM8, packer-assigned per-function base in bank 0), high
-    // pair 0. Because frames live in bank 0 the resulting pointer dereferences
-    // with a plain SRC, so address-taken frame locals keep working.
+    // dst(DR16) = RAM address of a frame slot (DCL frame scheme). Operand1 is
+    // the WITHIN-FRAME char offset (set by eliminateFrameIndex); the low pair
+    // is __frame_<fn> + off (R_I4004_IMM8, packer-assigned per-function base,
+    // a 0..0xFF char index WITHIN this function's CM-RAM bank). The frame may
+    // live in CM-RAM bank 0..3, so the HIGH pair carries the DCL bank code in
+    // its low nibble (R_I4004_IMM8 on __framebank_<fn>, value <=4), high nibble
+    // 0. A deref of this pointer (LDRAMi8/STRAMi8/LDRAMi16/STRAMi16) reads
+    // ptr.hi.lo, DCL-selects that bank, accesses, then restores DCL 0.
     Register Dst = MI.getOperand(0).getReg();
     int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     Register LoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
@@ -369,8 +413,10 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
         .addReg(LoP)
         .addExternalSymbol(FrameSym.c_str(), Off);
-    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
-    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm(0);
+    // high pair = DCL bank code (low nibble), high nibble 0.
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(HiP)
+        .addExternalSymbol(FrameBankSym.c_str(), 0);
     MI.eraseFromParent();
     return true;
   }
@@ -447,12 +493,20 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
 
   case I4004::LDRAMi8: {
     // dst(i8) = RAM[ptr]. ptr is a DR16; its low sub-pair (sub_pair_lo) is the
-    // SRC address byte, whose low nibble (sub_lo) is the char index.
+    // SRC address byte, whose low nibble (sub_lo) is the char index. Its HIGH
+    // sub-pair's low nibble (sub_pair_hi.sub_lo) is the DCL bank code (DCL frame
+    // scheme): a frame pointer carries its CM-RAM bank there; a bank-0 pointer
+    // (global, firmware data, LEA_GA) carries 0, so the DCL select is a
+    // harmless re-select of bank 0. Bracket: LD bank;DCL ... LDM 0;DCL so DCL
+    // is restored to 0 before any bank-0-assuming soft-call helper can run.
     Register Dst = MI.getOperand(0).getReg();
     Register Ptr = MI.getOperand(1).getReg();
     Register LoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    Register HiPair = TRI->getSubReg(Ptr, I4004::sub_pair_hi);
+    Register BankReg = TRI->getSubReg(HiPair, I4004::sub_lo);
     Register CharReg = TRI->getSubReg(LoPair, I4004::sub_lo);
     auto [DHi, DLo] = nibbles(Dst);
+    emitDclFromReg(MBB, MI, BankReg);
     BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
     BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
     BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DLo, RegState::Define);
@@ -464,17 +518,21 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(CharReg);
     BuildMI(MBB, MI, DL, TII->get(I4004::DAC));
     BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(CharReg, RegState::Define);
+    emitFrameDclReset(MBB, MI);
     MI.eraseFromParent();
     return true;
   }
 
   case I4004::STRAMi8: {
-    // RAM[ptr] = val(i8). Same addressing as LDRAMi8.
+    // RAM[ptr] = val(i8). Same addressing + DCL bracket as LDRAMi8.
     Register Val = MI.getOperand(0).getReg();
     Register Ptr = MI.getOperand(1).getReg();
     Register LoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    Register HiPair = TRI->getSubReg(Ptr, I4004::sub_pair_hi);
+    Register BankReg = TRI->getSubReg(HiPair, I4004::sub_lo);
     Register CharReg = TRI->getSubReg(LoPair, I4004::sub_lo);
     auto [VHi, VLo] = nibbles(Val);
+    emitDclFromReg(MBB, MI, BankReg);
     BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(LoPair);
     BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(VLo);
     BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
@@ -485,6 +543,7 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(CharReg);
     BuildMI(MBB, MI, DL, TII->get(I4004::DAC));
     BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(CharReg, RegState::Define);
+    emitFrameDclReset(MBB, MI);
     MI.eraseFromParent();
     return true;
   }
@@ -494,11 +553,18 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     // i16 RAM access: four consecutive chars, low byte first. Copy the pointer
     // byte into P0 so we can INC it 0..3 without disturbing the pointer, then
     // SRC P0 / RDM|WRM each char. Value halves: low pair = chars 0,1; high pair
-    // = chars 2,3 (nibble order low,hi within each byte).
+    // = chars 2,3 (nibble order low,hi within each byte). DCL frame scheme: the
+    // pointer's HIGH sub-pair low nibble is the CM-RAM bank code -- select it
+    // before the access and restore DCL 0 after (bank-0 pointers carry 0, a
+    // harmless re-select). The bank read happens BEFORE P0 is overwritten.
     const bool IsLoad = (MI.getOpcode() == I4004::LDRAMi16);
     Register ValDR = MI.getOperand(0).getReg();
     Register Ptr = MI.getOperand(1).getReg();
     Register PtrLoPair = TRI->getSubReg(Ptr, I4004::sub_pair_lo);
+    Register PtrHiPair = TRI->getSubReg(Ptr, I4004::sub_pair_hi);
+    Register BankReg = TRI->getSubReg(PtrHiPair, I4004::sub_lo);
+    // DCL-select the pointer's bank (reads BankReg; clobbers ACC -- a Def).
+    emitDclFromReg(MBB, MI, BankReg);
     // P0 = copy of the pointer's low byte (address), via LD/XCH nibble moves.
     Register P0Hi = TRI->getSubReg(I4004::P0, I4004::sub_hi);
     Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
@@ -526,6 +592,7 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       if (i != 3)
         BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
     }
+    emitFrameDclReset(MBB, MI);
     MI.eraseFromParent();
     return true;
   }
@@ -545,11 +612,11 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     // RAM[frame + off] = src, in this function's per-function frame. Operand1 is
     // the WITHIN-FRAME char offset (set by eliminateFrameIndex); the base char
     // comes from the external symbol __frame_<fn> (packer-assigned by a
-    // call-graph overlay, brief decision 1) so a callee never clobbers a
-    // caller's spills. Frames live in CM-RAM bank 0 alongside the firmware's
-    // data and soft stack, so a frame POINTER (LEA_FI) dereferences with a
-    // plain SRC -- no DCL bank bracket, which could not compose with the
-    // firmware's 376 address-taken frame locals.
+    // call-graph overlay) so a callee never clobbers a caller's spills. DCL
+    // frame scheme: the frame may live in CM-RAM bank 0..3; __framebank_<fn> is
+    // its DCL code. Bracket the access: select the frame bank, SRC/WRM, then
+    // restore DCL 0 so the soft stack / soft-call helpers (bank 0, plain SRC)
+    // and any CALLSOFT push between two spills in this function stay correct.
     Register Src = MI.getOperand(0).getReg();
     int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     const bool Wide = (MI.getOpcode() == I4004::SPILL16);
@@ -566,6 +633,8 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
     }
+    // Select the frame bank FIRST (clobbers P0 + ACC), then load the address.
+    emitFrameDcl(MBB, MI);
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
         .addReg(I4004::P0)
         .addExternalSymbol(FrameSym.c_str(), Off);
@@ -576,12 +645,15 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       if (i + 1 < Nibs.size())
         BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
     }
+    emitFrameDclReset(MBB, MI);
     MI.eraseFromParent();
     return true;
   }
 
   case I4004::RELOAD8:
   case I4004::RELOAD16: {
+    // dst = RAM[frame + off], this function's per-function frame. DCL frame
+    // scheme: select __framebank_<fn> before the read, restore DCL 0 after.
     Register Dst = MI.getOperand(0).getReg();
     int64_t Off = MI.getOperand(1).getImm() & 0xFF;
     const bool Wide = (MI.getOpcode() == I4004::RELOAD16);
@@ -598,6 +670,7 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
       Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
     }
+    emitFrameDcl(MBB, MI);
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
         .addReg(I4004::P0)
         .addExternalSymbol(FrameSym.c_str(), Off);
@@ -608,6 +681,7 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       if (i + 1 < Nibs.size())
         BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
     }
+    emitFrameDclReset(MBB, MI);
     MI.eraseFromParent();
     return true;
   }
@@ -624,6 +698,7 @@ bool I4004ExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   // a function with no frame access emits no reference, so the packer never
   // allocates one for it.
   FrameSym = ("__frame_" + MF.getName()).str();
+  FrameBankSym = ("__framebank_" + MF.getName()).str();
 
   bool Changed = false;
 
