@@ -78,7 +78,7 @@ fn main() {
         .unwrap_or(2);
     let mut b = Board::new(make_initial(&image), ram_count);
     let mut cur_bank = 0usize;
-    let mut prev_latch = b.roms[3].ports.value();
+    let mut prev_latch = 0u8;  // 8-bit latch (port4<<4|port3); bank 0 at reset
     let mut shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
     let mut spin = 0usize;
     let mut previous = 0;
@@ -90,7 +90,7 @@ fn main() {
     for line in schedule.lines() {
         if line.starts_with("#EXAMPLE") {
             b = Board::new(make_initial(&image), ram_count);
-            cur_bank = 0; prev_latch = b.roms[3].ports.value();
+            cur_bank = 0; prev_latch = 0;
             shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
             spin = 0; previous = 0; red = false; row.fill(" ");
         }
@@ -105,15 +105,24 @@ fn main() {
             let current = if tick < 64 { key } else { 0 };
             for _ in 0..1481 {
                 b.run_cycle();
-                // xl bank latch: on a change to 4001 chip 3's output port,
-                // swap the banked chips (>= first_banked_chip) to the selected
-                // bank's window. Common chips + RAM + CPU state are untouched.
+                // xl bank latch (8-bit): low nibble on 4001 chip-3's output
+                // port, high nibble on chip-4's. __soft_ret writes the HIGH
+                // nibble (chip 4) FIRST, then the LOW nibble (chip 3), so the
+                // chip-3 write is the COMMIT: trigger the banked-ROM reload only
+                // on a chip-3 change and read the (already-settled) high nibble
+                // from chip 4. Triggering on either nibble would reload at the
+                // transient (newhi<<4)|oldlo mid-update and map a wrong bank
+                // while control is still in the dispatch. bank=(port4<<4)|port3;
+                // 8 bits lifts the 16-bank ceiling to the 45+ banks the firmware
+                // needs.
                 if banked_image {
-                    let latch = b.roms[3].ports.value() as usize;
-                    if latch != prev_latch as usize {
-                        prev_latch = latch as u8;
-                        if latch != cur_bank {
-                            cur_bank = latch;
+                    let lo = b.roms[3].ports.value();
+                    if lo != prev_latch {
+                        prev_latch = lo;
+                        let bankn = (((b.roms[4].ports.value() as usize) & 0xF) << 4)
+                            | ((lo as usize) & 0xF);
+                        if bankn != cur_bank {
+                            cur_bank = bankn;
                             let view = bank_view(&common, &banked, cur_bank, bank_bytes);
                             for i in first_banked_chip..16usize {
                                 if i < b.roms.len() {

@@ -41,8 +41,8 @@ use chips::mcs4::Board; use arbitrary_int::u4;
 const COMMON: usize = $COMMONI; const BANKW: usize = $BANKI;
 fn view(c:&[u8],b:&[u8],bk:usize)->Vec<u8>{let mut v=vec![0u8;0x1000];let n=c.len().min(COMMON);v[..n].copy_from_slice(&c[..n]);let o=bk*BANKW;if o<b.len(){let m=(b.len()-o).min(BANKW);v[COMMON..COMMON+m].copy_from_slice(&b[o..o+m]);}v}
 fn main(){let a:Vec<String>=std::env::args().collect();let img=std::fs::read(&a[1]).unwrap();let cyc:usize=a[2].parse().unwrap();let nch:usize=a[3].parse().unwrap();
-let c=&img[..COMMON.min(img.len())];let bk=if img.len()>COMMON{&img[COMMON..]}else{&[][..]};let fb=COMMON/0x100;let mut bank=0usize;let mut b=Board::new(view(c,bk,bank),2);let mut prev=b.roms[3].ports.value();
-for _ in 0..cyc{b.run_cycle();let l=b.roms[3].ports.value() as usize;if l!=prev as usize{prev=l as u8;if l!=bank{bank=l;let v=view(c,bk,bank);for i in fb..16{if i<b.roms.len(){let s=i*0x100;let ch:[u8;0x100]=v[s..s+0x100].try_into().unwrap();b.roms[i]=chips::mcs4::rom4001::ROM::new(ch,u4::new(i as u8));}}}}}
+let c=&img[..COMMON.min(img.len())];let bk=if img.len()>COMMON{&img[COMMON..]}else{&[][..]};let fb=COMMON/0x100;let mut bank=0usize;let mut b=Board::new(view(c,bk,bank),2);let mut prev=0u8;
+for _ in 0..cyc{b.run_cycle();let lo=b.roms[3].ports.value();if lo!=prev{prev=lo;let l=((((b.roms[4].ports.value() as usize)&0xF)<<4)|((lo as usize)&0xF)) as usize;if l!=bank{bank=l;let v=view(c,bk,bank);for i in fb..16{if i<b.roms.len(){let s=i*0x100;let ch:[u8;0x100]=v[s..s+0x100].try_into().unwrap();b.roms[i]=chips::mcs4::rom4001::ROM::new(ch,u4::new(i as u8));}}}}}
 let mut out=Vec::new();for ch in 0..nch{out.push(b.rams[0].registers[0].characters.read_nibble(ch as u8).value().to_string());}
 println!("{}",out.join(" "));}
 RS
@@ -60,6 +60,18 @@ _start:
 	src	p0
 	ldm	0
 	wrm
+	fim	p0, 0x0e
+	src	p0
+	ldm	0
+	wrm
+	fim	p0, 0x30
+	src	p0
+	ldm	0
+	wrr
+	fim	p0, 0x40
+	src	p0
+	ldm	0
+	wrr
 	fim	p7, 0x40
 	fim	p0, %lo8(__halt)
 	jms	__push_off

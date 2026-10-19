@@ -32,15 +32,30 @@ _start:
 	ldm	0
 	dcl
 
-	; -- 1b. active-bank mirror = 0 (xl bank switching). The ROM bank latch
-	; (4001 chip 3 port) resets to bank 0; the trampolines keep a RAM mirror of
-	; the active bank in char 0x0F of chip0/reg0 (memory_map.md). Clear it so a
-	; cross-bank return restores bank 0 correctly. Harmless on the stock board
-	; (no trampoline ever reads it). __bankcall_* use SRC 0x0F.
+	; -- 1b. active-bank mirror = 0 (xl bank switching, 8-bit latch). The ROM
+	; bank latch is now TWO 4001 output-port nibbles: low on chip 3 (SRC 0x30),
+	; high on chip 4 (SRC 0x40), giving an 8-bit (256-bank) selector that the
+	; >16-bank firmware needs. The trampolines/__soft_ret keep a 2-char RAM
+	; mirror of the active bank: low nibble @ 0x0F, high nibble @ 0x0E of
+	; chip0/reg0. Clear both mirror chars AND both latch ports so the reset
+	; state is bank 0 and the halt return token (pushed below via __push_pg,
+	; which reads the mirror) carries bank 0. Harmless on the stock board.
 	fim	p0, 0x0f
 	src	p0
 	ldm	0
-	wrm
+	wrm			; __cur_bank.lo = 0
+	fim	p0, 0x0e
+	src	p0
+	ldm	0
+	wrm			; __cur_bank.hi = 0
+	fim	p0, 0x30
+	src	p0
+	ldm	0
+	wrr			; ROM bank latch low nibble (chip 3) = 0
+	fim	p0, 0x40
+	src	p0
+	ldm	0
+	wrr			; ROM bank latch high nibble (chip 4) = 0
 
 	; -- 2. SSP = __sstack_base --
 	fim	p7, __sstack_base

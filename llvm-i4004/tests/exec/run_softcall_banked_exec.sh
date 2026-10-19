@@ -72,12 +72,14 @@ fn main() {
     let first_banked = COMMON / 0x100;           // chip index where banks begin
     let mut bank = 0usize;
     let mut b = Board::new(view(common, banked, bank), 2);
-    let mut prev = b.roms[3].ports.value();
+    let mut prev = 0u8;
     for _ in 0..cycles {
         b.run_cycle();
-        let latch = b.roms[3].ports.value() as usize;
-        if latch != prev as usize {
-            prev = latch as u8;
+        let lo = b.roms[3].ports.value();
+        if lo != prev {
+            prev = lo;
+            let latch = (((b.roms[4].ports.value() as usize) & 0xF) << 4)
+                | ((lo as usize) & 0xF);
             if latch != bank {
                 bank = latch;
                 let v = view(common, banked, bank);
@@ -113,7 +115,19 @@ _start:
 	fim	p0, 0x0f
 	src	p0
 	ldm	0
-	wrm			; __cur_bank = 0
+	wrm			; __cur_bank.lo = 0
+	fim	p0, 0x0e
+	src	p0
+	ldm	0
+	wrm			; __cur_bank.hi = 0
+	fim	p0, 0x30
+	src	p0
+	ldm	0
+	wrr			; bank latch lo (chip 3) = 0
+	fim	p0, 0x40
+	src	p0
+	ldm	0
+	wrr			; bank latch hi (chip 4) = 0
 	fim	p7, 0x40	; SSP base
 	fim	p0, %lo8(__halt)
 	jms	__push_off

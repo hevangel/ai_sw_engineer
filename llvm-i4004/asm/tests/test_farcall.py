@@ -123,8 +123,8 @@ __halt:\tjun __halt
         all_thunks.append((base, ca, cb, ln.bank_images[0]))
     for base, ca, cb, im in all_thunks:
         assert im[base] == 0x20 and im[base + 1] == S, "thunk[0] not `fim p0,FWD_SAVE`"
-        assert im[base + 30] == (0x40 | ((soft >> 8) & 0xF)), "thunk tail not jun __soft_ret hi"
-        assert im[base + 31] == (soft & 0xFF), "thunk tail not jun __soft_ret lo"
+        assert im[base + 34] == (0x40 | ((soft >> 8) & 0xF)), "thunk tail not jun __soft_ret hi"
+        assert im[base + 35] == (soft & 0xFF), "thunk tail not jun __soft_ret lo"
         tramp = ln.far_restore[(ca, cb)]
         tb = tramp[0]
         timg = ln.bank_images[0] if tramp[3] else ln.bank_images[cb]

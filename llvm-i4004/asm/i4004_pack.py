@@ -56,6 +56,7 @@ SRTAB_SYM = "__srtab"
 PUSH_OFF_SYM = "__push_off"
 PUSH_PG_SYM = "__push_pg"
 PUSH_PB_SYM = "__push_pb"
+PUSH1_SYM = "__push1"
 
 # e_machine and relocation numbers -- must match the MC backend
 # (I4004ELFObjectWriter.cpp / ELFRelocs/I4004.def).
@@ -386,23 +387,31 @@ class Linker:
 
     # -- software-call return dispatch synthesis (abi.md 4.4.1/4.4.2) --------
     def _soft_ret_bytes(self, srtab_lo):
-        """__soft_ret (verified encodings). Pops the 4-nibble return token off
-        the P7 soft stack, top nibble first: BANK, then page, off.hi, off.lo
-        (SSP decremented as a full 8-bit pointer, SSP += 0xFF per pop). The bank
-        nibble is written to the ROM bank latch (4001 chip-3 output port, SRC
-        0x30, WRR) AND to the __cur_bank RAM mirror (SRC 0x0F, WRM), restoring
-        the CALLER's bank before control returns. Then it builds the jin pointer
-        in P4 (R8:R9) from __srtab (page offset `srtab_lo` = 0x80) + 2*page and
-        JINs via the per-page stub. Scratch: R11 (bank), R10 (page), P4, P0; the
-        return-value register D1 = P2:P3 (and P1) is NOT clobbered; P0 = R0:R1
-        carries the return OFFSET to the stub. jcn-nc -> .Lnocar = `jin p4`."""
+        """__soft_ret (verified encodings). Pops the 5-nibble return token off
+        the P7 soft stack, top nibble first: BANK.hi, BANK.lo, page, off.hi,
+        off.lo (SSP decremented as a full 8-bit pointer, SSP += 0xFF per pop).
+        The 8-bit bank = (hi<<4)|lo is written to the ROM bank latch -- the LOW
+        nibble to 4001 chip-3's output port (SRC 0x30, WRR) and the HIGH nibble
+        to 4001 chip-4's output port (SRC 0x40, WRR) -- AND mirrored to the two
+        __cur_bank RAM chars (lo @ 0x0F, hi @ 0x0E), restoring the CALLER's
+        (up to 8-bit) bank before control returns. An 8-bit latch lifts the
+        4-bit (16-bank) ceiling to 256 banks, which the >16-bank firmware needs.
+        Then it builds the jin pointer in P4 (R8:R9) from __srtab (page offset
+        `srtab_lo` = 0x80) + 2*page and JINs via the per-page stub. Scratch: R11
+        (bank.lo), R10 (page/bank.hi), P4, P0; the return-value register D1 =
+        P2:P3 (and P1) is NOT clobbered; P0 = R0:R1 carries the return OFFSET to
+        the stub. jcn-nc -> .Lnocar = `jin p4`."""
         assert srtab_lo == 0x80, "synthesis pins __srtab at page offset 0x80"
         def dec_ssp():
             # SSP (R14:R15) += 0xFF  (== SSP - 1, 8-bit, carry R15->R14)
             return [0xf1, 0xdf,0x8f,0xbf, 0xdf,0x8e,0xbe]
         b = []
-        # pop BANK -> R11 ; latch <- R11 (SRC 0x30 WRR) ; __cur_bank <- R11 (0x0F)
-        b += dec_ssp(); b += [0x2f,0xe9,0xbb]          # src p7; rdm; xch r11
+        # pop BANK.hi -> R10 ; latch hi <- R10 (SRC 0x40 WRR) ; cur_bank.hi 0x0E
+        b += dec_ssp(); b += [0x2f,0xe9,0xba]          # src p7; rdm; xch r10 (bank.hi)
+        b += [0x20,0x40,0x21,0xaa,0xe2]                # fim p0,0x40; src p0; ld r10; wrr
+        b += [0x20,0x0e,0x21,0xaa,0xe0]                # fim p0,0x0e; src p0; ld r10; wrm
+        # pop BANK.lo -> R11 ; latch lo <- R11 (SRC 0x30 WRR) ; cur_bank.lo 0x0F
+        b += dec_ssp(); b += [0x2f,0xe9,0xbb]          # src p7; rdm; xch r11 (bank.lo)
         b += [0x20,0x30,0x21,0xab,0xe2]                # fim p0,0x30; src p0; ld r11; wrr
         b += [0x20,0x0f,0x21,0xab,0xe0]                # fim p0,0x0f; src p0; ld r11; wrm
         b += dec_ssp(); b += [0x2f,0xe9,0xba]          # src p7; rdm; xch r10 (page)
@@ -427,15 +436,22 @@ class Linker:
     FWD_SAVE = 0x0A   # R8 -> 0x0A, R9 -> 0x0B, R10 -> 0x0C, R11 -> 0x0D
 
     def _push_tok_bytes(self):
-        """Two leaf push helpers (JMS/BBL, hardware depth 1), both using ONLY the
+        """Leaf push helpers (JMS/BBL, hardware depth 1), all using ONLY the
         scratch pair P0 and the SSP (P7) -- no argument register (P1/D1=P2:P3,
-        D2=P4:P5) is touched, so an i16 argument in D1/D2 survives:
+        D2=P4:P5) is touched, so an i16 argument in D1/D2 survives. With the
+        8-bit bank latch the token is 5 nibbles [off.lo, off.hi, page, bank.lo,
+        bank.hi], low-address-first:
           __push_off: write R1(off lo) then R0(off hi) at SSP, SSP += 2
-          __push_pg : write R0(page), then the CALLER bank read from the
-                      __cur_bank RAM mirror (SRC 0x0F), at SSP; SSP += 2
-        so the pushed token is [off.lo, off.hi, page, bank] low-address-first.
+          __push_pg : write R0(page), then the CALLER bank read from the two
+                      __cur_bank mirrors (lo @ 0x0F, hi @ 0x0E), SSP += 3.
+                      Used for the RETURN token.
+          __push_pb : write R0(page) then R1(bank.lo) at SSP, SSP += 2. Used by
+                      the far thunk for the FORWARD token's page+bank.lo; the
+                      thunk then pushes bank.hi with __push1 (the callee's bank
+                      is an explicit value the packer fills, not __cur_bank).
+          __push1   : write R0 at SSP, SSP += 1 (the forward token's bank.hi).
         SSP advances as a full 8-bit pointer (carry R15->R14). Returns
-        (off_bytes, pg_bytes)."""
+        (off_bytes, pg_bytes, pb_bytes, p1_bytes)."""
         def inc_ssp():
             return [0xf1, 0xd1,0x8f,0xbf, 0xd0,0x8e,0xbe]
         off = []
@@ -444,19 +460,24 @@ class Linker:
         off += [0xc0]                               # bbl 0
         pg = []
         pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(page); wrm; SSP++
-        pg += [0x20,0x0f,0x21,0xe9,0xb0]            # fim p0,0x0f; src p0; rdm; xch r0 (cur bank)
-        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(bank); wrm; SSP++
+        pg += [0x20,0x0f,0x21,0xe9,0xb0]            # fim p0,0x0f; src p0; rdm; xch r0 (cur bank.lo)
+        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(bank.lo); wrm; SSP++
+        pg += [0x20,0x0e,0x21,0xe9,0xb0]            # fim p0,0x0e; src p0; rdm; xch r0 (cur bank.hi)
+        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(bank.hi); wrm; SSP++
         pg += [0xc0]                                # bbl 0
-        # __push_pb: push R0(page) then R1(BANK) at SSP; SSP += 2. Unlike
-        # __push_pg (which reads the CALLER bank from __cur_bank), this takes an
-        # EXPLICIT bank already staged in R1 -- the far-call forward token for a
-        # cross-bank callee carries the CALLEE's bank, not the current one.
-        # Leaf (JMS/BBL depth 1); touches only P0/SSP, so args in P1-P3 survive.
+        # __push_pb: push R0(page) then R1(bank.lo) at SSP; SSP += 2. Takes an
+        # EXPLICIT bank.lo already staged in R1 (the far-call forward token for a
+        # cross-bank callee carries the CALLEE's bank). The thunk pushes bank.hi
+        # separately with __push1. Leaf; touches only P0/SSP so args survive.
         pb = []
         pb += [0x2f,0xa0,0xe0]; pb += inc_ssp()     # src p7; ld r0(page); wrm; SSP++
-        pb += [0x2f,0xa1,0xe0]; pb += inc_ssp()     # src p7; ld r1(bank); wrm; SSP++
+        pb += [0x2f,0xa1,0xe0]; pb += inc_ssp()     # src p7; ld r1(bank.lo); wrm; SSP++
         pb += [0xc0]                                # bbl 0
-        return off, pg, pb
+        # __push1: push R0 (the forward token's bank.hi) at SSP; SSP += 1.
+        p1 = []
+        p1 += [0x2f,0xa0,0xe0]; p1 += inc_ssp()     # src p7; ld r0; wrm; SSP++
+        p1 += [0xc0]                                # bbl 0
+        return off, pg, pb, p1
 
     def _synth_softcall(self):
         """Flat-image synthesis: reserve the per-page `jin p0` stub at STUB_OFF
@@ -474,15 +495,24 @@ class Linker:
         sr_base = sr_page * PAGE
         srtab_base = sr_base + 0x80
         self.soft_ret_base = sr_base
-        self.push_off_base = sr_base + 0x40
-        self.push_pg_base = sr_base + 0x60
-        self.push_pb_base = sr_base + 0xa0
+        # Dispatch-page layout (one 256-byte common page). __soft_ret grew to
+        # ~82 B and __push_pg to ~41 B for the 8-bit bank latch (two latch
+        # ports, 5-nibble token), so the old 0x40/0x60/0xa0 slots no longer fit.
+        # __srtab is PINNED at 0x80 (soft_ret computes jin = __srtab + 2*page
+        # assuming 0x80). New slots avoid [0x80,0xa0) and the 0xFC jin-p0 stub:
+        #   soft_ret 0x00..0x51, push_off 0x54, push1 0x6a, srtab 0x80,
+        #   push_pg 0xa0..0xc8, push_pb 0xd0..0xe4.
+        self.push_off_base = sr_base + 0x54
+        self.push1_base = sr_base + 0x6a
+        self.push_pg_base = sr_base + 0xa0
+        self.push_pb_base = sr_base + 0xd0
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
         self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
         self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
+        self.linker_syms[PUSH1_SYM] = self.push1_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         # the synthesized page occupies the whole 256 bytes (stub at 0xFC too)
         self.rom_used = max(self.rom_used, sr_base + PAGE)
@@ -511,15 +541,24 @@ class Linker:
                 f"0x{self.common_bytes:x}); raise --common-bytes")
         srtab_base = sr_base + 0x80
         self.soft_ret_base = sr_base
-        self.push_off_base = sr_base + 0x40
-        self.push_pg_base = sr_base + 0x60
-        self.push_pb_base = sr_base + 0xa0
+        # Dispatch-page layout (one 256-byte common page). __soft_ret grew to
+        # ~82 B and __push_pg to ~41 B for the 8-bit bank latch (two latch
+        # ports, 5-nibble token), so the old 0x40/0x60/0xa0 slots no longer fit.
+        # __srtab is PINNED at 0x80 (soft_ret computes jin = __srtab + 2*page
+        # assuming 0x80). New slots avoid [0x80,0xa0) and the 0xFC jin-p0 stub:
+        #   soft_ret 0x00..0x51, push_off 0x54, push1 0x6a, srtab 0x80,
+        #   push_pg 0xa0..0xc8, push_pb 0xd0..0xe4.
+        self.push_off_base = sr_base + 0x54
+        self.push1_base = sr_base + 0x6a
+        self.push_pg_base = sr_base + 0xa0
+        self.push_pb_base = sr_base + 0xd0
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
         self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
         self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
+        self.linker_syms[PUSH1_SYM] = self.push1_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         self.common_used = max(self.common_used, sr_base + PAGE)
         # pages per bank image = common_bytes + bank_bytes, all 256-byte pages.
@@ -571,7 +610,7 @@ class Linker:
                 common_pairs.add((addr, to))
             else:
                 banked_pairs.add((addr, to, frm))
-        THUNK = 32   # 20 B inline save-P4:P5 + 12 B push/dispatch
+        THUNK = 40   # 20 B inline save-P4:P5 + 16 B push/dispatch (8-bit bank) + slack
         self._common_thunk_slots = None   # lazily opened _common_free_slots gen
         # banked-caller thunks: prefer the caller's own bank tail; fall back to
         # a common slot (always mapped, equally correct) when the bank is full.
@@ -692,12 +731,15 @@ class Linker:
         All addresses are final (packer placement done)."""
         push_off = self.push_off_base
         push_pb = self.push_pb_base
+        push1 = self.push1_base
         soft_ret = self.soft_ret_base
         S = self.FWD_SAVE
         def thunk_bytes(callee_addr, callee_bank):
             tramp = self.far_restore[(callee_addr, callee_bank)][0]
             off = tramp & 0xFF                 # trampoline page-local offset
             page = (tramp >> 8) & 0x0F         # trampoline page nibble
+            bank_lo = callee_bank & 0x0F
+            bank_hi = (callee_bank >> 4) & 0x0F
             # inline save of P4:P5 (R8..R11) to the FWD_SAVE RAM chars.
             b = []
             b += [0x20, S,   0x21, 0xa8, 0xe0]   # fim p0,S  ; src p0; ld r8 ; wrm
@@ -708,9 +750,12 @@ class Linker:
                 0x20, off,                              # fim p0, off   (R0=off.hi,R1=off.lo)
                 0x50 | ((push_off >> 8) & 0xF), push_off & 0xFF,  # jms __push_off
                 0x20, (page << 4) & 0xF0,               # fim p0, page<<4 (R0.hi nibble=page)
-                0xD0 | (callee_bank & 0xF),             # ldm callee_bank
-                0xB1,                                   # xch r1  (R1 = bank)
-                0x50 | ((push_pb >> 8) & 0xF), push_pb & 0xFF,    # jms __push_pb
+                0xD0 | bank_lo,                         # ldm callee_bank.lo
+                0xB1,                                   # xch r1  (R1 = bank.lo)
+                0x50 | ((push_pb >> 8) & 0xF), push_pb & 0xFF,    # jms __push_pb (page, bank.lo)
+                0xD0 | bank_hi,                         # ldm callee_bank.hi
+                0xB0,                                   # xch r0  (R0 = bank.hi)
+                0x50 | ((push1 >> 8) & 0xF), push1 & 0xFF,        # jms __push1 (bank.hi)
                 0x40 | ((soft_ret >> 8) & 0xF), soft_ret & 0xFF,  # jun __soft_ret
             ]
             return b
@@ -744,12 +789,12 @@ class Linker:
         `jin p0` stub byte at STUB_OFF on every page. A slot never straddles a
         256-byte page (so a 12-byte stub's `jun` stays simple)."""
         srp = self.soft_ret_page
-        # dispatch page layout: soft_ret 0x00..0x3e, push_off 0x40..0x55,
-        # push_pg 0x60..0x75, srtab 0x80..0xa0, push_pb 0xa0..0xb5. Each push
-        # helper is 21 bytes.
+        # dispatch page layout (8-bit bank latch): soft_ret 0x00..0x52,
+        # push_off 0x54..0x69, push1 0x6a..0x75, srtab 0x80..0xa0,
+        # push_pg 0xa0..0xc9, push_pb 0xd0..0xe5. Reserve generously.
         used_on_srp = set()
-        for a, b in [(0x00, 0x3e), (0x40, 0x55), (0x60, 0x75),
-                     (0x80, 0xa0), (0xa0, 0xb5)]:
+        for a, b in [(0x00, 0x54), (0x54, 0x6a), (0x6a, 0x76),
+                     (0x80, 0xa0), (0xa0, 0xca), (0xd0, 0xe6)]:
             used_on_srp.update(range(a, b))
         start = self._common_used_fns
         for page_base in range(0, self.common_bytes, PAGE):
@@ -836,15 +881,18 @@ class Linker:
         # patch the jcn-nc target (.Lnocar) low byte (page-local)
         nocar_addr = sr + nocar_idx
         img[sr + jcn_operand_idx] = nocar_addr & 0xFF
-        # __push_off / __push_pg / __push_pb leaf helpers (8-bit SSP advance;
-        # no relocations). __push_pb is the far-call forward-token page+bank push.
-        off_b, pg_b, pb_b = self._push_tok_bytes()
+        # __push_off / __push_pg / __push_pb / __push1 leaf helpers (8-bit SSP
+        # advance; no relocations). __push_pb + __push1 push the far-call
+        # forward-token page + bank.lo + bank.hi (8-bit bank latch).
+        off_b, pg_b, pb_b, p1_b = self._push_tok_bytes()
         for i, byte in enumerate(off_b):
             img[self.push_off_base + i] = byte
         for i, byte in enumerate(pg_b):
             img[self.push_pg_base + i] = byte
         for i, byte in enumerate(pb_b):
             img[self.push_pb_base + i] = byte
+        for i, byte in enumerate(p1_b):
+            img[self.push1_base + i] = byte
         # __srtab: 16 entries `jun <stub on page k>` = 0x4<k>, 0xFC
         st = self.srtab_base
         for k in range(16):
