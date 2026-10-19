@@ -1,5 +1,33 @@
 # llvm-i4004 final report
 
+## STATUS (2026-10-19): software-call convention items 1–4 LANDED & green on chips
+
+The software-return-stack call convention (the fix for the hardware-stack
+overflow below) is implemented end to end as one coupled unit and
+**execution-verified on external/chips**:
+
+1. **MC** — `%lo8(sym)`/`%page(sym)` specifiers → `fixup_lo8`/`fixup_page4` →
+   `R_I4004_LO8`/`R_I4004_PAGE4`, resolved by the AsmBackend and the packer.
+2. **Packer** (`i4004_pack.py --softcall`) — synthesizes the per-page `jin p0`
+   stub (0xFC), `__soft_ret` (verified byte template) and `__srtab`; asserts the
+   JMS leaf-depth ≤ 3 rule.
+3. **Backend** — `I4004ExpandPseudos` lowers a compiled call to the inline
+   push-token + `jun callee` CALLSOFT sequence (no HW-stack level, no arg-reg
+   clobber) and every compiled return to `jun __soft_ret`; leaf rt/HAL helpers
+   keep `jms`.
+4. **Chips execution** (`tests/exec/run_softcall_exec.sh`) — a depth-4 call
+   chain (> 3 HW levels), a value preserved across a soft call, and an **i16
+   return value** through a 2-deep call all return correctly. lit 28/28; host
+   firmware `cargo test` 42/42.
+
+**Still needed before relinking the whole firmware (items 5–6):** an 8-bit SSP
+carry (R15→R14) so depth exceeds 5 frames (the firmware is 6+ deep); the banked
+`--softcall` path (stub per bank page + latch write in `__soft_ret`, deleting
+the old `__bankcall_*` JMS trampolines); then wiring `build_image.sh` + the
+chips bank-latch runner + the 42-example comparison. A recursion/large-frame
+value-spill bug (register allocation, not the soft-call mechanism) is also open.
+See `session_history/2026-10-19-softcall-items-1-4-green.md`.
+
 ## TOP FINDING (2026-10-19): the compiled firmware overflows the 3-level hardware stack — it cannot run correctly, banking or not
 
 The 4004 has only a **3-level** hardware return stack (`JMS` pushes, `BBL`
