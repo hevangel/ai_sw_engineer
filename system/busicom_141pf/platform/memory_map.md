@@ -43,3 +43,72 @@ backend's 16-bit AS-0 handle `[bank:2][chip:2][reg:2][char:4]`:
 - `link.ld` ends with an `ASSERT` that fails the link if the image exceeds the
   1280-byte five-ROM budget; widen `rom` (and add 4001 straps on the board) only
   for a larger board, up to the 4096-byte architectural max.
+
+## Extended (xl) board
+
+The stock board cannot hold the compiled Rust firmware: the runtime + crt0 +
+HAL alone take ~697 of the 1280 ROM bytes, and the firmware's static state
+(Calculator 68 B + KeyBuffer 24 B = 92 B, before stack/spills) already exceeds
+the stock 64-byte main RAM of the two bank-0 4002s. The **xl** board variant
+(`platform/rtl/busicom_141pf_xl.sv`, `run_image.sh --board xl`, `link_xl.ld`)
+keeps the Busicom I/O **identical** — same keyboard, printer and lamp ports on
+the same chips — and only ADDS memory, to the architectural maximum where it is
+cheap: 16 × 4001 ROM and 16 × 4002 RAM. Shrinking back onto the stock board is
+a later optimisation; this variant exists to get the firmware running first.
+
+### Chip complement
+
+| Device | Stock | xl | Selection |
+|---|---|---|---|
+| 4001 ROM | 5 (#0–#4) | **16** (#0–#15) | chip-select = address bits 11:8 |
+| 4002 RAM | 2 (bank 0: #0,#1) | **16** (banks 0–3, 4 chips each) | CM-RAM bank line (DCL) + 4002-1/-2 metal option + P0 strap |
+
+The added 4001s (#5–#15) have **no I/O wired** — their ROM-port pins are unused,
+exactly as on the stock board's #3/#4. The firmware's ROM-port select aliasing
+(`SRC X2 nibble mod 5`, documented in `busicom_141pf.sv`) is preserved on the xl
+top so the original ROM's keyboard/printer/drum port usage is byte-identical;
+extra ROMs are invisible to a program that never fetches past 0x4FF.
+
+Bank 0's two original 4002s keep their roles: chip 0 = **RAM0** (printer red /
+hammers / paper-advance port) and chip 1 = **RAM1** (Memory / Overflow /
+Negative lamp port). Their main-character storage stays reserved for the
+firmware working set, matching the stock layout, so linker-placed data starts at
+the first ADDED chip.
+
+Per bank the four chips are an authentic quad: 4002-1 P0=0 → chip 0, 4002-1 P0=1
+→ chip 1, 4002-2 P0=0 → chip 2, 4002-2 P0=1 → chip 3 (`intel_4002` answers
+`{Variant1, po_i}` under its asserted `cm_ram_i`).
+
+### Extended memory map
+
+| Space | Range | Size | Devices | Use |
+|---|---|---|---|---|
+| Program ROM | 0x000–0xFFF | 4096 bytes | 4001 #0–#15 | firmware (runtime+crt0+HAL+logic) |
+| RAM main characters | 16 chips × 4 reg × 16 nibbles | 1024 nibbles (512 bytes) | 4002 ×16, banks 0–3 | working set, `.data`/`.bss`, software stack, heap headroom |
+| RAM status characters | 16 × 4 × 4 nibbles | 256 nibbles | same | flags / opcode-addressed |
+
+ROM: **4096 bytes** (16-ROM architectural ceiling). RAM: **1280 nibbles total**
+(1024 main + 256 status) = 640 bytes, up from the stock 160 nibbles.
+
+### Linker regions (`link_xl.ld`)
+
+Same AS-0 handle model `[bank:2][chip:2][reg:2][char:4]` as the stock script.
+
+| Region | Handle range | Device | Size | Use |
+|---|---|---|---|---|
+| `rom` | 0x000–0xFFF | 4001 #0–#15 | 4096 B | `.reset` (at 0), `.text`, `.rodata`, `.data` load image |
+| `ram` | 0x0020–0x005F | bank 0 chips 2–3 main | 128 nibbles | `.data` (copied from ROM by crt0) + `.bss` arena |
+| `stack` | 0x0100–0x013F | bank 1 (4 chips) main | 256 nibbles | software return stack (abi.md §4.4, P7/SSP, grows upward) |
+| (spare) | 0x0200–0x03FF | banks 2–3 main | 512 nibbles | heap/arena headroom; add a named region when a build needs it |
+
+- Bank 0 chips 0–1 handles (0x0000–0x001F) are **not** linker-placed: they hold
+  the firmware's own working set and back the printer/lamp I/O port latches,
+  identical to the stock board.
+- The `.data`/`.bss` arena and the software stack are in **different CM-RAM
+  banks**, so a deep call graph cannot corrupt live variables.
+- `link_xl.ld` ends with `ASSERT(. <= 0x1000, …)`, the 4096-byte ceiling.
+
+Sources: MCS-4 data sheet (Nov 1971); 4002 chip-select (metal option + P0 + CM-RAM
+line) and DCL bank decode from `../ai_hw_engineer/design/intel_4002/src/intel_4002.sv`
+and `.../intel_4004/src/intel_4004.sv`; derived xl board top
+`platform/rtl/busicom_141pf_xl.sv` cites `../ai_hw_engineer/system/busicom_141pf/src/busicom_141pf.sv`.
