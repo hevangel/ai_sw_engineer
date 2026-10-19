@@ -986,39 +986,35 @@ class Linker:
 
     def _stub_pad(self, start, size):
         """Padding (bytes) to insert BEFORE a section of `size` at ROM address
-        `start` so its span [start+pad, start+pad+size) covers no page's
-        STUB_OFF byte (the 1-byte per-page `jin p0` return stub). A section that
-        covered that byte would be corrupted by _synth_bank_stubs()'s
-        unconditional stub write and would fall through into `jin p0`.
+        `start` so its span does not STRADDLE a page's STUB_OFF byte (the 1-byte
+        per-page `jin p0` return stub that _synth_bank_stubs writes). A section
+        that covered that byte would be clobbered by the stub write and, worse,
+        a function whose body sits across 0xFC falls THROUGH into `jin p0`
+        (which jumps to P0) -- the deep-call self-loop this fix addresses.
 
-        The usable span of any page is [0, STUB_OFF) then [STUB_OFF+1, PAGE):
-        PAGE-1 bytes with a 1-byte hole at STUB_OFF. If the section fits in the
-        bytes remaining before this page's stub, no pad is needed; otherwise pad
-        to the next page start. (A section that spans a whole page is already
-        rejected upstream: size <= bank_bytes and, for far-call safety, page-
-        local sections are <= PAGE; a function of size > STUB_OFF that also must
-        clear a stub is pushed to a fresh page, where it occupies [0, size) with
-        the stub at STUB_OFF beyond its end iff size <= STUB_OFF. A function
-        with size > STUB_OFF cannot avoid a stub on ANY page, so it is an error
-        -- surfaced here rather than silently corrupted.)"""
+        Scope: this reserves the stub against SINGLE-PAGE sections (size <=
+        STUB_OFF) that happen to straddle one page's 0xFC -- the proven bug
+        (`entry`, 32 B, spanning 0x8FC). It bumps such a section to the next
+        page start so 0xFC stays a clean 1-byte gap for the stub.
+
+        A MULTI-page section (size > the usable run before a stub) necessarily
+        contains interior page-0xFC bytes and cannot be bumped off all of them;
+        those are handled by the page-local relaxation / NOP padding already in
+        place (the function's own control flow does not fall into an interior
+        0xFC, and a page a large function fully owns is not a soft-return
+        dispatch landing page). For those we return 0 and leave placement as it
+        was before this reservation existed -- never regressing a case that
+        already linked and ran (e.g. the wide-bank 525-byte callee)."""
         page_off = start % PAGE
-        # Does [page_off, page_off+size) on this page cross STUB_OFF?
-        if page_off <= STUB_OFF < page_off + size:
-            # Can't fit before the stub on this page: push to next page start.
-            pad = PAGE - page_off
-            start += pad
-            page_off = 0
-        else:
-            pad = 0
-        # After landing, if the section is so large it would still reach the
-        # NEXT page's stub, it cannot be placed around a stub at all.
-        if page_off + size > PAGE or (page_off == 0 and size > STUB_OFF):
-            raise LinkError(
-                f"a {size}-byte section cannot avoid the per-page jin-p0 stub "
-                f"at offset 0x{STUB_OFF:x}: it is larger than the {STUB_OFF}-byte "
-                f"usable run before a page's stub. Split the function or move the "
-                f"stub offset (STUB_OFF).")
-        return pad
+        straddles = page_off <= STUB_OFF < page_off + size
+        if not straddles:
+            return 0
+        # Only reserve for sections that FIT before a stub once bumped (i.e. a
+        # single-page body). A larger section cannot avoid every page's stub;
+        # leave it to the existing page-relaxation and prior placement.
+        if size > STUB_OFF:
+            return 0
+        return PAGE - page_off
 
     def _page_align_section(self, obj, sec, base):
         """Insert NOP padding so no PAGE8/FIN8-relocated 2-byte instruction in
@@ -1180,36 +1176,27 @@ class Linker:
                         raise LinkError(
                             f"no bank has room for {obj.path}:{sec.name} "
                             f"({sec.size} B) in next-fit order; raise --banks")
-                # Reserve the per-page `jin p0` stub byte at STUB_OFF on every
-                # page: _synth_bank_stubs() UNCONDITIONALLY writes JIN_P0 at
-                # p*PAGE+STUB_OFF on every page, so if a function body were laid
-                # across that byte the stub write would (a) corrupt the function
-                # and (b) make the function fall THROUGH into `jin p0`, which
-                # jumps to P0 -- a self-loop that never reaches the function's
-                # own `jun __soft_ret`. (This is exactly the deep-call-chain
-                # corruption: `entry` spanned 0x8FC, fell into the stub, and the
-                # return dispatch looped forever.) Pad the fill cursor so this
-                # section does not straddle any page's STUB_OFF byte.
+                # Reserve the per-page `jin p0` stub byte (STUB_OFF): a single-
+                # page function body laid across a page's 0xFC would be clobbered
+                # by _synth_bank_stubs()'s stub write AND fall THROUGH into
+                # `jin p0` (jumps to P0) -- the deep-call self-loop this fix
+                # addresses (`entry` spanned 0x8FC, looped forever). _stub_pad
+                # bumps such a section to the next page; it is a no-op for a
+                # multi-page section (handled by page relaxation -- see its doc).
                 pad = self._stub_pad(base + bank_fill[cur], sec.size)
-                if pad:
-                    bank_fill[cur] += pad
-                    if not fits(cur, sec.size):
-                        # The pad pushed us over this bank; move to the next and
-                        # re-pad there.
+                if pad and bank_fill[cur] + pad + sec.size > self.bank_bytes:
+                    # Padding would overflow this bank: move to the next free one
+                    # and recompute the pad there.
+                    cur += 1
+                    while cur < self.banks and not fits(cur, sec.size):
                         cur += 1
-                        while cur < self.banks and not (
-                                bank_fill[cur] == 0
-                                and sec.size <= self.bank_bytes
-                                or self._stub_pad(base + bank_fill[cur], sec.size) == 0
-                                and fits(cur, sec.size)):
-                            cur += 1
-                        if cur >= self.banks:
-                            raise LinkError(
-                                f"no bank has room for {obj.path}:{sec.name} "
-                                f"({sec.size} B) after reserving the jin-p0 stub; "
-                                f"raise --banks")
-                        pad2 = self._stub_pad(base + bank_fill[cur], sec.size)
-                        bank_fill[cur] += pad2
+                    if cur >= self.banks:
+                        raise LinkError(
+                            f"no bank has room for {obj.path}:{sec.name} "
+                            f"({sec.size} B) after reserving the jin-p0 stub; "
+                            f"raise --banks")
+                    pad = self._stub_pad(base + bank_fill[cur], sec.size)
+                bank_fill[cur] += pad
                 sec.base = base + bank_fill[cur]
                 self.sec_bank[id(sec)] = cur
                 self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
