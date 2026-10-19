@@ -47,39 +47,58 @@ links the whole firmware + runtime + HAL + soft-call dispatch:
 The soft-call return dispatch lives once in the common region (mapped in every
 bank); every page of every bank carries the `jin p0` stub.
 
-### Item 6 — cross-bank mechanism IMPLEMENTED; a return-dispatch bug remains
-The cross-bank soft-call forward switch is built and partly proven:
-1. **Token + latch (done, verified).** The return token is now 4 nibbles
-   (off.lo, off.hi, page, **bank**); `__push_pg` pushes the caller's bank from
-   the `__cur_bank` RAM mirror (SRC 0x0F). Dumping the P7 soft stack confirms
-   each frame carries the right bank (entry pushes 0, a bank-1 callee pushes 1).
-   `__soft_ret` pops the bank nibble and writes it to the ROM bank latch (4001
-   chip-3 port, SRC 0x30, WRR) and `__cur_bank`.
-2. **`__tobank_<addr>` forward stubs (done, verified bytes).** The packer
-   synthesizes one common set-latch stub per distinct cross-bank callee
-   (`fim p0,0x30; src; ldm <bank>; wrr; fim p0,0x0f; src; ldm <bank>; wrm;
-   jun callee`) and rewrites every cross-bank `jun` to its stub. Packed into
-   common free slots; the old `__bankcall_*` JMS trampolines are gone.
-3. **Call-graph-aware bank placement (done).** DFS caller→callee order +
-   next-fit clustering keeps call chains in one bank, cutting cross-bank edges
-   (40→31 on the firmware).
-4. **Bank-reload chips harness (done).** `tests/exec/run_softcall_banked_exec.sh`
-   watches the chip-3 latch and swaps the banked ROM window — the adapter shape
-   for `chips_trace.rs`.
+### Item 6 — cross-bank soft-call FIXED & green on chips; 42-run blocked on common budget
+The cross-bank soft-call forward switch is implemented and EXECUTION-VERIFIED:
+1. **Token + latch (done, verified).** The return token is 4 nibbles (off.lo,
+   off.hi, page, **bank**); `__push_pg` pushes the caller's bank from the
+   `__cur_bank` RAM mirror (SRC 0x0F). `__soft_ret` pops the bank nibble and
+   writes it to the ROM bank latch (4001 chip-3 port, SRC 0x30, WRR) and
+   `__cur_bank`, restoring the caller's bank before dispatch.
+2. **`__tobank` forward stubs (done, verified).** The packer synthesizes one
+   common set-latch stub per distinct cross-bank callee, keyed by
+   **(target_addr, callee_bank)** — a banked PC (e.g. 0x800) exists in every
+   bank, so keying by address alone collided — and rewrites every cross-bank
+   `jun` (including a COMMON caller's, e.g. crt0's `jun main`) to the matching
+   stub. The old `__bankcall_*` JMS trampolines are gone.
+3. **Bank-reload runner (done, wired).** `platform/scripts/chips_trace.rs` and
+   `tests/exec/run_softcall_banked_exec.sh` split a banked image into common +
+   per-bank windows, boot bank 0, and reload the banked ROM chips on a chip-3
+   latch write.
 
-**OPEN BUG — cross-bank RETURN dispatch.** A same-bank soft call of any depth is
-green (depth-8, i16, value-preservation). A CROSS-bank call's forward path fires
-(latch toggles, tokens are correct), but the RETURN runs away: after the callee
-returns through `__soft_ret`, the PC free-runs through zeroed ROM instead of
-landing at `.Lret`. The token (page=8, offset correct) and the `__srtab`/stub
-bytes are correct, so the fault is in `__soft_ret`'s srtab→per-page-stub→`jin p0`
-dispatch for a banked return page interacting with the latch write — or the
-harness reloading the bank one fetch too late relative to the CPU's prefetch.
-Next: instruction-level trace of the first cross-bank return through `__soft_ret`
-(the `jin p4`→`__srtab[page]`→`jun 0x?FC`→`jin p0` chain), checking the latch
-value and mapped bank at each fetch.
+**PROVEN GREEN** (`run_softcall_banked_exec.sh`): a depth-8 chain ACROSS banks
+and an **i16 return through a cross-bank call** -> `8 0 0 0 6 0 4 0`, the latch
+toggling forward (to the callee bank) and back (restored from the token in
+`__soft_ret`). The earlier "return runs away" symptom was three bugs, all fixed:
+a sub-page test bank window omitting the return-page `jin p0` stub; a COMMON
+caller -> banked callee not detected as cross-bank (no latch set); and
+address-only stub keying colliding across banks. lit 28/28; flat soft-call exec
+green; host firmware `cargo test` 42/42.
 
-### chips_trace.rs (item 6 runner) — still to wire
+**Blocker to the 42-example run — common-region stub budget.** The whole
+firmware relinks banked, but the ~64 distinct cross-bank `__tobank` stubs
+(~768 B) + the runtime/crt0/HAL (~1,390 B) + the soft-call dispatch page do not
+fit the common region within the 12-bit-PC ceiling (common + bank ≤ 4096; a
+2,048 B common leaves only 2,048 for the bank window, which the largest function
+fills). Resolving it needs EITHER a more compact banking scheme (shrink the
+per-callee stub, or share a set-latch helper) OR splitting ~8 functions below a
+~1,536 B window (common 0xA00 + bank 0x600). The mechanism and the runner are
+ready; this is the remaining resource-packing step before the 42-example
+`run_image.sh secondary --board xl` + `compare.sh`.
+
+### Item 4 — recursion/large-frame value-spill: diagnosed, fix reverted
+The backend spills frame slots to a FIXED RAM region (chip0/reg3 @ 0x30) shared
+by every function, so a caller's spilled value is clobbered by a callee that
+spills (and by recursion). An SSP-relative per-call frame (prologue reserves
+`2*frameSize` chars on the soft stack, spills address SSP-relative) FIXES
+recursion (`sumdown(5)=15` verified on chips) but (a) bloated `divide` past the
+2,048 B bank window and (b) had an edge-case bug when a spill byte straddled a
+4002 register boundary. It was REVERTED because the firmware call graph is
+**acyclic** (no recursion) — so the fix is not needed for the 42 examples,
+though the shared-slot clobber on deep non-recursive paths is a latent risk the
+42-run will expose if present. The proper fix is the compact SSP-relative frame.
+See `session_history/2026-10-19-softcall-items-1-4-green.md`.
+
+### (historical) chips_trace.rs — still to wire
 The 53 KB banked image + 42-example run needs the same latch-reload wired into
 `platform/scripts/chips_trace.rs`'s cycle loop (pattern in
 `run_softcall_banked_exec.sh` / `rt/tests/bank_test.rs`); blocked behind the
