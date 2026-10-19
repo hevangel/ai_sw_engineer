@@ -47,26 +47,46 @@ links the whole firmware + runtime + HAL + soft-call dispatch:
 The soft-call return dispatch lives once in the common region (mapped in every
 bank); every page of every bank carries the `jin p0` stub.
 
-### Item 6 — gated on the cross-bank FORWARD latch switch
-Running the 42 examples needs two more pieces, both localized:
-1. **Cross-bank forward latch (backend + packer + token).** A compiled call
-   whose callee sits in a different bank currently reaches the right PC in the
-   WRONG bank — nothing sets the ROM bank latch before the `jun`. The design:
-   grow the return token to a 4th **bank** nibble (pushed by `__push_pg` from the
-   `__cur_bank` RAM mirror), have `__soft_ret` write the latch (4001 chip-3 port,
-   `fim p0,0x30; src p0; ldm <bank>; wrr`) from that nibble on return, and have
-   the packer insert a latch-set (to the callee's bank) before each cross-bank
-   `jun` — the old `__bankcall_*` JMS trampolines are deleted.
-2. **chips_trace.rs bank reload.** The secondary runner must split the 53 KB
-   image into common + per-bank windows, start on bank 0, and on a latch write
-   (`roms[3].ports`) rebuild `roms[4..]` from the selected bank — the exact
-   pattern already proven in `llvm-i4004/rt/tests/bank_test.rs`.
-A recursion/large-frame value-spill bug in register allocation (not the
-soft-call mechanism) is also open.
+### Item 6 — cross-bank mechanism IMPLEMENTED; a return-dispatch bug remains
+The cross-bank soft-call forward switch is built and partly proven:
+1. **Token + latch (done, verified).** The return token is now 4 nibbles
+   (off.lo, off.hi, page, **bank**); `__push_pg` pushes the caller's bank from
+   the `__cur_bank` RAM mirror (SRC 0x0F). Dumping the P7 soft stack confirms
+   each frame carries the right bank (entry pushes 0, a bank-1 callee pushes 1).
+   `__soft_ret` pops the bank nibble and writes it to the ROM bank latch (4001
+   chip-3 port, SRC 0x30, WRR) and `__cur_bank`.
+2. **`__tobank_<addr>` forward stubs (done, verified bytes).** The packer
+   synthesizes one common set-latch stub per distinct cross-bank callee
+   (`fim p0,0x30; src; ldm <bank>; wrr; fim p0,0x0f; src; ldm <bank>; wrm;
+   jun callee`) and rewrites every cross-bank `jun` to its stub. Packed into
+   common free slots; the old `__bankcall_*` JMS trampolines are gone.
+3. **Call-graph-aware bank placement (done).** DFS caller→callee order +
+   next-fit clustering keeps call chains in one bank, cutting cross-bank edges
+   (40→31 on the firmware).
+4. **Bank-reload chips harness (done).** `tests/exec/run_softcall_banked_exec.sh`
+   watches the chip-3 latch and swaps the banked ROM window — the adapter shape
+   for `chips_trace.rs`.
 
-the latch to the callee's bank before the `jun`, restore from the token's bank
-nibble in `__soft_ret`), and a recursion/large-frame value-spill bug in
-register allocation (not the soft-call mechanism).
+**OPEN BUG — cross-bank RETURN dispatch.** A same-bank soft call of any depth is
+green (depth-8, i16, value-preservation). A CROSS-bank call's forward path fires
+(latch toggles, tokens are correct), but the RETURN runs away: after the callee
+returns through `__soft_ret`, the PC free-runs through zeroed ROM instead of
+landing at `.Lret`. The token (page=8, offset correct) and the `__srtab`/stub
+bytes are correct, so the fault is in `__soft_ret`'s srtab→per-page-stub→`jin p0`
+dispatch for a banked return page interacting with the latch write — or the
+harness reloading the bank one fetch too late relative to the CPU's prefetch.
+Next: instruction-level trace of the first cross-bank return through `__soft_ret`
+(the `jin p4`→`__srtab[page]`→`jun 0x?FC`→`jin p0` chain), checking the latch
+value and mapped bank at each fetch.
+
+### chips_trace.rs (item 6 runner) — still to wire
+The 53 KB banked image + 42-example run needs the same latch-reload wired into
+`platform/scripts/chips_trace.rs`'s cycle loop (pattern in
+`run_softcall_banked_exec.sh` / `rt/tests/bank_test.rs`); blocked behind the
+return-dispatch bug above.
+
+A recursion/large-frame value-spill bug in register allocation (`sumdown`
+returns a wrong value) is also open — independent of the soft-call mechanism.
 See `session_history/2026-10-19-softcall-items-1-4-green.md`.
 
 
