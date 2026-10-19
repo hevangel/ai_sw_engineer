@@ -117,7 +117,7 @@ __halt:\tjun __halt
     soft = ln.linker_syms["__soft_ret"]
     S = ln.FWD_SAVE
     all_thunks = []
-    for (addr, hb), (base, ca, cb, isc) in ln.far_thunks.items():
+    for (addr, cbk, hb), (base, ca, cb, isc) in ln.far_thunks.items():
         all_thunks.append((base, ca, cb, ln.bank_images[0] if isc else ln.bank_images[hb]))
     for (addr, cbk), (base, ca, cb) in ln.far_thunks_common.items():
         all_thunks.append((base, ca, cb, ln.bank_images[0]))
@@ -133,6 +133,23 @@ __halt:\tjun __halt
         assert (jun_hi & 0x0F) == ((ca >> 8) & 0x0F), "trampoline jun page mismatch"
         checked += 1
     assert checked > 0, "no far thunks to check"
+
+    # 6. REGRESSION (deep-i8-chain N-2 / doubling): two DISTINCT cross-bank
+    # callees that share a banked PC and are reached from the SAME caller bank
+    # must get DISTINCT thunks. The key is (callee_addr, callee_bank,
+    # caller_bank); keying by (addr, caller_bank) alone let the 2nd call site
+    # overwrite the 1st, so both cross-bank calls in one function dispatched to
+    # a single callee. Assert no two thunks sharing (addr, caller_bank) but
+    # differing in callee_bank collapsed to one base.
+    seen = {}
+    for (addr, cbk, hb), (base, ca, cb, isc) in ln.far_thunks.items():
+        k = (addr, hb)
+        if k in seen and seen[k][0] != cb:
+            assert seen[k][1] != base, (
+                f"thunk collision: callees bank {seen[k][0]} and {cb} at "
+                f"addr 0x{addr:x} from caller bank {hb} share thunk base "
+                f"0x{base:x} (the N-2 regression)")
+        seen[k] = (cb, base)
 
     # 5. no cross-bank `jun callee` left unrewritten: every cross-bank ADDR12
     # site in a banked section points at a thunk, not the raw callee.

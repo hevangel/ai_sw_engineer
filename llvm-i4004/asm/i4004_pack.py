@@ -528,11 +528,19 @@ class Linker:
         control reaches COMMON __soft_ret. This removes the per-callee common
         __tobank stubs entirely; common grows only by the one __push_pb helper.
 
-        Keyed by (callee_addr, caller_bank): a given callee reached from two
-        different caller banks needs a thunk in each (a banked PC exists in
-        every bank, and the thunk must sit in the bank the call site is in)."""
+        Keyed by (callee_addr, callee_bank, caller_bank): a given callee
+        reached from two different caller banks needs a thunk in each (a banked
+        PC exists in every bank, and the thunk must sit in the bank the call
+        site is in). The callee_bank MUST be part of the key because a banked
+        PC (e.g. 0x800) is identical in every bank, so two DIFFERENT callees in
+        different banks can share the same `callee_addr`; keying by
+        (addr, host_bank) alone made the second such call site overwrite the
+        first in far_thunks, so both cross-bank calls from one caller bank
+        dispatched to the SAME callee (the deep-i8-chain N-2/doubling
+        regression -- two cross-bank calls in one function went to one callee).
+        """
         self.bank_stubs = {}        # unused in far-call mode (legacy name kept)
-        self.far_thunks = {}        # (callee_addr, host_bank) -> (abs, callee_addr, callee_bank)
+        self.far_thunks = {}        # (callee_addr, callee_bank, host_bank) -> (abs, callee_addr, callee_bank, is_common)
         self.far_thunks_common = {} # (callee_addr, callee_bank) -> (abs, callee_addr, callee_bank)
         # which cross-bank call sites exist, and from where?
         banked_pairs = set()        # (callee_addr, callee_bank, caller_bank)
@@ -560,10 +568,10 @@ class Linker:
                 self.far_thunks_common[(addr, callee_bank)] = (base, addr, callee_bank)
                 self.linker_syms[f"__farc_{addr:04x}_b{callee_bank:x}"] = base
                 # record the host-bank site routes to the common thunk
-                self.far_thunks[(addr, host_bank)] = (base, addr, callee_bank, True)
+                self.far_thunks[(addr, callee_bank, host_bank)] = (base, addr, callee_bank, True)
             else:
-                self.far_thunks[(addr, host_bank)] = (base, addr, callee_bank, False)
-            self.linker_syms[f"__far_{addr:04x}_b{host_bank:x}"] = base
+                self.far_thunks[(addr, callee_bank, host_bank)] = (base, addr, callee_bank, False)
+            self.linker_syms[f"__far_{addr:04x}_c{callee_bank:x}_b{host_bank:x}"] = base
         # common-caller thunks: in common free space (mapped in every bank).
         for (addr, callee_bank) in sorted(common_pairs):
             base = self._alloc_common_thunk(THUNK)
@@ -694,7 +702,7 @@ class Linker:
             return b
         # banked-caller thunks: only in their host bank. Entries that fell back
         # to common (is_common=True) are emitted by the common loop below.
-        for (addr, host_bank), tup in getattr(self, "far_thunks", {}).items():
+        for (addr, ckbank, host_bank), tup in getattr(self, "far_thunks", {}).items():
             base, callee_addr, callee_bank, is_common = tup
             if is_common or host_bank != bank:
                 continue
@@ -1502,7 +1510,11 @@ class Linker:
                                     # banked caller -> in-bank thunk (host==b==k)
                                     # or a common-fallback thunk (mapped in every
                                     # bank image when the bank tail was full).
-                                    th = self.far_thunks.get((addr, b))
+                                    # Key includes the CALLEE bank `to`: a banked
+                                    # PC is identical in every bank, so two
+                                    # distinct callees can share `addr` and must
+                                    # not share a thunk (deep-chain N-2 bug).
+                                    th = self.far_thunks.get((addr, to, b))
                                     if th is not None:
                                         is_common = th[3]
                                         if is_common or k == b:
