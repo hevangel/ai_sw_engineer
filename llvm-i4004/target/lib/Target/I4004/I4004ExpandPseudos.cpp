@@ -471,11 +471,13 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
 
   case I4004::SPILL8:
   case I4004::SPILL16: {
-    // RAM[spillslot] = src. Operand1 is the resolved char-base immediate.
+    // RAM[spillslot] = src. Operand1 is the resolved char-base immediate. The
+    // chars are consecutive (Base, Base+1, ...), so materialize the address
+    // ONCE with FIM P0, Base and walk with INC between nibbles instead of a
+    // fresh FIM per char (FIM is 2 bytes and was ~33% of the image).
     Register Src = MI.getOperand(0).getReg();
     int64_t Base = MI.getOperand(1).getImm() & 0xFF;
     const bool Wide = (MI.getOpcode() == I4004::SPILL16);
-    // Collect the byte-pairs to store (1 for i8, 2 for i16), each as {hi,lo}.
     SmallVector<Register, 2> Pairs;
     if (Wide) {
       Pairs.push_back(TRI->getSubReg(Src, I4004::sub_pair_lo));
@@ -483,20 +485,20 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     } else {
       Pairs.push_back(Src);
     }
-    int64_t Char = Base;
+    Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
+    // Flatten the nibble sequence (low then high of each pair, consecutive).
+    SmallVector<Register, 4> Nibs;
     for (Register P : Pairs) {
-      Register PHi = TRI->getSubReg(P, I4004::sub_hi);
-      Register PLo = TRI->getSubReg(P, I4004::sub_lo);
-      // low nibble -> Char, high nibble -> Char+1.
-      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Char & 0xFF);
+      Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
+      Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
+    }
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Base);
+    for (unsigned i = 0; i < Nibs.size(); ++i) {
       BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
-      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PLo);
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(Nibs[i]);
       BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
-      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm((Char + 1) & 0xFF);
-      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
-      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PHi);
-      BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
-      Char += 2;
+      if (i + 1 < Nibs.size())
+        BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
     }
     MI.eraseFromParent();
     return true;
@@ -514,19 +516,19 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     } else {
       Pairs.push_back(Dst);
     }
-    int64_t Char = Base;
+    Register P0Lo = TRI->getSubReg(I4004::P0, I4004::sub_lo);
+    SmallVector<Register, 4> Nibs;
     for (Register P : Pairs) {
-      Register PHi = TRI->getSubReg(P, I4004::sub_hi);
-      Register PLo = TRI->getSubReg(P, I4004::sub_lo);
-      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Char & 0xFF);
+      Nibs.push_back(TRI->getSubReg(P, I4004::sub_lo));
+      Nibs.push_back(TRI->getSubReg(P, I4004::sub_hi));
+    }
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Base);
+    for (unsigned i = 0; i < Nibs.size(); ++i) {
       BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
       BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
-      BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(PLo, RegState::Define);
-      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm((Char + 1) & 0xFF);
-      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
-      BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
-      BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(PHi, RegState::Define);
-      Char += 2;
+      BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(Nibs[i], RegState::Define);
+      if (i + 1 < Nibs.size())
+        BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(P0Lo);
     }
     MI.eraseFromParent();
     return true;
