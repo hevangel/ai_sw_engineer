@@ -54,6 +54,7 @@ SOFT_RET_SYM = "__soft_ret"
 SRTAB_SYM = "__srtab"
 PUSH_OFF_SYM = "__push_off"
 PUSH_PG_SYM = "__push_pg"
+PUSH_PB_SYM = "__push_pb"
 
 # e_machine and relocation numbers -- must match the MC backend
 # (I4004ELFObjectWriter.cpp / ELFRelocs/I4004.def).
@@ -67,6 +68,12 @@ R_I4004_ROMADDR12 = 5
 R_I4004_RAMADDR16 = 6
 R_I4004_LO8 = 7
 R_I4004_PAGE4 = 8
+# Bank nibble (the ROM bank a code symbol was placed in by the packer) into the
+# low nibble of an LDM operand byte (far-call forward token, abi.md sec.4.4.3).
+# The packer is the ONLY producer: it fills the nibble from its bank assignment
+# when it synthesizes the far-call sequence, so the backend never emits it from
+# a .ll (bank numbers do not exist until link-time placement). From %bank(sym).
+R_I4004_BANK4 = 9
 
 RELOC_NAME = {
     R_I4004_NONE: "R_I4004_NONE",
@@ -78,6 +85,7 @@ RELOC_NAME = {
     R_I4004_RAMADDR16: "R_I4004_RAMADDR16",
     R_I4004_LO8: "R_I4004_LO8",
     R_I4004_PAGE4: "R_I4004_PAGE4",
+    R_I4004_BANK4: "R_I4004_BANK4",
 }
 
 # ELF section-header types / flags we care about
@@ -274,6 +282,17 @@ class Linker:
         self.bank_bytes = bank_bytes
         self.rewrite_cross_bank = False
         self.want_softcall = False
+        # Far-calls (abi.md 4.4.3): a cross-bank CALLSOFT is lowered to an
+        # in-caller-bank 12-byte thunk that pushes a forward token (callee
+        # offset, page, bank) and `jun __soft_ret`, which pops it, sets the
+        # latch to the callee bank and dispatches. The latch change happens
+        # only once control is in COMMON (__soft_ret), so no running instruction
+        # is ever swapped out -- unlike the old common __tobank stubs. ON by
+        # default; --no-far-calls restores the __tobank path for A/B testing.
+        self.far_calls = True
+        # Per-bank tail bytes reserved for far-call thunks/trampolines so they
+        # fit in the caller's/callee's own bank instead of overflowing common.
+        self.thunk_reserve = 0x180
         self.sec_bank: dict[int, int] = {}   # id(section) -> bank (-1 = common)
         self.placed: list[Placed] = []
         self.rom_image = bytearray()
@@ -385,6 +404,14 @@ class Linker:
         b += [0x39]                                    # jin p4   <- .Lnocar
         return b, nocar_idx, jcn_operand_idx
 
+    # RAM scratch chars (chip0/reg0) used to carry P4:P5 (D2, the 2nd i16/ptr
+    # argument pair) across a far-call forward dispatch, because __soft_ret
+    # clobbers P4:P5 (R8..R11) while it computes the srtab jin pointer. The far
+    # thunk saves R8..R11 here; a per-callee restore trampoline in the callee's
+    # bank reloads them before entering the callee. Chars 0x0A..0x0D of reg0 are
+    # free (BCD digits use chars 0..9; 0x0F is __cur_bank).
+    FWD_SAVE = 0x0A   # R8 -> 0x0A, R9 -> 0x0B, R10 -> 0x0C, R11 -> 0x0D
+
     def _push_tok_bytes(self):
         """Two leaf push helpers (JMS/BBL, hardware depth 1), both using ONLY the
         scratch pair P0 and the SSP (P7) -- no argument register (P1/D1=P2:P3,
@@ -406,7 +433,16 @@ class Linker:
         pg += [0x20,0x0f,0x21,0xe9,0xb0]            # fim p0,0x0f; src p0; rdm; xch r0 (cur bank)
         pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(bank); wrm; SSP++
         pg += [0xc0]                                # bbl 0
-        return off, pg
+        # __push_pb: push R0(page) then R1(BANK) at SSP; SSP += 2. Unlike
+        # __push_pg (which reads the CALLER bank from __cur_bank), this takes an
+        # EXPLICIT bank already staged in R1 -- the far-call forward token for a
+        # cross-bank callee carries the CALLEE's bank, not the current one.
+        # Leaf (JMS/BBL depth 1); touches only P0/SSP, so args in P1-P3 survive.
+        pb = []
+        pb += [0x2f,0xa0,0xe0]; pb += inc_ssp()     # src p7; ld r0(page); wrm; SSP++
+        pb += [0x2f,0xa1,0xe0]; pb += inc_ssp()     # src p7; ld r1(bank); wrm; SSP++
+        pb += [0xc0]                                # bbl 0
+        return off, pg, pb
 
     def _synth_softcall(self):
         """Flat-image synthesis: reserve the per-page `jin p0` stub at STUB_OFF
@@ -426,11 +462,13 @@ class Linker:
         self.soft_ret_base = sr_base
         self.push_off_base = sr_base + 0x40
         self.push_pg_base = sr_base + 0x60
+        self.push_pb_base = sr_base + 0xa0
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
         self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
+        self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         # the synthesized page occupies the whole 256 bytes (stub at 0xFC too)
         self.rom_used = max(self.rom_used, sr_base + PAGE)
@@ -461,16 +499,220 @@ class Linker:
         self.soft_ret_base = sr_base
         self.push_off_base = sr_base + 0x40
         self.push_pg_base = sr_base + 0x60
+        self.push_pb_base = sr_base + 0xa0
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
         self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
         self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
+        self.linker_syms[PUSH_PB_SYM] = self.push_pb_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         self.common_used = max(self.common_used, sr_base + PAGE)
         # pages per bank image = common_bytes + bank_bytes, all 256-byte pages.
         self.n_pages = (self.common_bytes + self.bank_bytes) // PAGE
-        self._synth_bank_stubs()
+        if getattr(self, "far_calls", True):
+            self._synth_far_thunks()
+        else:
+            self._synth_bank_stubs()
+
+    def _synth_far_thunks(self):
+        """Far-call lowering (abi.md 4.4.3). For every distinct cross-bank
+        CALLSOFT (callee_addr, caller_bank) pair, allocate a 12-byte forward-
+        token thunk IN THE CALLER'S BANK (its banked tail). The thunk pushes the
+        forward token (callee offset, page, callee_bank) with the common push
+        helpers and `jun __soft_ret`; the cross-bank `jun callee` site is
+        rewritten to `jun thunk` (same 2 bytes -- NO section growth). The thunk
+        is correct in the banked region precisely because it NEVER touches the
+        bank latch: every one of its instructions runs under the caller's own
+        (still-mapped) bank, and the single latch switch happens only after
+        control reaches COMMON __soft_ret. This removes the per-callee common
+        __tobank stubs entirely; common grows only by the one __push_pb helper.
+
+        Keyed by (callee_addr, caller_bank): a given callee reached from two
+        different caller banks needs a thunk in each (a banked PC exists in
+        every bank, and the thunk must sit in the bank the call site is in)."""
+        self.bank_stubs = {}        # unused in far-call mode (legacy name kept)
+        self.far_thunks = {}        # (callee_addr, host_bank) -> (abs, callee_addr, callee_bank)
+        self.far_thunks_common = {} # (callee_addr, callee_bank) -> (abs, callee_addr, callee_bank)
+        # which cross-bank call sites exist, and from where?
+        banked_pairs = set()        # (callee_addr, callee_bank, caller_bank)
+        common_pairs = set()        # (callee_addr, callee_bank)
+        for _loc, frm, to, addr in self._cross_bank_calls():
+            if addr is None or to == -1:
+                continue
+            if frm == -1:
+                # COMMON caller (e.g. crt0's `jun main`). Its thunk MUST live in
+                # common: when the call fires the latch may still point at a
+                # different bank, so a thunk in the callee's bank would not be
+                # mapped. A common thunk is always mapped and never touches the
+                # latch itself (the switch happens in __soft_ret).
+                common_pairs.add((addr, to))
+            else:
+                banked_pairs.add((addr, to, frm))
+        THUNK = 32   # 20 B inline save-P4:P5 + 12 B push/dispatch
+        self._common_thunk_slots = None   # lazily opened _common_free_slots gen
+        # banked-caller thunks: prefer the caller's own bank tail; fall back to
+        # a common slot (always mapped, equally correct) when the bank is full.
+        for (addr, callee_bank, host_bank) in sorted(banked_pairs):
+            base = self._alloc_in_bank(host_bank, THUNK)
+            if base is None:
+                base = self._alloc_common_thunk(THUNK)
+                self.far_thunks_common[(addr, callee_bank)] = (base, addr, callee_bank)
+                self.linker_syms[f"__farc_{addr:04x}_b{callee_bank:x}"] = base
+                # record the host-bank site routes to the common thunk
+                self.far_thunks[(addr, host_bank)] = (base, addr, callee_bank, True)
+            else:
+                self.far_thunks[(addr, host_bank)] = (base, addr, callee_bank, False)
+            self.linker_syms[f"__far_{addr:04x}_b{host_bank:x}"] = base
+        # common-caller thunks: in common free space (mapped in every bank).
+        for (addr, callee_bank) in sorted(common_pairs):
+            base = self._alloc_common_thunk(THUNK)
+            self.far_thunks_common[(addr, callee_bank)] = (base, addr, callee_bank)
+            self.linker_syms[f"__farc_{addr:04x}_b{callee_bank:x}"] = base
+        # Restore trampolines: ONE per distinct cross-bank callee, in the
+        # CALLEE's bank. A far thunk saves P4:P5 (R8..R11) to RAM then routes the
+        # forward token to the callee's trampoline (not the callee directly);
+        # __soft_ret dispatches there with latch=callee_bank (so the callee bank,
+        # holding the trampoline, is mapped), and the trampoline reloads R8..R11
+        # and `jun`s the real callee. This makes the 2nd i16/pointer argument
+        # pair (D2 = P4:P5), which __soft_ret clobbers, survive the cross-bank
+        # call. Keyed by (callee_addr, callee_bank).
+        REST = 14   # 4x(fim/src/rdm/xch)=4*? -> see _restore_tramp_bytes; <= 14
+        self.far_restore = {}       # (callee_addr, callee_bank) -> (abs, callee_addr, callee_bank, is_common)
+        callees = set()
+        for tup in self.far_thunks.values():
+            callees.add((tup[1], tup[2]))          # (callee_addr, callee_bank)
+        for v in self.far_thunks_common.values():
+            callees.add((v[1], v[2]))
+        for (callee_addr, callee_bank) in sorted(callees):
+            tb = self._restore_tramp_bytes(callee_addr)
+            base = self._alloc_in_bank(callee_bank, len(tb))
+            is_common = False
+            if base is None:
+                # callee bank full: a COMMON trampoline works too (common is
+                # mapped in every bank, including the callee's; its `jun callee`
+                # reaches the now-mapped callee bank).
+                base = self._alloc_common_thunk(len(tb))
+                is_common = True
+            self.far_restore[(callee_addr, callee_bank)] = (base, callee_addr, callee_bank, is_common)
+            self.linker_syms[f"__frest_{callee_addr:04x}_b{callee_bank:x}"] = base
+        # recompute rom_used (unchanged: banks are uniform width)
+        self.rom_used = self.common_bytes + self.bank_bytes
+
+    def _restore_tramp_bytes(self, callee_addr):
+        """Callee-bank restore trampoline: reload P4:P5 (R8..R11) from the RAM
+        save chars, then `jun callee`. Uses P0 (R0:R1) as the RAM address pair
+        and writes into R8..R11 directly -- no temp-register conflict, and no
+        argument pair other than the P4:P5 it is restoring is touched."""
+        S = self.FWD_SAVE
+        b = []
+        b += [0x20, S,   0x21, 0xe9, 0xb8]   # fim p0,S  ; src p0; rdm; xch r8
+        b += [0x20, S+1, 0x21, 0xe9, 0xb9]   # fim p0,S+1; src p0; rdm; xch r9
+        b += [0x20, S+2, 0x21, 0xe9, 0xba]   # fim p0,S+2; src p0; rdm; xch r10
+        b += [0x20, S+3, 0x21, 0xe9, 0xbb]   # fim p0,S+3; src p0; rdm; xch r11
+        b += [0x40 | ((callee_addr >> 8) & 0xF), callee_addr & 0xFF]  # jun callee
+        return b
+
+    def _alloc_common_thunk(self, width):
+        """Reserve `width` bytes in common free space for a far thunk (mapped in
+        every bank). Opens the free-slot generator lazily."""
+        if self._common_thunk_slots is None:
+            self._common_thunk_slots = self._common_free_slots(width)
+        try:
+            base = next(self._common_thunk_slots)
+        except StopIteration:
+            raise LinkError(
+                f"banked soft-call (far-calls): no room for a {width}-byte far "
+                f"thunk in common free space (common_bytes "
+                f"0x{self.common_bytes:x}); raise --common-bytes/--bank-bytes")
+        self.common_used = max(self.common_used, base + width)
+        return base
+
+    def _alloc_in_bank(self, bank, width):
+        """Reserve `width` bytes in `bank`'s banked region, after the placed
+        functions. A thunk/trampoline contains only page-independent ops
+        (FIM/SRC/LD/WRM/JMS/JUN), so it MAY straddle a 256-byte page; it must
+        only avoid overwriting the per-page `jin p0` stub byte at STUB_OFF.
+        Advances self.bank_fill[bank]; returns None on overflow (caller falls
+        back to a common slot)."""
+        pos = self.common_bytes + self.bank_fill[bank]
+        limit = self.common_bytes + self.bank_bytes
+        while True:
+            # if the span would cover a STUB_OFF byte on any page it crosses,
+            # bump past the nearest such byte.
+            span_lo, span_hi = pos, pos + width
+            bumped = False
+            p = pos & ~(PAGE - 1)
+            while p < span_hi:
+                stub = p + STUB_OFF
+                if span_lo <= stub < span_hi:
+                    pos = stub + 1
+                    bumped = True
+                    break
+                p += PAGE
+            if bumped:
+                continue
+            if pos + width > limit:
+                return None   # bank tail full; caller falls back to common
+            self.bank_fill[bank] = (pos + width) - self.common_bytes
+            return pos
+
+    def _write_far_thunks(self, img, bank):
+        """Emit the far-call thunk bytes for `bank` into its image. The thunk:
+          - saves P4:P5 (R8..R11) to the FWD_SAVE RAM chars (so the 2nd i16/ptr
+            arg survives __soft_ret clobbering P4:P5 during dispatch);
+          - pushes a forward token (tramp_off, tramp_page, callee_bank) for the
+            callee's RESTORE TRAMPOLINE (in the callee bank);
+          - `jun __soft_ret`, which pops the token, sets latch=callee_bank and
+            dispatches to the trampoline, which reloads P4:P5 and `jun`s callee.
+        Uses only P0 + ACC (+ the SSP via the push helpers). The latch changes
+        only inside common __soft_ret, so no running instruction is swapped out.
+        All addresses are final (packer placement done)."""
+        push_off = self.push_off_base
+        push_pb = self.push_pb_base
+        soft_ret = self.soft_ret_base
+        S = self.FWD_SAVE
+        def thunk_bytes(callee_addr, callee_bank):
+            tramp = self.far_restore[(callee_addr, callee_bank)][0]
+            off = tramp & 0xFF                 # trampoline page-local offset
+            page = (tramp >> 8) & 0x0F         # trampoline page nibble
+            # inline save of P4:P5 (R8..R11) to the FWD_SAVE RAM chars.
+            b = []
+            b += [0x20, S,   0x21, 0xa8, 0xe0]   # fim p0,S  ; src p0; ld r8 ; wrm
+            b += [0x20, S+1, 0x21, 0xa9, 0xe0]   # fim p0,S+1; src p0; ld r9 ; wrm
+            b += [0x20, S+2, 0x21, 0xaa, 0xe0]   # fim p0,S+2; src p0; ld r10; wrm
+            b += [0x20, S+3, 0x21, 0xab, 0xe0]   # fim p0,S+3; src p0; ld r11; wrm
+            b += [
+                0x20, off,                              # fim p0, off   (R0=off.hi,R1=off.lo)
+                0x50 | ((push_off >> 8) & 0xF), push_off & 0xFF,  # jms __push_off
+                0x20, (page << 4) & 0xF0,               # fim p0, page<<4 (R0.hi nibble=page)
+                0xD0 | (callee_bank & 0xF),             # ldm callee_bank
+                0xB1,                                   # xch r1  (R1 = bank)
+                0x50 | ((push_pb >> 8) & 0xF), push_pb & 0xFF,    # jms __push_pb
+                0x40 | ((soft_ret >> 8) & 0xF), soft_ret & 0xFF,  # jun __soft_ret
+            ]
+            return b
+        # banked-caller thunks: only in their host bank. Entries that fell back
+        # to common (is_common=True) are emitted by the common loop below.
+        for (addr, host_bank), tup in getattr(self, "far_thunks", {}).items():
+            base, callee_addr, callee_bank, is_common = tup
+            if is_common or host_bank != bank:
+                continue
+            for i, by in enumerate(thunk_bytes(callee_addr, callee_bank)):
+                img[base + i] = by
+        # common-caller thunks: live in common, so emit into EVERY bank image.
+        for (addr, callee_bank), (base, callee_addr, cb) in \
+                getattr(self, "far_thunks_common", {}).items():
+            for i, by in enumerate(thunk_bytes(callee_addr, cb)):
+                img[base + i] = by
+        # restore trampolines: in-bank ones only in their callee bank; common
+        # ones into every bank image.
+        for (callee_addr, callee_bank), (base, ca, cb, is_common) in \
+                getattr(self, "far_restore", {}).items():
+            if not is_common and callee_bank != bank:
+                continue
+            for i, by in enumerate(self._restore_tramp_bytes(callee_addr)):
+                img[base + i] = by
 
     def _common_free_slots(self, width):
         """Yield `width`-byte free slots in the common region for synthesized
@@ -480,10 +722,12 @@ class Linker:
         `jin p0` stub byte at STUB_OFF on every page. A slot never straddles a
         256-byte page (so a 12-byte stub's `jun` stays simple)."""
         srp = self.soft_ret_page
-        off_end = self.push_off_base + 24 - srp * PAGE   # 0x40+24=0x58
-        pg_end = self.push_pg_base + 26 - srp * PAGE      # 0x60+26=0x7a
+        # dispatch page layout: soft_ret 0x00..0x3e, push_off 0x40..0x55,
+        # push_pg 0x60..0x75, srtab 0x80..0xa0, push_pb 0xa0..0xb5. Each push
+        # helper is 21 bytes.
         used_on_srp = set()
-        for a, b in [(0x00, 0x3e), (0x40, off_end), (0x60, pg_end), (0x80, 0xa0)]:
+        for a, b in [(0x00, 0x3e), (0x40, 0x55), (0x60, 0x75),
+                     (0x80, 0xa0), (0xa0, 0xb5)]:
             used_on_srp.update(range(a, b))
         start = self._common_used_fns
         for page_base in range(0, self.common_bytes, PAGE):
@@ -570,12 +814,15 @@ class Linker:
         # patch the jcn-nc target (.Lnocar) low byte (page-local)
         nocar_addr = sr + nocar_idx
         img[sr + jcn_operand_idx] = nocar_addr & 0xFF
-        # __push_off / __push_pg leaf helpers (8-bit SSP advance; no relocations)
-        off_b, pg_b = self._push_tok_bytes()
+        # __push_off / __push_pg / __push_pb leaf helpers (8-bit SSP advance;
+        # no relocations). __push_pb is the far-call forward-token page+bank push.
+        off_b, pg_b, pb_b = self._push_tok_bytes()
         for i, byte in enumerate(off_b):
             img[self.push_off_base + i] = byte
         for i, byte in enumerate(pg_b):
             img[self.push_pg_base + i] = byte
+        for i, byte in enumerate(pb_b):
+            img[self.push_pb_base + i] = byte
         # __srtab: 16 entries `jun <stub on page k>` = 0x4<k>, 0xFC
         st = self.srtab_base
         for k in range(16):
@@ -767,14 +1014,29 @@ class Linker:
                            if self.sec_bank.get(id(p.sec), -1) == -1]
             cur = 0  # pure next-fit in call-graph order: a DFS-adjacent call
                      # chain stays in one bank; advance only when it won't fit.
+            # Keep a soft per-bank tail reserve for far-call thunks/trampolines
+            # (they must live in the caller's / callee's own bank). A function
+            # larger than bank_bytes-reserve is allowed to occupy an otherwise
+            # empty bank at full size (its out-calls' thunks then fall back to
+            # common). reserve=0 when far-calls are off.
+            reserve = (self.thunk_reserve
+                       if (getattr(self, "want_softcall", False)
+                           and getattr(self, "far_calls", True))
+                       else 0)
+            def fits(cur, size):
+                soft = self.bank_bytes - reserve
+                if bank_fill[cur] + size <= soft:
+                    return True
+                # allow a lone oversized function to use the whole bank
+                return bank_fill[cur] == 0 and size <= self.bank_bytes
             for obj, sec in pack_order:
                 if sec.size > self.bank_bytes:
                     raise LinkError(
                         f"{obj.path}:{sec.name} is {sec.size} bytes > one bank's "
                         f"banked region {self.bank_bytes}; split the function")
-                if bank_fill[cur] + sec.size > self.bank_bytes:
+                if not fits(cur, sec.size):
                     cur += 1
-                    while cur < self.banks and bank_fill[cur] + sec.size > self.bank_bytes:
+                    while cur < self.banks and not fits(cur, sec.size):
                         cur += 1
                     if cur >= self.banks:
                         raise LinkError(
@@ -1020,6 +1282,16 @@ class Linker:
                 raise LinkError(self._loc(obj, sec, rel) +
                                 f": PAGE4 target 0x{value:x} exceeds 12 bits")
             self.rom_image[off] = ((value >> 8) & 0x0F) << 4
+        elif rt == R_I4004_BANK4:
+            # Low nibble of an LDM operand = the ROM bank the packer placed the
+            # referenced code symbol in (far-call forward token). Resolved from
+            # the linker's bank assignment, NOT from `value` (an address exists
+            # in every bank). Common/linker-defined symbols resolve to bank 0,
+            # the caller-independent value the __soft_ret dispatch expects.
+            bank = self._sec_bank_of_symbol(obj, rel)
+            if bank < 0:
+                bank = 0
+            self.rom_image[off] = (self.rom_image[off] & 0xF0) | (bank & 0x0F)
         elif rt == R_I4004_ROMADDR12:
             # 12-bit ROM address stored zero-extended into a 2-byte data cell
             self.rom_image[off] = value & 0xFF
@@ -1202,16 +1474,43 @@ class Linker:
                 for k in banks:
                     self.rom_image = images[k]       # _patch writes self.rom_image
                     for rel in rels:
-                        # Soft-call cross-bank forward switch: redirect a `jun
-                        # callee` whose BANKED callee is in a different bank than
-                        # the consuming section to the callee's common
-                        # `__tobank_<addr>` set-latch stub (sets latch +
-                        # __cur_bank to the callee bank, then juns the callee).
-                        # Applies to a COMMON caller too (b == -1), e.g. crt0's
-                        # jun main when main is not in bank 0 -- common runs under
-                        # whatever latch is current. Same-bank and banked->common
-                        # calls are untouched.
+                        # Far-call lowering (abi.md 4.4.3): redirect a cross-bank
+                        # `jun callee` to the in-bank forward-token thunk, which
+                        # pushes (off, page, callee_bank) and `jun __soft_ret`.
+                        # The thunk lives in the CALLER's bank (host_bank) and
+                        # never touches the latch, so no running instruction is
+                        # swapped out. A COMMON caller (b == -1) hosts its thunk
+                        # in the callee bank; such a common call site is only
+                        # rewritten in the image for that bank (k == host_bank),
+                        # which is where control actually is when it fires
+                        # (crt0's `jun main` runs after the latch already points
+                        # at main's bank via the reset default / prior switch).
                         if (getattr(self, "want_softcall", False)
+                                and getattr(self, "far_calls", True)
+                                and rel.rtype == R_I4004_ADDR12):
+                            to = self._sec_bank_of_symbol(obj, rel)
+                            addr = self._target_addr(obj, rel)
+                            if to != -1 and to != b and addr is not None:
+                                if b == -1:
+                                    # common caller -> common thunk (mapped in
+                                    # every bank image; rewrite everywhere).
+                                    th = self.far_thunks_common.get((addr, to))
+                                    if th is not None:
+                                        self._patch(obj, sec, sec.base, rel, th[0])
+                                        continue
+                                else:
+                                    # banked caller -> in-bank thunk (host==b==k)
+                                    # or a common-fallback thunk (mapped in every
+                                    # bank image when the bank tail was full).
+                                    th = self.far_thunks.get((addr, b))
+                                    if th is not None:
+                                        is_common = th[3]
+                                        if is_common or k == b:
+                                            self._patch(obj, sec, sec.base, rel, th[0])
+                                            continue
+                        # Legacy soft-call __tobank stub (when --no-far-calls).
+                        if (getattr(self, "want_softcall", False)
+                                and not getattr(self, "far_calls", True)
                                 and rel.rtype == R_I4004_ADDR12):
                             to = self._sec_bank_of_symbol(obj, rel)
                             addr = self._target_addr(obj, rel)
@@ -1259,7 +1558,10 @@ class Linker:
                 self.bank_images = self._build_banked_images()
                 for k in range(self.banks):
                     self._write_softcall(self.bank_images[k], self.n_pages)
-                    self._write_bank_stubs(self.bank_images[k])
+                    if getattr(self, "far_calls", True):
+                        self._write_far_thunks(self.bank_images[k], k)
+                    else:
+                        self._write_bank_stubs(self.bank_images[k])
                 self._assert_leaf_depth()
                 return
             xb = self._cross_bank_calls()
@@ -1401,6 +1703,15 @@ def main(argv=None):
                     help="synthesize the software-call return dispatch "
                          "(__soft_ret + __srtab + per-page jin-p0 stubs) and "
                          "assert the JMS leaf-depth rule (abi.md 4.4.1/4.4.2).")
+    ap.add_argument("--far-calls", dest="far_calls", action="store_true",
+                    default=True,
+                    help="(banked --softcall, DEFAULT ON) lower each cross-bank "
+                         "call to an in-caller-bank forward-token thunk + "
+                         "`jun __soft_ret`, removing the common __tobank stubs "
+                         "(abi.md 4.4.3).")
+    ap.add_argument("--no-far-calls", dest="far_calls", action="store_false",
+                    help="restore the legacy common __tobank set-latch stubs "
+                         "instead of far-call thunks (for A/B comparison).")
     args = ap.parse_args(argv)
 
     rom_len = args.max
@@ -1432,6 +1743,7 @@ def main(argv=None):
                     bank_bytes=args.bank_bytes)
         ln.rewrite_cross_bank = args.rewrite_cross_bank
         ln.want_softcall = args.softcall
+        ln.far_calls = args.far_calls
         if args.emit_trampolines:
             # pass 1: placement only, then write the trampoline source.
             if not args.banks:

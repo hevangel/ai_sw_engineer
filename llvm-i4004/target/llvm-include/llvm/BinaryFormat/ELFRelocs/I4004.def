@@ -24,3 +24,7 @@ ELF_RELOC(R_I4004_LO8,        7)
 // Page nibble (bits 11..8) of a code symbol into a FIM second word's low
 // nibble (software-call return page, abi.md sec.4.4.1). From %page(sym).
 ELF_RELOC(R_I4004_PAGE4,      8)
+// Bank nibble (the ROM bank the packer placed a code symbol in) into the low
+// nibble of an LDM operand byte (far-call forward token, abi.md sec.4.4.3).
+// Packer-produced only -- bank numbers do not exist until link placement.
+ELF_RELOC(R_I4004_BANK4,      9)

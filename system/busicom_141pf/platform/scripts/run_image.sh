@@ -73,7 +73,16 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ -f $image ]] || fail "image not found: $image"
 sz=$(wc -c < "$image")
-(( sz >= 1280 && sz <= 4096 )) || fail "image size $sz out of range (1280..4096)"
+# A flat image is 1280..4096 B. A BANKED image (i4004_pack --banks, common +
+# N*bank) is larger and only runs on the secondary (chips) sim, whose
+# chips_trace adapter reloads banked ROM on the chip-3 latch; the primary (RTL)
+# sim splits into <=16 physical 4001s so it is capped at 4096 B.
+if (( sz > 4096 )); then
+    [[ $sim == secondary ]] || fail "banked image ($sz B > 4096) runs on the secondary sim only; the RTL board has <=16 4001s (4096 B)"
+    (( sz <= 0x20000 )) || fail "image size $sz too large (banked max 128 KiB)"
+else
+    (( sz >= 1280 && sz <= 4096 )) || fail "image size $sz out of range (1280..4096)"
+fi
 
 mkdir -p "$WORK"
 
