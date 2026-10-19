@@ -5,7 +5,7 @@
 | Original year | 1971 (Busicom 141-PF introduction; see [system README](../README.md)) |
 | Original authors | Intel, for Busicom (firmware reverse-engineered by the Busicom 141-PF Replication Project) |
 | Machine | Busicom 141-PF — Intel 4004, 5 × 4001, 2 × 4002, 3 × 4003 |
-| Status | **M3** — host core (M2: 42/42) plus port-level machine drivers: keyboard 4003 scan + 8-key buffer, selectors, drum-printer hammer/`TEST` sequencing, paper advance, red/black ink, two-column symbols + lamps, all behind a port-level HAL. Proven **42/42 exactly** against the original ROM's full printed tape (`tests/port_trace.rs` vs `oracle/rom_port_trace.txt`, no relaxations), and **42/42** against the manual oracle through the core and the drivers |
+| Status | **M4 (target build path)** — on top of M3 (host core + port-level drivers, **42/42 exact tape**): the target entry now implements the board `Hal` over the runtime's `__bus_*` externs, and `scripts/build_target_ir.sh` produces one whole-program i4004-compatible LLVM IR module (`avr-none` + build-std + fat LTO, retargeted to i4004). Fit analysis from that IR shows the firmware's register file (`Calculator` = 116 bytes, one BCD digit per byte) does **not** fit the stock 2×4002 board (64 bytes main RAM) — see `report/final_report.md` M4. All host tests remain **42/42** (the target Hal is `target_os="none"`-only). No 4004 image yet: `llc` selects 1/40 functions so far (`llvm-i4004/rust/codegen_worklist.md`) |
 
 ## History
 
