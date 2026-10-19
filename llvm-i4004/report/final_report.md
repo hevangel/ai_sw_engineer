@@ -2,6 +2,35 @@
 
 ## HEADLINE FINDING (2026-10-19): the compiled firmware is ~11x too big for the 4004
 
+### Size-reduction campaign (in progress) — instruction-mix profile of the 45,714 B
+
+`system/busicom_141pf/firmware/build/prof.py` over the whole firmware `.s`
+(36,975 instructions, 45,714 bytes):
+
+| Mnemonic | count | ~bytes | share |
+|---|---|---|---|
+| `fim` (2B)  | 7,498 | 14,996 | **33%** |
+| `src`       | 6,218 |  6,218 | 14% |
+| `xch`       | 5,951 |  5,951 | 13% |
+| `ld`        | 5,597 |  5,597 | 12% |
+| `rdm`       | 3,716 |  3,716 | 8% |
+| `wrm`       | 2,502 |  2,502 | 5% |
+| `add`/`clc`/`sub`/`cmc` | 3,422 | 3,422 | 7% |
+| `jcn`/`jun`/`jms` (2B)  | 1,241 | 2,482 | 5% |
+| other       | — | ~4,800 | 11% |
+
+Patterns: **5,401 `fim ; src` pointer setups**, 3,716 `src rdm xch` byte-reads,
+2,502 `src ld wrm` byte-writes, 746 `clc ld sub` compare nibbles, 326 `clc ld
+add`. **The dominant cost is pointer-address materialization**: every RAM byte
+access re-emits `fim pN,<const>` (2 B) + `src` even for consecutive cells of the
+same object. `fim` alone is a third of the image. The reduction tiers target
+this first (peephole redundant `fim`/`src`, walk adjacent cells with `inc`,
+route the load/store + i16-compare sequences through JMS helpers, MachineOutliner,
+cheaper spills), then firmware code shape, then (last resort) a documented
+xl ROM bank-switch.
+
+## HEADLINE FINDING (2026-10-19): the compiled firmware is ~11x too big for the 4004
+
 The whole firmware now compiles to a relocatable object (43/43 functions, the
 mem/i16 runtime is complete and chips-tested, build_image.sh drives the full
 pipeline), but it **cannot be linked into a runnable ROM image**, for a reason

@@ -23,6 +23,7 @@ add_llvm_target(I4004CodeGen
   I4004InstrInfo.cpp
   I4004MachineFunctionInfo.cpp
   I4004MCInstLower.cpp
+  I4004Peephole.cpp
   I4004RegisterInfo.cpp
   I4004SelectionDAGInfo.cpp
   I4004Subtarget.cpp

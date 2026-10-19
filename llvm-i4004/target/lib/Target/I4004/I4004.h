@@ -32,8 +32,13 @@ FunctionPass *createI4004ISelDag(I4004TargetMachine &TM,
 // instruction sequences).
 FunctionPass *createI4004ExpandPseudosPass();
 
+// Post-expansion peephole: removes redundant FIM/SRC pointer setups (the
+// largest single source of code size on this target).
+FunctionPass *createI4004PeepholePass();
+
 void initializeI4004DAGToDAGISelLegacyPass(PassRegistry &);
 void initializeI4004ExpandPseudosPass(PassRegistry &);
+void initializeI4004PeepholePass(PassRegistry &);
 
 } // namespace llvm
 
