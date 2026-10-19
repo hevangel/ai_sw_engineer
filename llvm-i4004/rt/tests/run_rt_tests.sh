@@ -188,6 +188,47 @@ if [[ -f "$RT/logic16.s" ]]; then
   done
 fi
 
+status "=== shift16: __ashlhi3 / __lshrhi3 / __ashrhi3 (i16) ==="
+if [[ -f "$RT/shift16.s" ]]; then
+  for a in 0 1 0x00FF 0x0100 0x1234 0x8001 0xAAAA 0xFFFF; do
+    for n in 0 1 2 3 4 7 8 12 15 16 20; do
+      av=$(( a & 0xffff ))
+      shl=$(( (av << n) & 0xffff ))
+      lsr=$(( av >> n )); (( n >= 16 )) && lsr=0
+      if (( av & 0x8000 )); then
+        if (( n >= 16 )); then asr=0xffff; else asr=$(( ( (av | 0xffff0000) >> n ) & 0xffff )); fi
+      else
+        asr=$(( av >> n )); (( n >= 16 )) && asr=0
+      fi
+      run_wide "shift16.s" __ashlhi3 "$av" "$n" "$shl"
+      run_wide "shift16.s" __lshrhi3 "$av" "$n" "$lsr"
+      run_wide "shift16.s" __ashrhi3 "$av" "$n" "$asr"
+    done
+  done
+fi
+
+status "=== arith16: __mulhi3 / __udivhi3 / __umodhi3 (i16) ==="
+if [[ -f "$RT/arith16.s" ]]; then
+  # arith16 uses the soft stack (P7); the wide stub inits SSP to 0x40. The
+  # divider links the stack helper (stack.s) too.
+  if [[ "$MODE" == full ]]; then
+    MAS="0 1 2 10 100 255 256 1000 4096 12345 40000 65535"
+    MBS="1 2 3 7 10 100 256 1000 9999 65535"
+  else
+    MAS="0 1 7 100 255 1000 12345 40000 65535"
+    MBS="1 2 3 10 100 256 1000 65535"
+  fi
+  for a in $MAS; do for b in $MBS; do
+    av=$(( a & 0xffff )); bv=$(( b & 0xffff ))
+    mul=$(( (av * bv) & 0xffff ))
+    run_wide "arith16.s" __mulhi3 "$av" "$bv" "$mul"
+    [[ "$bv" == 0 ]] && continue
+    q=$(( av / bv )); r=$(( av % bv ))
+    run_wide "arith16.s" __udivhi3 "$av" "$bv" "$q"
+    run_wide "arith16.s" __umodhi3 "$av" "$bv" "$r"
+  done; done
+fi
+
 echo "" >&2
 status "RESULT: $pass passed, $failc failed"
 [[ "$failc" == 0 ]] || exit 1

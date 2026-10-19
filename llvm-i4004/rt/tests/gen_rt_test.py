@@ -75,6 +75,13 @@ def main():
         a, b = args.a & 0xffff, args.b & 0xffff
         lines = [TEMPLATE_HEAD.format(helper=args.helper, inputs=f"a={a} b={b}")]
         body = []
+        # SSP init: __udivmod16 (and anything using the soft stack) needs P7 set
+        # to the stack base, which crt0 does in a real image but the bare test
+        # stub must do itself. link.ld's stack region ORIGIN is 0x40 (4002 #1,
+        # char 0). Select RAM bank 0 too (reset does, but be explicit).
+        body.append("\tldm\t0")
+        body.append("\tdcl")
+        body.append("\tfim\tp7, 0x40")                     # SSP = __sstack_base
         # i16 a in D1 = P2:P3 (P2 = low byte, P3 = high byte); FIM loads a pair
         # as 0xHHLL -> Reven=HH (pair high nibble), Rodd=LL (pair low nibble),
         # i.e. FIM pN,0xVV sets the pair to byte value 0xVV. So the low byte of a
