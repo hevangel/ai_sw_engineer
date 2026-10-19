@@ -890,9 +890,14 @@ class Linker:
         need = n_pages * PAGE
         if len(img) < need:
             img.extend(b"\x00" * (need - len(img)))
-        # per-page jin p0 stub at STUB_OFF on every page
+        # per-page jin p0 stub at STUB_OFF -- ONLY on return-target pages
+        # (self.stub_pages), so a stub never clobbers live code on a page no
+        # soft-return lands on. _reserve_page_stub freed 0xFC on exactly those
+        # pages. Flat path (no stub_pages) falls back to every page.
+        stub_pages = getattr(self, "stub_pages", None)
         for p in range(n_pages):
-            img[p * PAGE + STUB_OFF] = JIN_P0
+            if stub_pages is None or p in stub_pages:
+                img[p * PAGE + STUB_OFF] = JIN_P0
         # __soft_ret body
         body, nocar_idx, jcn_operand_idx = self._soft_ret_bytes(self.srtab_base & 0xFF)
         sr = self.soft_ret_base
@@ -1015,6 +1020,172 @@ class Linker:
         if size > STUB_OFF:
             return 0
         return PAGE - page_off
+
+    @staticmethod
+    def _insn_len(op):
+        """Length in bytes of the 4004 instruction whose first byte is `op`.
+        Two-byte: JCN(0x1X), FIM(0x2X with EVEN low nibble), JUN(0x4X),
+        JMS(0x5X), ISZ(0x7X). SRC(0x2X odd), FIN/JIN(0x3X) and everything else
+        are one byte. (abi.md / isa.md opcode map.)"""
+        hi = op >> 4
+        if hi in (1, 4, 5, 7):
+            return 2
+        if hi == 2 and (op & 1) == 0:   # FIM (even) is 2 bytes; SRC (odd) is 1
+            return 2
+        return 1
+
+    def _reserve_page_stub(self, obj, sec, base, stub_pages):
+        """Keep executable code off the per-page `jin p0` stub byte (STUB_OFF =
+        0xFC) on the RETURN-TARGET pages (`stub_pages`, absolute page numbers)
+        that actually receive a stub. A soft-return lands via
+        __srtab[page] -> `jun 0x{page}FC` -> `jin p0`, so page P's 0xFC must be
+        the stub whenever some `.Lret` is on page P. Only those pages get a stub
+        written (_write_softcall), so only those pages must be freed of code --
+        every OTHER function-interior page keeps its bytes, and the function is
+        NOT globally shifted. This is what makes the fix cheap and keeps the
+        page-local PAGE8 branches of the untouched pages intact.
+
+        Root cause this addresses (PROVEN by a chips PC-trace, 2026-10-19): the
+        packer wrote `jin p0` (0x31) at 0xFC on EVERY page including pages a
+        multi-page function (run/press/dispatch) occupies, clobbering real code
+        (run's `inc r1` at 0x8FC) so run fell through into a stray `jin p0`,
+        looped on itself and never reached its cross-bank scan_pass call.
+
+        For a return-target page, bridge: splice `JUN next_page` + NOP pad at the
+        last instruction boundary whose JUN operand lands <= 0xFB, so 0xFC..0xFF
+        become a clean gap the stub owns and control jumps over it. Idempotent
+        (skips an already-bridged page). Runs ONCE after placement converges, so
+        `base` is final and there is no cross-iteration re-bridging. Returns True
+        if it changed anything (so the caller re-runs page-align for the few
+        shifted PAGE8 branches)."""
+        data = sec.data
+        n = len(data)
+        if base < 0 or n == 0:
+            return False
+        # code sections only -- never walk .rodata/.data as instructions.
+        if sec.name == ".rodata" or sec.name.startswith(".rodata") \
+                or sec.name == ".data" or sec.name.startswith(".data"):
+            return False
+        off = 0
+        safe_boundary = 0            # last boundary with (base+off)%PAGE <= 0xFA
+        any_change = False
+        while off < n:
+            ilen = self._insn_len(data[off])
+            a0 = base + off
+            a1 = a0 + ilen - 1
+            covers = any((a % PAGE) == STUB_OFF for a in range(a0, a1 + 1))
+            if not covers:
+                if (a0 % PAGE) <= STUB_OFF - 2:
+                    safe_boundary = off
+                off += ilen
+                continue
+            page_base = (a0 // PAGE) * PAGE
+            # Only RETURN-TARGET pages receive a stub; leave code on every other
+            # page untouched. stub_pages=None means reserve EVERY page (the stub
+            # is written on all pages).
+            if stub_pages is not None and (page_base // PAGE) not in stub_pages:
+                off += ilen
+                continue
+            pb_off = page_base - base                    # section offset of page start
+            tail_all_nop = all(
+                (pb_off + k) >= n or sec.data[pb_off + k] == 0x00
+                for k in range(STUB_OFF, PAGE))
+            # a genuine bridge also has an unconditional JUN (0x4X) ending right
+            # before the NOP tail -- so 0xFC is unreachable by fall-through. Our
+            # bridge JUN targets the NEXT PAGE's 0x00, so its OPERAND byte is
+            # 0x00 (looks like a NOP); the last non-zero byte on the page is thus
+            # the JUN OPCODE itself (0x4X). Detect that.
+            has_bridge_jun = False
+            last_nz = -1
+            for k in range(STUB_OFF - 1, -1, -1):
+                if pb_off + k < n and sec.data[pb_off + k] != 0x00:
+                    last_nz = k
+                    break
+            if last_nz >= 0 and pb_off + last_nz < n:
+                b_lastnz = sec.data[pb_off + last_nz]
+                # opcode at last_nz (operand 0x00 follows), or opcode at last_nz-1
+                if (b_lastnz & 0xF0) == 0x40:
+                    has_bridge_jun = True
+                elif last_nz >= 1 and (sec.data[pb_off + last_nz - 1] & 0xF0) == 0x40:
+                    has_bridge_jun = True
+            if tail_all_nop and has_bridge_jun:
+                off = pb_off + PAGE                      # resume at next page
+                safe_boundary = off
+                continue
+            resume_abs = page_base + PAGE
+            # Latest instruction boundary on this page with %PAGE <= 0xFA.
+            ins_off = pb_off
+            scan = pb_off
+            while scan < n:
+                srel = (base + scan) % PAGE
+                if srel > STUB_OFF - 2:
+                    break
+                ins_off = scan
+                scan += self._insn_len(sec.data[scan])
+            ins_abs = base + ins_off
+            insert_len = resume_abs - ins_abs
+            if insert_len < 3 or (ins_abs % PAGE) > STUB_OFF - 2:
+                raise LinkError(
+                    f"{obj.path}:{sec.name}: cannot reserve STUB_OFF at "
+                    f"0x{page_base+STUB_OFF:x} (no safe instruction boundary)")
+            bridge = bytearray([0x40, 0x00] + [0x00] * (insert_len - 2))
+            if __import__("os").environ.get("STUBDBG") == "1":
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[stub] {sec.name[-24:]} base=0x{base:x} page=0x{page_base:x} "
+                    f"ins_off=0x{ins_off:x} len={insert_len}\n")
+            sec.data = data[:ins_off] + bytes(bridge) + data[ins_off:]
+            n_ins = len(bridge)
+            sec.size += n_ins
+            rels = obj.relocs.setdefault(sec.index, [])
+            for r in rels:
+                if r.offset >= ins_off:
+                    r.offset += n_ins
+            for s in obj.symbols:
+                if s.shndx == sec.index and s.value >= ins_off:
+                    s.value += n_ins
+            sym_idx = len(obj.symbols)
+            resume_off = ins_off + n_ins                 # section offset of resume
+            obj.symbols.append(Symbol(
+                name=f".Lstubresume_{sec.index}_{resume_off:x}",
+                value=resume_off, size=0, info=0x00, shndx=sec.index))
+            rels.append(Reloc(offset=ins_off + 1, sym=sym_idx,
+                              rtype=R_I4004_ADDR12, addend=0))
+            # restart just past the resume point; its instructions are on a new
+            # layout. safe_boundary resets to the resume offset (page-local and
+            # <= 0xFD's page start region).
+            data = sec.data
+            n = len(data)
+            off = resume_off
+            safe_boundary = resume_off
+            any_change = True
+        return any_change
+
+    def _compute_stub_pages(self):
+        """The set of 4096-view page numbers (0..15) that receive a `jin p0`
+        return stub: every page that holds a soft-return landing point. A
+        CALLSOFT pushes its `.Lret` page as the return token; the backend emits
+        that page via a R_I4004_PAGE4 reloc whose target IS the `.Lret`. So the
+        stub pages are exactly {page(target) for each PAGE4 reloc}, resolved at
+        final placement. Page 0 is always included (the common dispatch page's
+        own layout and any page-0 return)."""
+        pages = {0}
+        for obj in self.objs:
+            for sec in obj.sections:
+                rels = obj.relocs.get(sec.index)
+                if not rels or sec.base < 0 or classify(sec.name) != "rom":
+                    continue
+                for rel in rels:
+                    if rel.rtype != R_I4004_PAGE4:
+                        continue
+                    tgt = self._target_addr(obj, rel)
+                    if tgt is not None:
+                        pages.add((tgt // PAGE) & 0xF)
+        return pages
+
+    def _reserve_return_stub_pages(self):
+        """(unused) earlier post-placement variant; the reservation now runs
+        inside the _place_rom_banked fix-point so growth re-packs correctly."""
 
     def _page_align_section(self, obj, sec, base):
         """Insert NOP padding so no PAGE8/FIN8-relocated 2-byte instruction in
@@ -1176,13 +1347,12 @@ class Linker:
                         raise LinkError(
                             f"no bank has room for {obj.path}:{sec.name} "
                             f"({sec.size} B) in next-fit order; raise --banks")
-                # Reserve the per-page `jin p0` stub byte (STUB_OFF): a single-
-                # page function body laid across a page's 0xFC would be clobbered
-                # by _synth_bank_stubs()'s stub write AND fall THROUGH into
-                # `jin p0` (jumps to P0) -- the deep-call self-loop this fix
-                # addresses (`entry` spanned 0x8FC, looped forever). _stub_pad
-                # bumps such a section to the next page; it is a no-op for a
-                # multi-page section (handled by page relaxation -- see its doc).
+                # Reserve the per-page `jin p0` stub byte (STUB_OFF). _stub_pad
+                # bumps a SINGLE-page section off a page's 0xFC. Interior 0xFC
+                # bytes of a MULTI-page function on a RETURN-TARGET page are
+                # bridged by _reserve_page_stub below (only those pages get a
+                # stub). Do NOT page-align the function: that would shift its
+                # page-local PAGE8 branches and force large page-align padding.
                 pad = self._stub_pad(base + bank_fill[cur], sec.size)
                 if pad and bank_fill[cur] + pad + sec.size > self.bank_bytes:
                     # Padding would overflow this bank: move to the next free one
@@ -1201,14 +1371,28 @@ class Linker:
                 self.sec_bank[id(sec)] = cur
                 self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
                 bank_fill[cur] += sec.size
-            # page-align each banked section at its assigned base
+            # page-align each banked section at its assigned base, and reserve
+            # the per-page jin-p0 stub byte (STUB_OFF) so a MULTI-page function
+            # body never occupies 0xFC (the stub write would clobber it and the
+            # function would fall through into `jin p0` -- the run->scan_pass
+            # self-loop this fix addresses). Both passes grow sections, so we
+            # re-pack to a fixed point.
             changed = False
+            # which absolute pages are soft-return targets (need a stub)? only
+            # those pages must keep 0xFC clear; every other function-interior
+            # page keeps its code. Recomputed each iteration from current bases.
+            stub_pages = self._compute_stub_pages()
             for obj, sec in banked_items:
+                if self._reserve_page_stub(obj, sec, sec.base, stub_pages):
+                    changed = True
                 if self._page_align_section(obj, sec, sec.base):
                     changed = True
             if not changed:
                 break
         self.bank_fill = bank_fill
+        # final return-target pages -- _write_softcall writes a stub ONLY here
+        # (so a non-return function page keeps its 0xFC code byte intact).
+        self.stub_pages = self._compute_stub_pages()
         # rom_used = common + the largest bank (image size per bank is uniform).
         self.rom_used = self.common_bytes + self.bank_bytes
 
