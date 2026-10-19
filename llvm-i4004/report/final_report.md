@@ -1,32 +1,49 @@
 # llvm-i4004 final report
 
-## STATUS (2026-10-19): software-call convention items 1–4 LANDED & green on chips
+## STATUS (2026-10-19): soft-call convention done & green; whole-firmware relink BLOCKED by 2 oversized functions
 
-The software-return-stack call convention (the fix for the hardware-stack
-overflow below) is implemented end to end as one coupled unit and
-**execution-verified on external/chips**:
+The software-return-stack call convention is implemented end to end and
+**execution-verified on external/chips**, including the 8-bit SSP pointer that
+lifts the depth ceiling to the firmware's real 6+ depth:
 
 1. **MC** — `%lo8(sym)`/`%page(sym)` specifiers → `fixup_lo8`/`fixup_page4` →
    `R_I4004_LO8`/`R_I4004_PAGE4`, resolved by the AsmBackend and the packer.
 2. **Packer** (`i4004_pack.py --softcall`) — synthesizes the per-page `jin p0`
-   stub (0xFC), `__soft_ret` (verified byte template) and `__srtab`; asserts the
-   JMS leaf-depth ≤ 3 rule.
-3. **Backend** — `I4004ExpandPseudos` lowers a compiled call to the inline
-   push-token + `jun callee` CALLSOFT sequence (no HW-stack level, no arg-reg
-   clobber) and every compiled return to `jun __soft_ret`; leaf rt/HAL helpers
-   keep `jms`.
-4. **Chips execution** (`tests/exec/run_softcall_exec.sh`) — a depth-4 call
-   chain (> 3 HW levels), a value preserved across a soft call, and an **i16
-   return value** through a 2-deep call all return correctly. lit 28/28; host
-   firmware `cargo test` 42/42.
+   stub (0xFC), `__soft_ret`, `__srtab`, and the 8-bit-SSP push leaf helpers
+   `__push_off`/`__push_pg`; asserts the JMS leaf-depth ≤ 3 rule. Both the FLAT
+   and the BANKED path synthesize the common-region return dispatch.
+3. **Backend** — `I4004ExpandPseudos` lowers a compiled call to the CALLSOFT
+   sequence (`fim p0,%lo8; jms __push_off; fim p0,%page; jms __push_pg; jun
+   callee`, P0-only staging so i16 args in D1/D2 survive) and every compiled
+   return to `jun __soft_ret`; leaf rt/HAL helpers keep `jms`.
+4. **Chips execution** (`tests/exec/run_softcall_exec.sh`, GREEN) — a **depth-8**
+   call chain (24 token nibbles, crossing 4002 registers via the 8-bit SSP), a
+   value preserved across a soft call, and an **i16 return** through a 2-deep
+   call. lit 28/28; host firmware `cargo test` 42/42. `crt0` now soft-enters
+   `main`; `build_image.sh` passes `--softcall` (+ optional `BANKS`).
 
-**Still needed before relinking the whole firmware (items 5–6):** an 8-bit SSP
-carry (R15→R14) so depth exceeds 5 frames (the firmware is 6+ deep); the banked
-`--softcall` path (stub per bank page + latch write in `__soft_ret`, deleting
-the old `__bankcall_*` JMS trampolines); then wiring `build_image.sh` + the
-chips bank-latch runner + the 42-example comparison. A recursion/large-frame
-value-spill bug (register allocation, not the soft-call mechanism) is also open.
+### Item 5 (relink whole firmware) — reached the real blocker
+The whole firmware compiles, assembles, resolves every relocation, and **passes
+the leaf-depth assertion** through the soft-call pipeline. FLAT size = **48,801
+bytes** (`.text` = 47,347 B across 62 functions). It needs banking, and the
+banked `--softcall` synthesis works (builds per-bank images with the common
+return dispatch + per-page stubs). BUT the 4004's 12-bit PC forces
+**common_bytes + bank_bytes ≤ 4096**, and:
+- the runtime + crt0 + HAL + the soft-call common page need **≈ 1,718 B** of
+  common, so the bank window is at most ≈ 2,304 B (common 0x700 + bank 0x900);
+- **2 compiled functions exceed that window**: `bcd::Num::divide` (2,401 B) and
+  `Calculator::do_mul_div_equals` (2,380 B). A function cannot straddle a bank.
+
+So a runnable banked image is gated on **splitting those 2 functions below
+~2,300 B** (firmware-shape work, the report's "Tier B"), keeping host `cargo
+test` 42/42. This is the single remaining blocker to item 5; item 6 (chips
+bank-latch runner + 42-example run) follows once an image links. Two further
+pieces are also open and documented: the cross-bank FORWARD latch switch (set
+the latch to the callee's bank before the `jun`, restore from the token's bank
+nibble in `__soft_ret`), and a recursion/large-frame value-spill bug in
+register allocation (not the soft-call mechanism).
 See `session_history/2026-10-19-softcall-items-1-4-green.md`.
+
 
 ## TOP FINDING (2026-10-19): the compiled firmware overflows the 3-level hardware stack — it cannot run correctly, banking or not
 

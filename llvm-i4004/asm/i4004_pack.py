@@ -412,8 +412,10 @@ class Linker:
         is known) and BEFORE _apply (so the symbols resolve)."""
         if not getattr(self, "want_softcall", False):
             return
-        # Dedicated page for __soft_ret (@0x00) + __push_tok (@0x40) + __srtab
-        # (@0x80), just past the placed code.
+        if self.banks:
+            return self._synth_softcall_banked()
+        # Dedicated page for __soft_ret (@0x00) + push helpers + __srtab (@0x80),
+        # just past the placed code.
         sr_page = (self.rom_used + PAGE - 1) // PAGE
         sr_base = sr_page * PAGE
         srtab_base = sr_base + 0x80
@@ -435,17 +437,54 @@ class Linker:
                 f"soft-call synthesis overflows ROM budget "
                 f"({self.rom_used} > {self.rom_len}); raise --max")
 
+    def _synth_softcall_banked(self):
+        """Banked soft-call: the return-dispatch region (__soft_ret, push
+        helpers, __srtab) lives on ONE page in the COMMON region (mapped in every
+        bank) so every bank can reach it; the per-page `jin p0` stub sits at
+        STUB_OFF on every page of every bank. The soft-call page is reserved as
+        extra common usage AFTER the common functions have been placed by
+        _place_rom_banked. Must run after _place_rom (banked) / before
+        _build_banked_images."""
+        # Reserve one common page just past the placed common functions.
+        sr_page = (self.common_used + PAGE - 1) // PAGE
+        sr_base = sr_page * PAGE
+        if sr_base + PAGE > self.common_bytes:
+            raise LinkError(
+                f"banked soft-call: no room for the return-dispatch page in the "
+                f"common region (need page at 0x{sr_base:x}, common_bytes "
+                f"0x{self.common_bytes:x}); raise --common-bytes")
+        srtab_base = sr_base + 0x80
+        self.soft_ret_base = sr_base
+        self.push_off_base = sr_base + 0x40
+        self.push_pg_base = sr_base + 0x60
+        self.srtab_base = srtab_base
+        self.soft_ret_page = sr_page
+        self.linker_syms[SOFT_RET_SYM] = sr_base
+        self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
+        self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
+        self.linker_syms[SRTAB_SYM] = srtab_base
+        self.common_used = max(self.common_used, sr_base + PAGE)
+        # pages per bank image = common_bytes + bank_bytes, all 256-byte pages.
+        self.n_pages = (self.common_bytes + self.bank_bytes) // PAGE
+
     def _emit_softcall(self):
-        """Write the synthesized bytes into self.rom_image (flat). Called from
-        _apply after relocations are patched."""
-        if not getattr(self, "want_softcall", False):
+        """Write the synthesized soft-call bytes into self.rom_image (FLAT path).
+        Called from _apply after relocations are patched. The banked path calls
+        _write_softcall on each per-bank image instead."""
+        if not getattr(self, "want_softcall", False) or self.banks:
             return
-        img = self.rom_image
-        need = self.n_pages * PAGE
+        self._write_softcall(self.rom_image, self.n_pages)
+
+    def _write_softcall(self, img, n_pages):
+        """Write the per-page `jin p0` stubs, __soft_ret, the push helpers and
+        __srtab into image `img` (which spans `n_pages` 256-byte pages). Shared
+        by the flat and banked emitters; all addresses are self.* bases set by
+        _synth_softcall[_banked] (common PCs, identical in every bank)."""
+        need = n_pages * PAGE
         if len(img) < need:
             img.extend(b"\x00" * (need - len(img)))
         # per-page jin p0 stub at STUB_OFF on every page
-        for p in range(self.n_pages):
+        for p in range(n_pages):
             img[p * PAGE + STUB_OFF] = JIN_P0
         # __soft_ret body
         body, nocar_idx, jcn_operand_idx = self._soft_ret_bytes(self.srtab_base & 0xFF)
@@ -1027,6 +1066,24 @@ class Linker:
         self._place_ram()
         self._linker_defined()
         if self.banks:
+            if getattr(self, "want_softcall", False):
+                # Soft-call banking: the return dispatch (__soft_ret, push
+                # helpers, __srtab, per-page jin-p0 stubs) lives in the common
+                # region, mapped identically in every bank. A compiled call is a
+                # CALLSOFT `jun callee` to the callee's common PC; __soft_ret
+                # restores control via the token. Image builds and is measurable
+                # here. NOTE: the cross-bank FORWARD latch switch (set the ROM
+                # bank latch to the callee's bank before the jun, restore from
+                # the token's bank nibble in __soft_ret) is the remaining
+                # correctness piece; until it lands a call whose callee sits in a
+                # different bank reaches the right PC in the WRONG bank. Tracked
+                # in the report.
+                self._synth_softcall_banked()
+                self.bank_images = self._build_banked_images()
+                for k in range(self.banks):
+                    self._write_softcall(self.bank_images[k], self.n_pages)
+                self._assert_leaf_depth()
+                return
             xb = self._cross_bank_calls()
             if xb and not self.rewrite_cross_bank:
                 callees = sorted(self.cross_bank_callees())
