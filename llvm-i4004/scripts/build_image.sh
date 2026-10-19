@@ -56,7 +56,7 @@ timeout 180 "$bin/llc" -mtriple=i4004 -function-sections -filetype=obj "$ir" -o 
 # 2. assemble crt0 + runtime + HAL. crt0.s MUST be first object so .reset lands
 #    at ROM 0 (the packer places sections in object order within a section).
 hal="$root/../system/busicom_141pf/platform/runtime/hal.s"
-rtsrcs=(crt0.s arith.s arith16.s bcd.s logic.s logic16.s shift.s shift16.s mem.s stack.s)
+rtsrcs=(crt0.s arith.s arith16.s bcd.s logic.s logic16.s shift.s shift16.s mem.s stack.s regops.s)
 objs=("$out_dir/crt0.o")
 timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$rt/crt0.s" -o "$out_dir/crt0.o"
 for s in "${rtsrcs[@]:1}"; do

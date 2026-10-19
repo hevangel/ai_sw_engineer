@@ -66,7 +66,7 @@ impl Num {
     }
 
     pub fn is_zero(&self) -> bool {
-        self.d.iter().all(|&x| x == 0)
+        crate::regops::is_zero(&self.d)
     }
 
     /// Number of significant digits (0 for zero).
@@ -96,15 +96,7 @@ impl Num {
 
     /// Magnitude comparison ignoring sign and scale (caller aligns first).
     pub fn cmp_mag(&self, other: &Num) -> core::cmp::Ordering {
-        let mut i = DIGITS;
-        while i > 0 {
-            i -= 1;
-            let (a, b) = (self.digit(i), other.digit(i));
-            if a != b {
-                return a.cmp(&b);
-            }
-        }
-        core::cmp::Ordering::Equal
+        crate::regops::cmp(&self.d, &other.d)
     }
 
     /// Multiply by 10^k. Returns `false` (value unchanged) if digits would be lost.
@@ -173,33 +165,12 @@ impl Num {
     }
 
     fn add_mag(&mut self, o: &Num) -> bool {
-        let mut carry = 0u8;
-        for i in 0..DIGITS {
-            let mut s = self.digit(i) + o.digit(i) + carry;
-            carry = 0;
-            if s > 9 {
-                s -= 10;
-                carry = 1;
-            }
-            self.set_digit(i, s);
-        }
-        carry == 0
+        crate::regops::add(&mut self.d, &o.d)
     }
 
     /// self.mag -= o.mag, requires self.mag >= o.mag.
     fn sub_mag(&mut self, o: &Num) {
-        let mut borrow = 0u8;
-        for i in 0..DIGITS {
-            let sub = o.digit(i) + borrow;
-            let di = self.digit(i);
-            if di >= sub {
-                self.set_digit(i, di - sub);
-                borrow = 0;
-            } else {
-                self.set_digit(i, di + 10 - sub);
-                borrow = 1;
-            }
-        }
+        crate::regops::sub(&mut self.d, &o.d)
     }
 
     /// Signed addition of `o` (with its sign flipped if `negate`).

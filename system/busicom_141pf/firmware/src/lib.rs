@@ -20,6 +20,7 @@ pub mod driver_printer;
 pub mod hal;
 pub mod keys;
 pub mod print;
+pub mod regops;
 
 pub use bcd::Num;
 pub use keys::{Key, Lamps, Rounding, Switches};
