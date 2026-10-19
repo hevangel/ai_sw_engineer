@@ -150,6 +150,7 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
     }
 
     /// Shift a full 20-bit hammer word MSB-first into the chain.
+    #[inline(never)]
     fn shift_hammer_word(&mut self, word: u32) {
         for i in (0..20).rev() {
             self.shift_printer_bit((word >> i) & 1 == 1);
@@ -174,6 +175,7 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
 
     /// Which drum sector each hammer column needs for this row, as a per-sector
     /// 20-bit mask: `masks[s]` has a 1 for every column that fires at sector s.
+    #[inline(never)]
     fn sector_masks(row: &Row) -> [u32; SECTORS] {
         let mut masks = [0u32; SECTORS];
         if row.overflow {
