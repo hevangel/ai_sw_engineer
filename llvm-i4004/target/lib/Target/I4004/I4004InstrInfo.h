@@ -24,6 +24,17 @@ namespace llvm {
 
 class I4004Subtarget;
 
+namespace I4004II {
+// Target-specific MachineOperand target flags. Attached to an MBB operand of a
+// soft-call FIM so MCInstLower wraps the block symbol in a %lo8/%page specifier
+// expression (the software-call return-token materialisation, abi.md 4.4.1).
+enum TOF {
+  MO_NONE = 0,
+  MO_LO8,  // low 8 bits of the symbol (-> R_I4004_LO8)
+  MO_PAGE, // page nibble (bits 11..8) of the symbol (-> R_I4004_PAGE4)
+};
+} // namespace I4004II
+
 class I4004InstrInfo : public I4004GenInstrInfo {
   const I4004RegisterInfo RI;
   virtual void anchor();

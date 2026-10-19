@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/GlobalValue.h"
 #include <array>
 
 using namespace llvm;
@@ -237,16 +238,85 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     return false;
 
   case I4004::RETpseudo:
-    // Return on the hardware stack: BBL 0.
-    BuildMI(MBB, MI, DL, TII->get(I4004::BBL)).addImm(0);
+    // Software-return-stack return (abi.md 4.4.1): a compiled function is
+    // entered via the soft-call convention (the caller pushed a 3-nibble return
+    // token and JUN'd here, bypassing the hardware stack), so it returns by
+    // JUN __soft_ret, which pops the token and dispatches. BBL is reserved for
+    // the hand-written leaf rt/HAL helpers (asm, JMS/BBL, depth <= 3).
+    BuildMI(MBB, MI, DL, TII->get(I4004::JUN))
+        .addExternalSymbol("__soft_ret");
     MI.eraseFromParent();
     return true;
 
-  case I4004::CALL:
-    // Call to a known address: JMS <target> (hardware stack).
-    BuildMI(MBB, MI, DL, TII->get(I4004::JMS)).add(MI.getOperand(0));
+  case I4004::CALL: {
+    // A call to a hand-written LEAF runtime/HAL helper (libi4004rt: __mulqi3,
+    // __andhi3, memcpy, ... -- external symbols) keeps the hardware stack:
+    // those helpers return via BBL and their own call graph is <= 3 deep
+    // (asserted by the packer, abi.md 4.4.2). Everything else -- a call to a
+    // compiled firmware function, which returns via __soft_ret -- uses the
+    // software-call convention.
+    const MachineOperand &Callee0 = MI.getOperand(0);
+    bool IsLeafHelper = false;
+    StringRef Name;
+    if (Callee0.isSymbol())
+      Name = Callee0.getSymbolName();
+    else if (Callee0.isGlobal())
+      Name = Callee0.getGlobal()->getName();
+    if (!Name.empty())
+      IsLeafHelper = Name.starts_with("__") || Name == "memcpy" ||
+                     Name == "memset" || Name == "memmove";
+    if (IsLeafHelper) {
+      BuildMI(MBB, MI, DL, TII->get(I4004::JMS)).add(MI.getOperand(0));
+      MI.eraseFromParent();
+      return true;
+    }
+    // Software call (abi.md 4.4.1), expanded post-RA. The return token is
+    // pushed INLINE through the scratch pair P0 and the SSP (P7), so NO
+    // argument register (P1/P2/P3) is disturbed and no hardware-stack level is
+    // spent (a JMS __push_ret would clobber P1 and cost a HW level):
+    //   fim  p0, %lo8(.Lret)   ; R0 = off.hi, R1 = off.lo
+    //   src p7 ; ld r1 ; wrm ; inc r15     ; [SSP+0] = off.lo
+    //   src p7 ; ld r0 ; wrm ; inc r15     ; [SSP+1] = off.hi
+    //   fim  p0, %page(.Lret)  ; R0 = page nibble (high nibble of the byte)
+    //   src p7 ; ld r0 ; wrm ; inc r15     ; [SSP+2] = page
+    //   jun  <callee>          ; NOT jms -- hardware stack bypassed
+    // .Lret:
+    MachineFunction &MF = *MBB.getParent();
+    MachineBasicBlock *RetBB = MF.CreateMachineBasicBlock(MBB.getBasicBlock());
+    MF.insert(std::next(MBB.getIterator()), RetBB);
+    RetBB->splice(RetBB->begin(), &MBB, std::next(MI.getIterator()), MBB.end());
+    RetBB->transferSuccessorsAndUpdatePHIs(&MBB);
+    MBB.addSuccessor(RetBB);
+    RetBB->setLabelMustBeEmitted();
+
+    MachineOperand Callee = MI.getOperand(0);
+    Register R0 = TRI->getSubReg(I4004::P0, I4004::sub_hi);
+    Register R1 = TRI->getSubReg(I4004::P0, I4004::sub_lo);
+    Register R15 = TRI->getSubReg(I4004::P7, I4004::sub_lo);
+
+    auto pushNibble = [&](Register NibReg) {
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P7);
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(NibReg);
+      BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+      BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(R15);
+    };
+
+    // offset: R0 = hi, R1 = lo. Push low first (frame layout: SSP+0 = off.lo).
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(I4004::P0)
+        .addMBB(RetBB, I4004II::MO_LO8);
+    pushNibble(R1);
+    pushNibble(R0);
+    // page: %page puts the page nibble in the byte's high nibble -> R0.
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
+        .addReg(I4004::P0)
+        .addMBB(RetBB, I4004II::MO_PAGE);
+    pushNibble(R0);
+
+    BuildMI(MBB, MI, DL, TII->get(I4004::JUN)).add(Callee);
     MI.eraseFromParent();
     return true;
+  }
 
   case I4004::ZEXT8TO16:
   case I4004::ANYEXT8TO16: {
@@ -542,9 +612,26 @@ bool I4004ExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   TRI = STI.getRegisterInfo();
 
   bool Changed = false;
+
+  // CALL expansion can SPLIT a basic block (the soft-call return site becomes a
+  // new MBB), which invalidates a range-for over the function and the per-block
+  // iterator. So collect the calls first, then expand each -- exactly the
+  // pattern I4004BranchRelax uses for the same reason.
+  SmallVector<MachineInstr *, 16> Calls;
+  for (MachineBasicBlock &MBB : MF)
+    for (MachineInstr &MI : MBB)
+      if (MI.getOpcode() == I4004::CALL)
+        Calls.push_back(&MI);
+  for (MachineInstr *MI : Calls)
+    Changed |= expandMI(*MI->getParent(), *MI);
+
+  // Now expand the remaining (non-splitting) pseudos. New MBBs created above are
+  // included by this walk.
   for (MachineBasicBlock &MBB : MF) {
     for (auto I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
+      if (MI.getOpcode() == I4004::CALL)
+        continue; // already handled
       Changed |= expandMI(MBB, MI);
     }
   }

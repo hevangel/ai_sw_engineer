@@ -119,8 +119,10 @@ void I4004AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     Data[1] = Value & 0xff;
     break;
   case I4004::fixup_page4:
-    // Page nibble (bits 11..8) into the low nibble of byte 1.
-    Data[1] = (Value >> 8) & 0x0f;
+    // Page nibble (bits 11..8) into the HIGH nibble of byte 1, so FIM Pn,byte
+    // puts the page in Pn's even (high) register -- which __push_ret reads as
+    // the page (abi.md 4.4.1: page in R4 = P2.hi).
+    Data[1] = ((Value >> 8) & 0x0f) << 4;
     break;
   default:
     llvm_unreachable("unknown I4004 fixup kind");

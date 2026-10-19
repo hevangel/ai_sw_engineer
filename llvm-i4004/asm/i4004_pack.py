@@ -645,12 +645,13 @@ class Linker:
             # low 8 bits of a code symbol into the FIM second word (byte at off)
             self.rom_image[off] = value & 0xFF
         elif rt == R_I4004_PAGE4:
-            # page nibble (bits 11..8) of a code symbol into the FIM second
-            # word's LOW nibble; keep the (zero) high nibble of the byte.
+            # page nibble (bits 11..8) of a code symbol into the HIGH nibble of
+            # the FIM second word, so FIM Pn,byte puts the page in Pn.hi (R4),
+            # which __push_ret reads as the page (abi.md 4.4.1).
             if value > 0xFFF:
                 raise LinkError(self._loc(obj, sec, rel) +
                                 f": PAGE4 target 0x{value:x} exceeds 12 bits")
-            self.rom_image[off] = (value >> 8) & 0x0F
+            self.rom_image[off] = ((value >> 8) & 0x0F) << 4
         elif rt == R_I4004_ROMADDR12:
             # 12-bit ROM address stored zero-extended into a 2-byte data cell
             self.rom_image[off] = value & 0xFF
