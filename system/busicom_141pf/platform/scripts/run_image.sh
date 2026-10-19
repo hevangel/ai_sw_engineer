@@ -162,16 +162,15 @@ EOF
     ( cd "$WORK/chips_trace" && CARGO_TARGET_DIR="$WORK/ct_target" cargo build --release >"$WORK/cargo.log" 2>&1 ) \
         || { tail -20 "$WORK/cargo.log" >&2; fail "chips adapter build failed"; }
     # RAM 4002 count. stock = 2 (bank 0 chips 0,1).
-    # xl: the external `chips` board model stores a 4002's identity in a 2-bit
-    # page_mask and selects banks by chip-index/4, but Board::new sets
-    # page_mask = u2::new(raw_index), which PANICS for index >= 4 -- so the
-    # unmodified model (we must not edit external/) can represent only ONE
-    # CM-RAM bank of up to 4 chips. We therefore run chips with ram_count=4
-    # (bank 0 fully populated: chips 0-3). The full 16-chip / 4-bank xl board
-    # is validated on the RTL (primary) simulator instead; this is a FINDING
-    # about the secondary model's capacity, documented in README. rams[0]/[1]
-    # keep the printer/lamp roles, so the decoded tape is unchanged.
-    if [[ $board == xl ]]; then ram_count=4; else ram_count=2; fi
+    # xl: the DCL-banked firmware places per-function frames in CM-RAM banks
+    # 1-3, so the secondary (chips) model must instantiate all 16 4002s (4 banks
+    # x 4 chips). Board::new cannot build > 4 (it sets page_mask = u2::new(raw
+    # index), which panics for index >= 4), so chips_trace.rs HAND-BUILDS the
+    # chips for ram_count > 4 with page_mask = chip-within-bank = i % 4 (the same
+    # workaround tests/exec/run_ramdcl_exec and run_frame_exec use). external/
+    # chips is never edited. rams[0]/[1] keep the printer/lamp port roles, so the
+    # decoded tape is unchanged.
+    if [[ $board == xl ]]; then ram_count=16; else ram_count=2; fi
     status "running chips (board=$board, ram_count=$ram_count)"
     "$WORK/ct_target/release/chips_trace" "$image" "$schedule" "$ram_count" > "$out"
     ;;

@@ -21,7 +21,7 @@
 // compensation is identical to the oracle capture and the two agree. See
 // platform/README.md "JCN TEST-pin polarity".
 use chips::{mcs4::{Board, shifter4003::Shifter}, shifter::Direction};
-use arbitrary_int::u4;
+use arbitrary_int::{u2, u4};
 
 // Banked (xl) ROM support. A banked image from i4004_pack --banks is laid out as
 //   common(COMMON_BYTES) || bank0_tail(BANK_BYTES) || bank1_tail(BANK_BYTES) ...
@@ -76,7 +76,27 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .or_else(|| std::env::var("CHIPS_RAM_COUNT").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(2);
-    let mut b = Board::new(make_initial(&image), ram_count);
+    // Build the board's RAM. `Board::new` can only construct <= 4 4002s: it
+    // calls `u2::new(page)` per chip, which panics for page > 3. The DCL-banked
+    // firmware places per-function frames in CM-RAM banks 1-3, so the xl board
+    // needs all 16 4002s (4 banks x 4 chips) -- otherwise a frame access to
+    // bank 1-3 hits a chip that does not exist and the calculator produces no
+    // output. For ram_count > 4 we therefore build the chips BY HAND with
+    // page_mask = chip-within-bank = i % 4 (exactly as tests/exec/run_ramdcl_exec
+    // and run_frame_exec do), replacing Board's RAM. rams[0]/[1] keep the
+    // printer/lamp port roles (bank 0 chips 0/1), so the tape decode is
+    // unchanged.
+    let make_board = |img: &[u8]| -> Board {
+        let mut b = Board::new(make_initial(img), ram_count.min(4));
+        if ram_count > 4 {
+            b.rams.clear();
+            for i in 0..ram_count {
+                b.rams.push(chips::mcs4::ram4002::RAM::new(u2::new(i % 4)));
+            }
+        }
+        b
+    };
+    let mut b = make_board(&image);
     let mut cur_bank = 0usize;
     let mut prev_latch = 0u8;  // 8-bit latch (port4<<4|port3); bank 0 at reset
     let mut shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
@@ -89,7 +109,7 @@ fn main() {
     let sb = ["#","*","Ⅰ","Ⅱ","Ⅲ","M+","M-","T","K","E","Ex","C","M"];
     for line in schedule.lines() {
         if line.starts_with("#EXAMPLE") {
-            b = Board::new(make_initial(&image), ram_count);
+            b = make_board(&image);
             cur_bank = 0; prev_latch = 0;
             shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
             spin = 0; previous = 0; red = false; row.fill(" ");
