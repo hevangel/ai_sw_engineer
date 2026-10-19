@@ -99,9 +99,8 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UREM, MVT::i32, LibCall);
 
   // AND/OR/XOR: the 4004 has no native bitwise ALU. Custom-lower to libi4004rt
-  // helpers. i8 AND/OR/XOR custom-lower to __{and,or,xor}qi3 (in libi4004rt).
-  // i16 AND/OR/XOR also custom-lower, splitting into two i8 qi3 calls on the
-  // sub-pairs (no i16 hi3 helper needed).
+  // helpers (__and/__or/__xor qi3/hi3). The runtime agent provides these; names
+  // follow abi.md sec.6's helper convention.
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::AND, VT, Custom);
     setOperationAction(ISD::OR, VT, Custom);
@@ -114,8 +113,9 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   // mul/div/rem libcall impl names are registered in
   // I4004Subtarget::initLibcallLoweringInfo (the LLVM 23 hook).
 
-  // Variable shifts: i8 custom-lower to __{ashl,lshr,ashr}qi3 (in libi4004rt).
-  // i16 shifts custom-lower to the hi3 helpers (added to libi4004rt).
+  // Variable shifts have no native 4004 instruction and no standard i8 RTLIB
+  // entry, so custom-lower them (like AND/OR/XOR) to explicit libi4004rt calls
+  // __{ashl,lshr,ashr}{qi,hi}3 (abi.md sec.6). PARTS forms expand first.
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::SHL, VT, Custom);
     setOperationAction(ISD::SRL, VT, Custom);
@@ -177,65 +177,23 @@ SDValue I4004TargetLowering::LowerOperation(SDValue Op,
   }
 }
 
-// AND/OR/XOR and shifts -> libi4004rt calls. i8 bitwise/shift use the qi3
-// helpers. An i16 bitwise op is split into two i8 qi3 calls on the low and high
-// bytes (no hi3 helper needed); i16 shifts use the hi3 helpers.
+// AND/OR/XOR -> a call into libi4004rt. i8 uses __{and,or,xor}qi3 (two i8 args,
+// i8 result); i16 uses the hi3 variants. The runtime agent implements these.
 SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
   EVT VT = Op.getValueType();
-  SDLoc DL(Op);
-  unsigned Opc = Op.getOpcode();
-  const bool IsBitwise = (Opc == ISD::AND || Opc == ISD::OR || Opc == ISD::XOR);
-
-  auto callI8 = [&](const char *Name, SDValue A, SDValue B) -> SDValue {
-    SDValue Callee =
-        DAG.getExternalSymbol(Name, getPointerTy(DAG.getDataLayout()));
-    TargetLowering::ArgListTy Args;
-    Type *I8Ty = Type::getInt8Ty(*DAG.getContext());
-    for (SDValue V : {A, B}) {
-      TargetLowering::ArgListEntry E(V, I8Ty);
-      E.IsZExt = true;
-      Args.push_back(E);
-    }
-    TargetLowering::CallLoweringInfo CLI(DAG);
-    CLI.setDebugLoc(DL).setChain(DAG.getEntryNode()).setLibCallee(
-        CallingConv::C, I8Ty, Callee, std::move(Args));
-    return LowerCallTo(CLI).first;
-  };
-
-  // i16 bitwise: split into low/high i8 halves, call the qi3 helper on each,
-  // and reassemble the i16 from the two i8 results.
-  if (VT == MVT::i16 && IsBitwise) {
-    const char *Qi = Opc == ISD::AND ? "__andqi3"
-                     : Opc == ISD::OR ? "__orqi3"
-                                      : "__xorqi3";
-    SDValue L = Op.getOperand(0), R = Op.getOperand(1);
-    SDValue Llo = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, L);
-    SDValue Rlo = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, R);
-    SDValue Sh = DAG.getConstant(8, DL, MVT::i16);
-    SDValue Lhi = DAG.getNode(
-        ISD::TRUNCATE, DL, MVT::i8, DAG.getNode(ISD::SRL, DL, MVT::i16, L, Sh));
-    SDValue Rhi = DAG.getNode(
-        ISD::TRUNCATE, DL, MVT::i8, DAG.getNode(ISD::SRL, DL, MVT::i16, R, Sh));
-    SDValue Lo = callI8(Qi, Llo, Rlo);
-    SDValue Hi = callI8(Qi, Lhi, Rhi);
-    SDValue LoZ = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Lo);
-    SDValue HiZ = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Hi);
-    return DAG.getNode(ISD::OR, DL, MVT::i16, LoZ,
-                       DAG.getNode(ISD::SHL, DL, MVT::i16, HiZ, Sh));
-  }
-
   const bool Wide = (VT == MVT::i16);
   const char *Name = nullptr;
-  switch (Opc) {
-  case ISD::AND: Name = "__andqi3"; break;
-  case ISD::OR:  Name = "__orqi3";  break;
-  case ISD::XOR: Name = "__xorqi3"; break;
+  switch (Op.getOpcode()) {
+  case ISD::AND: Name = Wide ? "__andhi3" : "__andqi3"; break;
+  case ISD::OR:  Name = Wide ? "__orhi3"  : "__orqi3";  break;
+  case ISD::XOR: Name = Wide ? "__xorhi3" : "__xorqi3"; break;
   case ISD::SHL: Name = Wide ? "__ashlhi3" : "__ashlqi3"; break;
   case ISD::SRL: Name = Wide ? "__lshrhi3" : "__lshrqi3"; break;
   case ISD::SRA: Name = Wide ? "__ashrhi3" : "__ashrqi3"; break;
   default: llvm_unreachable("not a bitwise/shift op");
   }
 
+  SDLoc DL(Op);
   SmallVector<SDValue, 2> Ops{Op.getOperand(0), Op.getOperand(1)};
   SDValue Callee = DAG.getExternalSymbol(Name, getPointerTy(DAG.getDataLayout()));
   TargetLowering::ArgListTy Args;
