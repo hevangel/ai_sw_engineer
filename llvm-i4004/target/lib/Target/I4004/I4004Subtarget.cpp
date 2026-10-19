@@ -58,6 +58,11 @@ void I4004Subtarget::initLibcallLoweringInfo(LibcallLoweringInfo &Info) const {
   Info.setLibcallImpl(RTLIB::SREM_I16, RTLIB::impl___modhi3);
   Info.setLibcallImpl(RTLIB::UREM_I8, RTLIB::impl___umodqi3);
   Info.setLibcallImpl(RTLIB::UREM_I16, RTLIB::impl___umodhi3);
+  Info.setLibcallImpl(RTLIB::MUL_I32, RTLIB::impl___mulsi3);
+  Info.setLibcallImpl(RTLIB::SDIV_I32, RTLIB::impl___divsi3);
+  Info.setLibcallImpl(RTLIB::UDIV_I32, RTLIB::impl___udivsi3);
+  Info.setLibcallImpl(RTLIB::SREM_I32, RTLIB::impl___modsi3);
+  Info.setLibcallImpl(RTLIB::UREM_I32, RTLIB::impl___umodsi3);
   // memcpy/memset/memmove (llvm.mem* intrinsics -> libi4004rt).
   Info.setLibcallImpl(RTLIB::MEMCPY, RTLIB::impl_memcpy);
   Info.setLibcallImpl(RTLIB::MEMSET, RTLIB::impl_memset);

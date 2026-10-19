@@ -89,6 +89,14 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UDIV, MVT::i16, LibCall);
   setOperationAction(ISD::SREM, MVT::i16, LibCall);
   setOperationAction(ISD::UREM, MVT::i16, LibCall);
+  // i32 arithmetic (rare; the firmware's digit scaling uses i32 udiv/mul by 10)
+  // -> libcalls. i32 is split by the legalizer where it can; mul/div go to the
+  // si3 helpers.
+  setOperationAction(ISD::MUL, MVT::i32, LibCall);
+  setOperationAction(ISD::SDIV, MVT::i32, LibCall);
+  setOperationAction(ISD::UDIV, MVT::i32, LibCall);
+  setOperationAction(ISD::SREM, MVT::i32, LibCall);
+  setOperationAction(ISD::UREM, MVT::i32, LibCall);
 
   // AND/OR/XOR: the 4004 has no native bitwise ALU. Custom-lower to libi4004rt
   // helpers (__and/__or/__xor qi3/hi3). The runtime agent provides these; names
