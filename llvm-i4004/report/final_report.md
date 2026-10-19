@@ -4,6 +4,21 @@
 
 ### Size-reduction campaign (in progress) — instruction-mix profile of the 45,714 B
 
+**Size progression (whole firmware `.text`, measured after each landing):**
+
+| Step | bytes | delta | note |
+|---|---|---|---|
+| baseline (43/43 lower) | 45,714 | — | |
+| redundant FIM/SRC peephole | 45,320 | −394 | block-local dedupe |
+| spill/reload FIM-once + INC | 41,424 | −3,896 | biggest single win so far |
+| **target** | **≤ 4,096** | | 4004 ROM max |
+
+Still ~10x over; the structural levers (MachineOutliner, base-pointer addressing
+for LDRAMi8/STRAMi8, JMS helpers for the repeated load/store + nibble-chain
+sequences, and the Tier-A firmware/runtime co-design that stores each `Num` in
+one 4002 register) are what close the gap. `size_profile.py` over the whole
+firmware `.s` is re-run after each step; the original baseline mix was:
+
 `system/busicom_141pf/firmware/build/prof.py` over the whole firmware `.s`
 (36,975 instructions, 45,714 bytes):
 
