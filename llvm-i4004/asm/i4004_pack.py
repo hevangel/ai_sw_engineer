@@ -237,7 +237,8 @@ def classify(name: str) -> str:
 
 class Linker:
     def __init__(self, objs, rom_len, ram_origin, ram_len,
-                 stack_origin, stack_len, pad_pages, allow_eop):
+                 stack_origin, stack_len, pad_pages, allow_eop,
+                 banks=0, common_bytes=0x400, bank_bytes=0xC00):
         self.objs = objs
         self.rom_len = rom_len
         self.ram_origin = ram_origin
@@ -246,11 +247,42 @@ class Linker:
         self.stack_len = stack_len
         self.pad_pages = pad_pages
         self.allow_eop = allow_eop
+        # Banking (item 2): banks>0 enables the xl bank-switched layout.
+        #   common region = ROM chips #0..#3 (common_bytes, default 0x400), the
+        #     same in every bank; holds .reset/crt0/HAL/hot-rt + trampolines.
+        #   banked region = chips #4..#15 (bank_bytes, default 0xC00) per bank.
+        # Address of a banked function is 0x400 + offset-in-bank (same PC in
+        # every bank, different physical content). Cross-bank calls route
+        # through a __bankcall_* trampoline in the common region.
+        self.banks = banks
+        self.common_bytes = common_bytes
+        self.bank_bytes = bank_bytes
+        self.sec_bank: dict[int, int] = {}   # id(section) -> bank (-1 = common)
         self.placed: list[Placed] = []
         self.rom_image = bytearray()
         self.global_syms: dict[str, tuple[ObjFile, Symbol]] = {}
         self.linker_syms: dict[str, int] = {}
         self.warnings: list[str] = []
+
+    @staticmethod
+    def _is_common_fn(name: str) -> bool:
+        """A ROM code section that belongs in the always-mapped common region:
+        the reset vector, rodata, and every runtime/HAL/trampoline helper. The
+        firmware's Rust functions (mangled `_R...`/`_Z...`) are banked."""
+        # strip the leading .text./.reset/.rodata prefix to get the fn name
+        for pfx in (".reset", ".rodata"):
+            if name == pfx or name.startswith(pfx + "."):
+                return True
+        fn = name
+        if name.startswith(".text."):
+            fn = name[len(".text."):]
+        elif name == ".text":
+            return True  # a merged .text (no function-sections) stays common
+        # runtime/HAL symbols: __foo, _start, reg_*, memset/memcpy/memmove
+        return (fn.startswith("__") or fn.startswith("_start")
+                or fn.startswith("reg_") or fn in ("memset", "memcpy", "memmove")
+                or fn.startswith("__bankcall_"))
+
 
     # -- symbol resolution --------------------------------------------------
     def _collect_globals(self):
@@ -278,6 +310,8 @@ class Linker:
         return buckets[".reset"] + buckets[".text"] + buckets[".rodata"]
 
     def _place_rom(self):
+        if self.banks:
+            return self._place_rom_banked()
         addr = 0
         for obj, sec in self._ordered_rom_inputs():
             align = max(sec.addralign, 1)
@@ -299,6 +333,61 @@ class Linker:
             raise LinkError(
                 f"ROM image {addr} bytes exceeds budget {self.rom_len} "
                 f"(0x{self.rom_len:x}); add 4001s / raise --max")
+
+    def _place_rom_banked(self):
+        """xl bank-switched placement. Common ROM sections (.reset/.rodata +
+        runtime/HAL/trampoline helpers) go in the common region [0,common_bytes)
+        shared by every bank. Firmware functions are greedily bin-packed into
+        banks' banked regions [common_bytes, common_bytes+bank_bytes). Each
+        banked function's ADDRESS is common_bytes + its offset within its bank
+        (so the same PC in every bank). sec_bank records the assignment; -1 =
+        common. (Trampoline synthesis + cross-bank-call rewrite is a follow-up;
+        this first lands correct classification, placement and the bank .map.)"""
+        inputs = self._ordered_rom_inputs()
+        common_items = [(o, s) for (o, s) in inputs if self._is_common_fn(s.name)]
+        banked_items = [(o, s) for (o, s) in inputs if not self._is_common_fn(s.name)]
+
+        # Common region: .reset first (at 0), then the rest, contiguous.
+        addr = 0
+        for obj, sec in common_items:
+            align = max(sec.addralign, 1)
+            addr = (addr + align - 1) & ~(align - 1)
+            sec.base = addr
+            self.sec_bank[id(sec)] = -1
+            self.placed.append(Placed(obj, sec, addr, -1, "rom"))
+            addr += sec.size
+        self.common_used = addr
+        if addr > self.common_bytes:
+            raise LinkError(
+                f"common ROM region overflow: {addr} bytes > {self.common_bytes} "
+                f"(0x{self.common_bytes:x}); common holds .reset/crt0/HAL/rt + "
+                f"trampolines -- shrink the hot-runtime set or enlarge the common region")
+
+        # Banked region: greedy first-fit bin-pack by descending size.
+        base = self.common_bytes
+        bank_fill = [0] * self.banks  # bytes used in each bank's banked region
+        for obj, sec in sorted(banked_items, key=lambda it: -it[1].size):
+            if sec.size > self.bank_bytes:
+                raise LinkError(
+                    f"{obj.path}:{sec.name} is {sec.size} bytes > one bank's "
+                    f"banked region {self.bank_bytes}; split the function")
+            placed_ok = False
+            for k in range(self.banks):
+                if bank_fill[k] + sec.size <= self.bank_bytes:
+                    sec.base = base + bank_fill[k]
+                    self.sec_bank[id(sec)] = k
+                    self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
+                    bank_fill[k] += sec.size
+                    placed_ok = True
+                    break
+            if not placed_ok:
+                raise LinkError(
+                    f"no bank has room for {obj.path}:{sec.name} "
+                    f"({sec.size} B); raise --banks")
+        self.bank_fill = bank_fill
+        # rom_used = common + the largest bank (image size per bank is uniform).
+        self.rom_used = self.common_bytes + self.bank_bytes
+
 
     def _place_ram(self):
         # .data: RAM run address (AS-0 handle) + ROM load image appended.
@@ -469,15 +558,100 @@ class Linker:
     def _loc(self, obj, sec, rel):
         return f"{obj.path}:{sec.name}+0x{rel.offset:x}"
 
+    # -- banking helpers ----------------------------------------------------
+    def _sec_bank_of_symbol(self, obj, rel):
+        """Bank of the section a reloc's symbol resolves into (-1 = common /
+        linker-defined / RAM)."""
+        sym = obj.symbols[rel.sym]
+        STT_SECTION = 3
+        if (sym.info & 0xf) == STT_SECTION or sym.name == "":
+            return self.sec_bank.get(id(obj.sections[sym.shndx]), -1)
+        if sym.shndx == 0:
+            if sym.name in self.global_syms:
+                g_obj, g_sym = self.global_syms[sym.name]
+                return self.sec_bank.get(id(g_obj.sections[g_sym.shndx]), -1)
+            return -1  # linker-defined
+        return self.sec_bank.get(id(obj.sections[sym.shndx]), -1)
+
+    def _cross_bank_calls(self):
+        """List (loc, from_bank, to_bank) for every ADDR12 call/jump whose
+        target is in a DIFFERENT bank than the consuming section. A common
+        section (-1) can reach any bank's COMMON twin, and common code is
+        mapped in every bank, so common<->common and *<->common are fine; only
+        banked->other-banked is a true cross-bank reference."""
+        out = []
+        for obj in self.objs:
+            for sec in obj.sections:
+                rels = obj.relocs.get(sec.index)
+                if not rels or sec.base < 0:
+                    continue
+                frm = self.sec_bank.get(id(sec), -1)
+                for rel in rels:
+                    if rel.rtype != R_I4004_ADDR12:
+                        continue
+                    to = self._sec_bank_of_symbol(obj, rel)
+                    if frm != -1 and to != -1 and frm != to:
+                        out.append((self._loc(obj, sec, rel), frm, to))
+        return out
+
+    def _build_banked_images(self):
+        """Return a list of per-bank 4096-byte ROM arrays. Bank k = the common
+        region (identical everywhere) + bank k's banked sections, all
+        relocations resolved (every placed section's base is its final PC)."""
+        images = [bytearray(self.common_bytes + self.bank_bytes)
+                  for _ in range(self.banks)]
+        # place section bytes
+        for p in self.placed:
+            if p.kind != "rom":
+                continue
+            b = self.sec_bank.get(id(p.sec), -1)
+            targets = range(self.banks) if b == -1 else [b]
+            for k in targets:
+                images[k][p.base:p.base + p.sec.size] = p.sec.data
+        # resolve relocations into each bank image that contains the section
+        for obj in self.objs:
+            for sec in obj.sections:
+                rels = obj.relocs.get(sec.index)
+                if not rels or sec.base < 0 or classify(sec.name) != "rom":
+                    continue
+                b = self.sec_bank.get(id(sec), -1)
+                banks = range(self.banks) if b == -1 else [b]
+                for k in banks:
+                    self.rom_image = images[k]       # _patch writes self.rom_image
+                    for rel in rels:
+                        S = self._sym_addr(obj, rel)
+                        self._patch(obj, sec, sec.base, rel, S + rel.addend)
+        return images
+
     # -- driver -------------------------------------------------------------
     def link(self):
         self._collect_globals()
         self._place_rom()
         self._place_ram()
         self._linker_defined()
-        self._apply()
+        if self.banks:
+            xb = self._cross_bank_calls()
+            if xb:
+                msg = "\n".join(f"    {loc}: bank {f} -> bank {t}" for loc, f, t in xb[:20])
+                raise LinkError(
+                    f"{len(xb)} cross-bank ADDR12 call(s) need a trampoline "
+                    f"(not yet synthesised):\n{msg}\n  (trampoline generation is "
+                    f"the next packer step; place these callees in a common "
+                    f"helper or the same bank for now)")
+            self.bank_images = self._build_banked_images()
+        else:
+            self._apply()
 
     def rom_bin(self, pad_to=None):
+        if self.banks:
+            # image = common(common_bytes) || bank_0_hi(bank_bytes) || ...
+            # bank k image already has common in [0,common_bytes); take its
+            # common once, then each bank's banked tail.
+            out = bytearray(self.bank_images[0][:self.common_bytes])
+            for k in range(self.banks):
+                out.extend(self.bank_images[k][self.common_bytes:
+                                               self.common_bytes + self.bank_bytes])
+            return bytes(out)
         out = bytearray(self.rom_image)
         if pad_to is not None and len(out) < pad_to:
             out.extend(b"\x00" * (pad_to - len(out)))
@@ -487,6 +661,23 @@ class Linker:
         lines = []
         lines.append("i4004 image map")
         lines.append("=" * 60)
+        if self.banks:
+            total = self.common_bytes + self.banks * self.bank_bytes
+            lines.append(f"BANKED image: {self.banks} banks, common 0x{self.common_bytes:x} "
+                         f"+ {self.banks} x 0x{self.bank_bytes:x} = {total} bytes total")
+            lines.append(f"  common used: {self.common_used}/{self.common_bytes} bytes")
+            for k in range(self.banks):
+                lines.append(f"  bank {k}: {self.bank_fill[k]}/{self.bank_bytes} bytes")
+            lines.append("  Function banks:")
+            for p in sorted(self.placed, key=lambda q: (self.sec_bank.get(id(q.sec), -1), q.base)):
+                if p.kind != "rom":
+                    continue
+                b = self.sec_bank.get(id(p.sec), -1)
+                tag = "common" if b == -1 else f"bank{b}"
+                lines.append(f"    0x{p.base:03x} +{p.sec.size:<4} {tag:7} "
+                             f"{p.obj.path.split('/')[-1]}:{p.sec.name}")
+            lines.append("")
+            return "\n".join(lines) + "\n"
         lines.append(f"ROM used : {self.rom_used} bytes "
                      f"(0x000-0x{max(self.rom_used-1,0):03x}) of {self.rom_len}")
         lines.append(f"  .data load image: 0x{self.rom_used:03x}-0x{max(self.data_rom_end-1,0):03x} "
@@ -546,6 +737,13 @@ def main(argv=None):
     ap.add_argument("--allow-eop-rollforward", action="store_true",
                     help="permit a page-local op whose 2nd word crosses a page boundary")
     ap.add_argument("--linker-script", help="read ROM/RAM/stack regions from a link.ld")
+    ap.add_argument("--banks", type=int, default=0,
+                    help="xl bank-switched ROM: number of banks (0 = flat, default). "
+                         "Image = common(--common-bytes) || bank_k(--bank-bytes) per bank.")
+    ap.add_argument("--common-bytes", type=lambda s: int(s, 0), default=0x400,
+                    help="size of the always-mapped common region (default 0x400 = chips 0-3)")
+    ap.add_argument("--bank-bytes", type=lambda s: int(s, 0), default=0xC00,
+                    help="size of each bank's banked region (default 0xC00 = chips 4-15)")
     args = ap.parse_args(argv)
 
     rom_len = args.max
@@ -561,15 +759,20 @@ def main(argv=None):
         if "stack" in regions:
             stack_origin, stack_len = regions["stack"]
 
-    if rom_len > 4096:
+    if args.banks == 0 and rom_len > 4096:
         print(f"ERROR: ROM budget {rom_len} exceeds 4004 architectural max 4096",
               file=sys.stderr)
         return 2
+    if args.banks:
+        # banking: per-bank view is common+bank <= 4096; total ROM is larger.
+        rom_len = args.common_bytes + args.bank_bytes
 
     try:
         objs = [read_elf(p) for p in args.objects]
         ln = Linker(objs, rom_len, ram_origin, ram_len, stack_origin, stack_len,
-                    args.pad_pages, args.allow_eop_rollforward)
+                    args.pad_pages, args.allow_eop_rollforward,
+                    banks=args.banks, common_bytes=args.common_bytes,
+                    bank_bytes=args.bank_bytes)
         ln.link()
         pad_to = args.pad
         binimg = ln.rom_bin(pad_to=pad_to)
