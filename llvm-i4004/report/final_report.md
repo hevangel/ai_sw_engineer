@@ -29,6 +29,42 @@ chips-test this return-dispatch core FIRST (hand-written depth-8 chain), then
 wire the backend `CALL`→`CALLSOFT` lowering. This reframes the project: a
 RUNNING whole-firmware image is gated on the software-call convention.
 
+## SOFT-CALL INTEGRATION RECIPE (items 1–3) — exact, verified encodings
+
+The whole-firmware fix for the hardware-stack overflow. 40 of 43 firmware
+functions are non-leaf (contain `jms`); only 3 are leaves — so nearly every
+call site and every return is affected. Build as ONE unit (LLVM rebuild in the
+middle is expected). Verified byte encodings (llvm-mc): `jin p0` = `0x31` (1 B);
+`jun 0xKFC` = `0x4K 0xFC`; `fim p1,imm8` = `0x22 imm8`. `__push_ret` already
+landed (`rt/softcall.s`, 13 B).
+
+**(1) Packer synthesis — reserve BEFORE placement, emit AFTER.** Add
+`self.soft_calls`. In `_place_rom`/`_place_rom_banked` RESERVE a 2-byte window
+at `STUB_OFF=0xFC` on every ROM page (common + every bank) so no real section
+lands there (bump placement past it like the page-align pass), plus a
+page-local block for `__soft_ret`+`__srtab`. After `_apply()` (and per bank)
+write: `rom_image[page*256+0xFC]=0x31` (`jin p0`) per page; `__srtab[k]` =
+`jun 0x{k}FC` = `0x4<k> 0xFC`; `__soft_ret` body = the PROVEN `softcall_mp.s`
+sequence emitted with the packer's known `&__srtab` (no symbolic nibble math —
+it was brittle). Register `__soft_ret`/`__push_ret` as linker-defined globals.
+Banking: `__soft_ret` also writes the latch from the token's bank nibble; the 41
+`__bankcall_*` JMS trampolines are then DELETED (cross-bank = soft call + latch)
+→ dissolves banking Wall 2.
+
+**(2) Backend lowering (needs LLVM rebuild).** `I4004ExpandPseudos::expandMI`:
+replace `CALL→JMS` with CALLSOFT: make MCSymbol `.Lret` after the call; emit
+`fim p1,<lo8 .Lret>; fim <pagereg>,<page .Lret>; jms __push_ret; jun <callee>;
+.Lret:`. Replace `RETpseudo→BBL` with `JUN __soft_ret` for NON-LEAF functions;
+leaf functions keep `BBL`. NEW MC fixups needed: `R_I4004_IMM8_LO` (code label
+low 8 → FIM) and `R_I4004_IMM4_PAGE` (code label page nibble → FIM) in the
+MCCodeEmitter/AsmBackend + packer `_patch` — the main new MC work.
+
+**(3) Packer leaf-depth assertion.** Walk the JMS-reachable subgraph; assert
+depth ≤ 3; fail the link otherwise.
+
+**(4) chips tests:** depth-8 plain + cross-bank; recursion depth 5; return
+values in P1/D1 (extend the `softcall_mp.s` harness).
+
 ## HEADLINE FINDING (2026-10-19): the compiled firmware is ~11x too big for the 4004
 
 ### Size-reduction campaign (in progress) — instruction-mix profile of the 45,714 B
