@@ -128,6 +128,7 @@ impl Calculator {
     /// (positive) entry in WR so the lamp stays off; a negative total/result
     /// leaves that value in WR so the lamp lights. See `driver_lamps` for bit 3
     /// (`WR.S0.bit1`).
+    #[inline(never)]
     pub fn press<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         self.dispatch(key, sw, out);
         // The minus-sign lamp tracks the sign of WR at idle (listing: bit 2 =
@@ -136,6 +137,7 @@ impl Calculator {
         self.lamps.negative = self.wr.neg;
     }
 
+    #[inline(never)]
     fn dispatch<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         // At overflow, only CE and C respond (disassembly: engine starts only
         // for those two keys when SR.S2 overflow is set).
@@ -208,6 +210,7 @@ impl Calculator {
         }
     }
 
+    #[inline(never)]
     fn digit(&mut self, digit: u8) {
         self.begin_entry();
         let typed = if self.wr.digits() > self.wr.scale {
@@ -233,6 +236,7 @@ impl Calculator {
 
     // --- clear ----------------------------------------------------------
 
+    #[inline(never)]
     fn clear<P: Printer>(&mut self, out: &mut P) {
         // C clears WR, DR, SR, TR and the overflow flag; memory is preserved.
         self.wr = Num::ZERO;
@@ -253,6 +257,7 @@ impl Calculator {
         out.print(&Row::num_a(&Num::ZERO, SymA::Clear));
     }
 
+    #[inline(never)]
     fn overflow<P: Printer>(&mut self, out: &mut P) {
         self.lamps.overflow = true;
         out.print(&Row::overflow());
@@ -260,6 +265,7 @@ impl Calculator {
 
     // --- addition / subtraction ----------------------------------------
 
+    #[inline(never)]
     fn add_sub<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         // Operand: the new entry, else repeat the last working value.
         if self.entering {
@@ -302,6 +308,7 @@ impl Calculator {
     /// second op key with no new entry is an **operation correction**: the ROM
     /// reprints only the op glyph with a BLANK value (2-8 `× ÷ ×`), the operand
     /// already latched.
+    #[inline(never)]
     fn mul_div_key<P: Printer>(&mut self, op: MulOp, sw: Switches, out: &mut P) {
         let entered = self.entering;
         if entered {
@@ -368,6 +375,7 @@ impl Calculator {
     }
 
     /// Evaluate `DR (op) WR` (or the constant variant) into a floating result.
+    #[inline(never)]
     fn compute(&mut self) -> Option<Num> {
         match self.mop {
             MulOp::Mul => self.dr.mul(&self.wr),
@@ -406,6 +414,7 @@ impl Calculator {
 
     // --- equals ---------------------------------------------------------
 
+    #[inline(never)]
     fn equals<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.mode == Mode::AddSub {
             // Recall and clear the main total.
@@ -433,6 +442,7 @@ impl Calculator {
     /// entered scale when the pending operation itself began from a typed entry
     /// (e.g. `8 * M=+` → `8`), otherwise rescaled to the current DP (e.g. a
     /// repeat chain `2 M+ * =` → `2.000000`).
+    #[inline(never)]
     fn print_operand<P: Printer>(&self, fresh: bool, sw: Switches, out: &mut P) {
         let shown = if fresh || self.op_from_entry {
             self.wr
@@ -447,6 +457,7 @@ impl Calculator {
     /// Execute the pending mul/div for `=`/`%`/`M=±`, print the result row with
     /// `symbol`, and update constant-operation state. `scale_pct` scales the
     /// result for percent (divide → ×100, multiply → ÷100 already folded).
+    #[inline(never)]
     fn do_mul_div_equals<P: Printer>(
         &mut self,
         sw: Switches,
@@ -538,6 +549,7 @@ impl Calculator {
 
     // --- percent --------------------------------------------------------
 
+    #[inline(never)]
     fn percent<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -556,6 +568,7 @@ impl Calculator {
 
     // --- exchange -------------------------------------------------------
 
+    #[inline(never)]
     fn exchange<P: Printer>(&mut self, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -571,6 +584,7 @@ impl Calculator {
 
     // --- subtotal / reference ------------------------------------------
 
+    #[inline(never)]
     fn subtotal_key<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.entering {
             // Reference number / date: printed as typed, changes nothing.
@@ -603,6 +617,7 @@ impl Calculator {
 
     // --- memory ---------------------------------------------------------
 
+    #[inline(never)]
     fn memory_add<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -632,6 +647,7 @@ impl Calculator {
     /// with `=`, then the product/quotient with `M+`/`M-`), then accumulate the
     /// product/quotient into memory (the printed row is the product, not the
     /// running memory sum — the oracle prints the product; `CM` shows the sum).
+    #[inline(never)]
     fn memory_eq<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         let fresh = self.entering;
         if self.entering {
@@ -669,6 +685,7 @@ impl Calculator {
 
     /// Execute the pending mul/div for `M=±`, returning the raw floating result
     /// without printing. Updates constant-operation state like `=`.
+    #[inline(never)]
     fn compute_equals<P: Printer>(&mut self, out: &mut P) -> Option<Num> {
         let result = match self.mop {
             MulOp::Mul => {
@@ -709,6 +726,7 @@ impl Calculator {
         }
     }
 
+    #[inline(never)]
     fn recall_memory<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         self.wr = self.mr;
         self.entering = false;
@@ -720,6 +738,7 @@ impl Calculator {
         out.print(&Row::number(&zero_as_bare(shown), SymA::Recall, SymB::Mem));
     }
 
+    #[inline(never)]
     fn clear_memory<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         let value = self.mr;
         let (shown, _rounded) = value.round_at(sw.dp, sw.rounding == Rounding::Round);
@@ -735,6 +754,7 @@ impl Calculator {
 
     // --- square root ----------------------------------------------------
 
+    #[inline(never)]
     fn sqrt<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         let fresh = self.entering;
         if self.entering {
@@ -826,6 +846,7 @@ fn subtotal_row(shown: &Num, _rounded: bool) -> Row {
 /// A result row carrying `sym_b` (total `*`, or `M+`/`M-` for `M=±`), plus the
 /// rounded-up `^` mark in column A when `rounded` (spec A8: e.g. `56.09 ^ *`,
 /// `12.72 ^ M+`).
+#[inline(never)]
 fn result_row(shown: &Num, rounded: bool, sym_b: SymB) -> Row {
     let sym_a = if rounded { SymA::Rounded } else { SymA::None };
     Row::number(shown, sym_a, sym_b)
