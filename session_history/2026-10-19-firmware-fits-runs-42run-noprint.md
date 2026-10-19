@@ -60,6 +60,52 @@ the printer/lamp ports. Diagnosis so far (build/pchist/):
   which chips_trace reads. So the firmware simply never REACHES a print call, or
   spins before it.
 
+## SHARPENED ROOT CAUSE (build/halcall + build/halspine)
+Instrumented HAL-entry PCs and per-bank execution over 500k cycles of ex 1-1:
+- `run`'s entry (0x800, bank 32) executes exactly ONCE (NOT a misdispatch
+  re-running Calculator::new).
+- Bank-region execution is ONLY bank 43 = 36 PCs (one-time `main`→`run`
+  startup) and bank 32 = 45,322 PCs (`run`). **Banks 33-42 execute ZERO
+  instructions.** `scan_pass` is in **bank 33**; dispatchers in 34-36.
+- ZERO `__bus_*` HAL calls (rom_port_read/write, test_pin, ram_port_write) —
+  the keyboard is never scanned, nothing is printed. 88% of PCs are the common
+  `__memset_ram` loop (0x488-0x4a9).
+
+So crt0 → `main`(bank43) → `run`(bank32) works, but inside `run`'s loop the
+cross-bank CALLSOFT `run`(bank32) → `scan_pass`(bank33) NEVER transfers to bank
+33 — execution stays in bank 32 + common, churning memset. No keyboard read →
+`run`'s `while buffer.pop()` drives nothing → 0/42, all rows empty. This is NOT
+a key-hold/timing issue (the firmware never issues the first scan HAL call); it
+is a **cross-bank far-call dispatch failure for `run`→`scan_pass`**. The backend
+emits `jms __push_off; jms __push_pg; jun scan_pass`; the packer rewrites the
+`jun` to a far-thunk (set bank 33 via `__soft_ret`, dispatch to scan_pass's
+restore trampoline). That path does not land in bank 33, while the startup
+cross-bank calls DO work — so the defect is in the far-call/soft-call-return
+path for a CALLSOFT made FROM banked code (origin bank 32) to a high bank (33),
+vs the common/bank-0-origin startup calls.
+
+### Next session — localize the far-call dispatch
+1. Instruction-aware disasm (NOT byte-linear — the 4004's mixed 1/2-byte ops
+   desync a linear scan; build/disasm_banked.py is byte-linear and unreliable
+   mid-function) of `run`'s `jun scan_pass` far-thunk; single-step it on chips
+   and capture the latch-port writes (roms[3]/roms[4].ports): does it drive BOTH
+   nibbles to bank 33 and `jin` into scan_pass's restore trampoline?
+2. Diff against a WORKING cross-bank call (crt0→main) to see what origin-bank-32
+   does differently.
+3. `run_softcall_banked_exec` (every call cross-bank, depth 8) PASSES, so the
+   generic far-call works at small scale; the firmware differs in bank NUMBER
+   (33) and depth. Build a focused exec test: bank-0 `main` cross-calls a
+   function in a HIGH bank (>=32) that then cross-calls common HAL, mirroring
+   run→scan_pass→__bus_*, and bisect.
+
+## Instrumentation left in build/ (gitignored)
+- build/halcall/ : HAL-entry PC log + scan-period / key-seen measurement.
+- build/halspine/ : per-bank execution distribution, run-entry count, tail PC
+  histogram, HAL/soft_ret hit counts.
+- build/pchist/ : PC-page histogram + __memset_ram entry count + max bank PC.
+- build/disasm_banked.py : byte-linear banked disasm (make instruction-aware
+  before trusting it mid-function).
+
 Leading hypotheses for the next session (host-vs-chips differential — the host
 `manual_examples_recovered_rom` test passes 42/42 on the SAME firmware logic, so
 the divergence is in the compiled-target execution or the chips drum/TEST-pin
