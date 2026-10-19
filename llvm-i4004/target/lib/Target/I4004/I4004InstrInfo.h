@@ -51,6 +51,27 @@ public:
                             Register VReg, unsigned SubReg = 0,
                             MachineInstr::MIFlag Flags =
                                 MachineInstr::NoFlags) const override;
+
+  // Branch analysis / editing. Needed by MachineBlockPlacement, BranchFolder
+  // and tail-duplication; without them the BranchFolder's tail-merge aborts in
+  // ReplaceTailWithBranchTo ("Target didn't implement insertBranch"). We model
+  // only the unconditional BR pseudo (-> JUN) precisely; the conditional
+  // compare-and-branch pseudos (BRCCi8/BRCCi16, BRZ/BRNZ) are opaque to the
+  // generic analysis (their condition is a multi-operand SUB-chain, not a
+  // reversible Cond vector), so analyzeBranch reports them unanalyzable and the
+  // optimizer leaves them alone.
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
+                     SmallVectorImpl<MachineOperand> &Cond,
+                     bool AllowModify = false) const override;
+
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
+
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
 };
 
 } // end namespace llvm

@@ -580,7 +580,7 @@ fn isqrt_digits(rad: &[u8; WIDE], hi: usize) -> [u8; DIGITS] {
         let lo = 2 * p;
         let d_hi = if lo < hi { rad[lo + 1] } else { 0 };
         let d_lo = rad[lo];
-        add_small(&mut rem, (d_hi * 10 + d_lo) as u32);
+        add_small(&mut rem, (d_hi * 10 + d_lo) as u16);
 
         // largest x in 1..=9 with (20*root + x)*x <= remainder
         let mut x = 0u8;
@@ -630,10 +630,17 @@ fn shift_root_up(root: &mut [u8; DIGITS], len: &mut usize) {
 }
 
 /// Add a small (`< 100`) integer into a little-endian decimal accumulator.
-fn add_small(buf: &mut [u8; WIDE], mut v: u32) {
+///
+/// `v` is a `u16` (not `u32`): both call sites pass a value below 100, and the
+/// loop only ever shrinks it, so the whole computation fits in 16 bits. On the
+/// 4004 a `u32` here forced `__udivsi3`/`__mulsi3` libcalls whose i32 operands
+/// need more double-pair registers than exist, so register allocation ran out;
+/// `u16` lowers to the `hi3` helpers and allocates. The integer values are
+/// identical, so the host tape stays exact (verified 42/42).
+fn add_small(buf: &mut [u8; WIDE], mut v: u16) {
     let mut i = 0usize;
     while v > 0 && i < WIDE {
-        let s = buf[i] as u32 + v % 10;
+        let s = buf[i] as u16 + v % 10;
         buf[i] = (s % 10) as u8;
         v = v / 10 + s / 10;
         i += 1;
@@ -655,7 +662,7 @@ fn trial_product(root: &[u8; DIGITS], root_len: usize, cand: u8) -> [u8; WIDE] {
     }
     // base = base * 10 + cand   (i.e. 20*root + cand)
     shift_up(&mut base, 1);
-    add_small(&mut base, cand as u32);
+    add_small(&mut base, cand as u16);
     // out = base * cand
     let mut out = [0u8; WIDE];
     let mut c = 0u8;
