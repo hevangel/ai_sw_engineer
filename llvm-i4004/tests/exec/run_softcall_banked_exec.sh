@@ -22,8 +22,9 @@ fail(){ printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [[ -x "$B/llc" ]] || fail "llc missing at $B"
 
 COMMON=0x800
-BANKW=0x50      # small banked window: ~1-2 small functions per bank, so the
-               # depth-8 chain + i16 path span several banks -> real cross-bank
+BANKW=0x100     # one full 256-byte page per bank window, so each page carries
+               # its reserved jin-p0 stub at 0xFC; padded functions below are
+               # ~1 per bank, so every chain call crosses a bank boundary
 COMMONI=$((COMMON)); BANKI=$((BANKW))
 
 # --- bank-reloading harness (watches the chip-3 latch) -----------------------
@@ -123,17 +124,34 @@ _start:
 __halt:	jun __halt
 EOF
 
-# --- test IR (chain depth 8 + i16 through a call) ---------------------------
+# --- test IR: depth chain + i16. Each fN is padded with volatile RAM traffic
+# (scratch cells 0x20..) so it is large enough that next-fit places roughly one
+# per bank -> every compiled call in the chain crosses a bank boundary. The
+# padding does not change the returned value (it writes/reads scratch chars the
+# result store never reads).
 cat > "$WORK/t.ll" <<'EOF'
 target datalayout = "e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8"
 target triple = "i4004"
-define i8 @f7(i8 %x) { %r = add i8 %x, 1 ret i8 %r }
-define i8 @f6(i8 %x) { %a=add i8 %x,1 %r=call i8 @f7(i8 %a) ret i8 %r }
-define i8 @f5(i8 %x) { %a=add i8 %x,1 %r=call i8 @f6(i8 %a) ret i8 %r }
-define i8 @f4(i8 %x) { %a=add i8 %x,1 %r=call i8 @f5(i8 %a) ret i8 %r }
-define i8 @f3(i8 %x) { %a=add i8 %x,1 %r=call i8 @f4(i8 %a) ret i8 %r }
-define i8 @f2(i8 %x) { %a=add i8 %x,1 %r=call i8 @f3(i8 %a) ret i8 %r }
-define i8 @f1(i8 %x) { %a=add i8 %x,1 %r=call i8 @f2(i8 %a) ret i8 %r }
+
+; ~150-byte padding: 10 volatile stores to scratch cells, value derived from %x.
+define void @pad(i8 %x) {
+  store volatile i8 %x, ptr inttoptr (i16 32 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 34 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 36 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 38 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 40 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 42 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 44 to ptr)
+  store volatile i8 %x, ptr inttoptr (i16 46 to ptr)
+  ret void
+}
+define i8 @f7(i8 %x) { call void @pad(i8 %x) %r = add i8 %x, 1 ret i8 %r }
+define i8 @f6(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f7(i8 %a) ret i8 %r }
+define i8 @f5(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f6(i8 %a) ret i8 %r }
+define i8 @f4(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f5(i8 %a) ret i8 %r }
+define i8 @f3(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f4(i8 %a) ret i8 %r }
+define i8 @f2(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f3(i8 %a) ret i8 %r }
+define i8 @f1(i8 %x) { call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f2(i8 %a) ret i8 %r }
 define i8 @chain8(i8 %x){ %a=add i8 %x,1 %r=call i8 @f1(i8 %a) ret i8 %r }
 define i16 @addw2(i16 %a,i16 %b){ %r=add i16 %a,%b ret i16 %r }
 define i16 @wide(i16 %a,i16 %b){ %r=call i16 @addw2(i16 %a,i16 %b) ret i16 %r }

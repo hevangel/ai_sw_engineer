@@ -506,32 +506,33 @@ class Linker:
             # advance to next page handled by outer loop
 
     def _synth_bank_stubs(self):
-        """Register a common `__tobank_<addr>` set-latch stub (12 B) for every
-        distinct cross-bank CALLSOFT target, packed into common free slots. The
-        stub sets the ROM bank latch + __cur_bank mirror to the callee's bank,
-        then `jun`s the callee. Cross-bank `jun callee` sites are rewritten to
-        the stub in _build_banked_images; the token's 4th (bank) nibble restores
-        the caller's bank in __soft_ret."""
-        callees = self.cross_bank_callees()  # {target_addr -> callee bank}
-        self.bank_stubs = {}                 # addr -> (stub_base, callee_bank)
+        """Register a common `__tobank` set-latch stub (12 B) for every distinct
+        cross-bank CALLSOFT (target_addr, callee_bank) pair, packed into common
+        free slots. The stub sets the ROM bank latch + __cur_bank mirror to the
+        callee's bank, then `jun`s the callee. Cross-bank `jun callee` sites are
+        rewritten to the matching stub in _build_banked_images; the token's 4th
+        (bank) nibble restores the caller's bank in __soft_ret. Keyed by
+        (addr, bank) because a banked PC exists in every bank."""
+        pairs = self.cross_bank_callee_pairs()  # {(addr, bank) -> bank}
+        self.bank_stubs = {}                     # (addr, bank) -> stub_base
         slots = self._common_free_slots(12)
-        for addr in sorted(callees):
+        for (addr, bank) in sorted(pairs):
             try:
                 base = next(slots)
             except StopIteration:
                 raise LinkError(
-                    f"banked soft-call: no room for {len(callees)} __tobank "
-                    f"stubs ({len(callees)*12} B) in common free space "
+                    f"banked soft-call: no room for {len(pairs)} __tobank "
+                    f"stubs ({len(pairs)*12} B) in common free space "
                     f"(common_bytes 0x{self.common_bytes:x}); raise "
                     f"--common-bytes or reduce cross-bank calls")
-            self.bank_stubs[addr] = (base, callees[addr])
-            self.linker_syms[f"__tobank_{addr:04x}"] = base
+            self.bank_stubs[(addr, bank)] = base
+            self.linker_syms[f"__tobank_{addr:04x}_b{bank:x}"] = base
             self.common_used = max(self.common_used, base + 12)
 
     def _write_bank_stubs(self, img):
-        """Emit the __tobank_<addr> stub bytes into a bank image (common region,
+        """Emit the __tobank stub bytes into a bank image (common region,
         identical in every bank)."""
-        for addr, (sb, bank) in getattr(self, "bank_stubs", {}).items():
+        for (addr, bank), sb in getattr(self, "bank_stubs", {}).items():
             B = bank & 0xF
             body = [0x20,0x30, 0x21, 0xd0 | B, 0xe2,   # fim p0,0x30; src p0; ldm B; wrr
                     0x20,0x0f, 0x21, 0xd0 | B, 0xe0,   # fim p0,0x0f; src p0; ldm B; wrm
@@ -1075,6 +1076,18 @@ class Linker:
                     if rel.rtype != R_I4004_ADDR12:
                         continue
                     to = self._sec_bank_of_symbol(obj, rel)
+                    if getattr(self, "want_softcall", False):
+                        # Soft-call: a call reaching a BANKED callee from a
+                        # different bank needs a latch set. This INCLUDES a
+                        # common caller (frm == -1): common code runs under
+                        # whatever latch is current, so calling a banked callee
+                        # must switch to the callee's bank (e.g. crt0's jun main
+                        # when main is not in bank 0). A banked->common call is
+                        # never cross-bank (common is mapped in every bank).
+                        if to != -1 and to != frm:
+                            out.append((self._loc(obj, sec, rel), frm, to,
+                                        self._target_addr(obj, rel)))
+                        continue
                     if frm != -1 and to != -1 and frm != to:
                         out.append((self._loc(obj, sec, rel), frm, to,
                                     self._target_addr(obj, rel)))
@@ -1088,6 +1101,17 @@ class Linker:
             if addr is not None:
                 callees[addr] = to
         return callees
+
+    def cross_bank_callee_pairs(self):
+        """Soft-call: the set of distinct (target_addr, callee_bank) pairs that
+        need a __tobank stub. Keyed by (addr, bank) -- NOT addr alone -- because
+        a banked PC (e.g. 0x800) exists in EVERY bank, so two callees in
+        different banks can share an address and still need separate stubs."""
+        pairs = {}
+        for _loc, _f, to, addr in self._cross_bank_calls():
+            if addr is not None and to != -1:
+                pairs[(addr, to)] = to
+        return pairs
 
     def emit_trampolines_source(self):
         """Generate trampolines.s: one __bankcall_<addr> per distinct cross-bank
@@ -1176,17 +1200,21 @@ class Linker:
                     self.rom_image = images[k]       # _patch writes self.rom_image
                     for rel in rels:
                         # Soft-call cross-bank forward switch: redirect a `jun
-                        # callee` whose callee is in a DIFFERENT bank to the
-                        # callee's common `__tobank_<addr>` set-latch stub (which
-                        # sets the latch + __cur_bank to the callee bank, then
-                        # juns the callee). Same-bank calls are untouched.
+                        # callee` whose BANKED callee is in a different bank than
+                        # the consuming section to the callee's common
+                        # `__tobank_<addr>` set-latch stub (sets latch +
+                        # __cur_bank to the callee bank, then juns the callee).
+                        # Applies to a COMMON caller too (b == -1), e.g. crt0's
+                        # jun main when main is not in bank 0 -- common runs under
+                        # whatever latch is current. Same-bank and banked->common
+                        # calls are untouched.
                         if (getattr(self, "want_softcall", False)
-                                and rel.rtype == R_I4004_ADDR12 and b != -1):
+                                and rel.rtype == R_I4004_ADDR12):
                             to = self._sec_bank_of_symbol(obj, rel)
                             addr = self._target_addr(obj, rel)
                             if (to != -1 and to != b and addr is not None
-                                    and addr in getattr(self, "bank_stubs", {})):
-                                stub_base = self.bank_stubs[addr][0]
+                                    and (addr, to) in getattr(self, "bank_stubs", {})):
+                                stub_base = self.bank_stubs[(addr, to)]
                                 self._patch(obj, sec, sec.base, rel, stub_base)
                                 continue
                         # Legacy __bankcall_* trampoline rewrite (non-softcall).
