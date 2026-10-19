@@ -23,10 +23,50 @@
 use chips::{mcs4::{Board, shifter4003::Shifter}, shifter::Direction};
 use arbitrary_int::u4;
 
+// Banked (xl) ROM support. A banked image from i4004_pack --banks is laid out as
+//   common(COMMON_BYTES) || bank0_tail(BANK_BYTES) || bank1_tail(BANK_BYTES) ...
+// where COMMON_BYTES of common ROM is mapped in EVERY bank (chips 0..COMMON/256)
+// and BANK_BYTES is the per-bank window (chips COMMON/256..16). The firmware
+// sets a bank LATCH on 4001 chip 3's output port (SRC 0x30, WRR) via the
+// __tobank_* stubs and __soft_ret; this adapter watches roms[3].ports and swaps
+// the banked chips' content on a change (the chips model itself has no bank
+// concept, and external/ is read-only). A flat image (<= 4096 B) uses no banks.
+const COMMON_BYTES_DEFAULT: usize = 0x800;
+const BANK_BYTES_DEFAULT: usize = 0x800;
+
+// Build the 4096-byte ROM view the Board sees for `bank`: common region then
+// the selected bank's tail.
+fn bank_view(common: &[u8], banked: &[u8], bank: usize, bank_bytes: usize) -> Vec<u8> {
+    let mut v = vec![0u8; 0x1000];
+    let c = common.len().min(0x1000);
+    v[..c].copy_from_slice(&common[..c]);
+    let off = bank * bank_bytes;
+    if off < banked.len() {
+        let n = (banked.len() - off).min(bank_bytes).min(0x1000 - common.len());
+        v[common.len()..common.len() + n].copy_from_slice(&banked[off..off + n]);
+    }
+    v
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let image = std::fs::read(&args[1]).unwrap();
     let schedule = std::fs::read_to_string(&args[2]).unwrap();
+    // Banked image? (produced by i4004_pack --banks; size > 4096.)
+    let common_bytes = std::env::var("COMMON_BYTES").ok()
+        .and_then(|s| usize::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(COMMON_BYTES_DEFAULT);
+    let bank_bytes = std::env::var("BANK_BYTES").ok()
+        .and_then(|s| usize::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(BANK_BYTES_DEFAULT);
+    let banked_image = image.len() > 0x1000;
+    let common: Vec<u8> = if banked_image { image[..common_bytes].to_vec() } else { Vec::new() };
+    let banked: Vec<u8> = if banked_image { image[common_bytes..].to_vec() } else { Vec::new() };
+    let first_banked_chip = common_bytes / 0x100;
+    // initial board image: bank 0 view for a banked image, else the flat image.
+    let make_initial = |img: &[u8]| -> Vec<u8> {
+        if banked_image { bank_view(&common, &banked, 0, bank_bytes) } else { img.to_vec() }
+    };
     // RAM 4002 count: stock board = 2 (bank 0 chips 0,1). The xl board passes
     // a larger count as argv[3] (or $CHIPS_RAM_COUNT) to model the added 4002s
     // across the four CM-RAM banks (chips grouped in banks of 4). rams[0]/[1]
@@ -36,7 +76,9 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .or_else(|| std::env::var("CHIPS_RAM_COUNT").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(2);
-    let mut b = Board::new(image.clone(), ram_count);
+    let mut b = Board::new(make_initial(&image), ram_count);
+    let mut cur_bank = 0usize;
+    let mut prev_latch = b.roms[3].ports.value();
     let mut shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
     let mut spin = 0usize;
     let mut previous = 0;
@@ -47,7 +89,8 @@ fn main() {
     let sb = ["#","*","Ⅰ","Ⅱ","Ⅲ","M+","M-","T","K","E","Ex","C","M"];
     for line in schedule.lines() {
         if line.starts_with("#EXAMPLE") {
-            b = Board::new(image.clone(), ram_count);
+            b = Board::new(make_initial(&image), ram_count);
+            cur_bank = 0; prev_latch = b.roms[3].ports.value();
             shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
             spin = 0; previous = 0; red = false; row.fill(" ");
         }
@@ -62,6 +105,28 @@ fn main() {
             let current = if tick < 64 { key } else { 0 };
             for _ in 0..1481 {
                 b.run_cycle();
+                // xl bank latch: on a change to 4001 chip 3's output port,
+                // swap the banked chips (>= first_banked_chip) to the selected
+                // bank's window. Common chips + RAM + CPU state are untouched.
+                if banked_image {
+                    let latch = b.roms[3].ports.value() as usize;
+                    if latch != prev_latch as usize {
+                        prev_latch = latch as u8;
+                        if latch != cur_bank {
+                            cur_bank = latch;
+                            let view = bank_view(&common, &banked, cur_bank, bank_bytes);
+                            for i in first_banked_chip..16usize {
+                                if i < b.roms.len() {
+                                    let s = i * 0x100;
+                                    let chunk: [u8; 0x100] =
+                                        view[s..s + 0x100].try_into().unwrap();
+                                    b.roms[i] = chips::mcs4::rom4001::ROM::new(
+                                        chunk, u4::new(i as u8));
+                                }
+                            }
+                        }
+                    }
+                }
                 let p = b.roms[0].ports.value();
                 shifts[0].read_write_serial(Direction::Left, p & 2 == 0, p & 1 == 0);
                 let out = shifts[1].read_write_serial(Direction::Left, p & 2 == 2, p & 4 == 0);
