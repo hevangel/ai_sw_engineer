@@ -117,51 +117,81 @@ original Busicom 141-PF did NOT have. This is an explicit, documented hardware
 deviation; the original ROM never switches banks and runs identically with the
 latch tied to bank 0.
 
-### The latch
-- A 1-nibble latch on **4001 chip #3's output port** (`SRC` chip 3 then `WRR`).
-  Chips #0–#2 keep their Busicom port roles; chip #3's port is unwired on both
-  the stock and the plain-xl board, so writing it perturbs nothing on the
-  original ROM. The latch value (0..15) selects the active ROM **bank**.
-- **Reset** clears the latch to bank 0.
+### The latch (8-bit, two ROM output ports)
+- The bank selector is an **8-bit latch** split across **two** 4001 output
+  ports: the LOW nibble on **chip #3's port** (`SRC 0x30; WRR`) and the HIGH
+  nibble on **chip #4's port** (`SRC 0x40; WRR`). `bank = (chip4 << 4) | chip3`,
+  selecting banks 0..255. An earlier design used a single 4-bit nibble on chip
+  #3 and capped the image at 16 banks; the Rust firmware needs 45+, so the
+  latch was widened. Chips #0–#2 keep their Busicom port roles; chips #3 and #4
+  are unwired on the original board, so writing them perturbs nothing on the
+  original ROM.
+- The 8-bit latch is mirrored into two RAM chars, `__cur_bank.lo` @ 0x0F and
+  `__cur_bank.hi` @ 0x0E of chip0/reg0, so a return can restore the caller bank.
+- **Reset / crt0** clears both mirror chars and both latch ports to bank 0.
+- Every latch write runs ONLY from the common region (`__soft_ret`), writing
+  the HIGH nibble first then the LOW nibble; the low-nibble write is the commit
+  a simulator triggers the ROM reload on.
 
 ### Address map (common + banked)
-- **Common region: ROM chips #0–#3 (addresses 0x000–0x3FF, 1 KiB).** Always
-  mapped from bank 0 regardless of the latch. Holds `.reset`/crt0, the HAL
-  glue, the hot libi4004rt helpers, and the **cross-bank call trampolines**, so
-  the code that performs a bank switch never unmaps itself.
-- **Banked region: ROM chips #4–#15 (addresses 0x400–0xFFF, 3 KiB per bank).**
-  Mapped from the bank the latch selects. Total ROM = 1 KiB common + N × 3 KiB.
+- **Common region (always mapped from bank 0).** Holds `.reset`/crt0, the HAL
+  glue, the hot libi4004rt helpers, the soft-call return dispatch (`__soft_ret`,
+  `__srtab`, the push helpers `__push_off/__push_pg/__push_pb/__push1`,
+  `__save_p4p5`, the per-page `jin p0` stubs) and any far-thunk fallbacks, so
+  the code that performs a bank switch never unmaps itself. Sized by
+  `--common-bytes` (0x900 for the current firmware: must leave `bank_bytes`
+  room for the largest single function under the 4096-byte per-bank view).
+- **Banked region.** Mapped from the bank the latch selects. `--bank-bytes`
+  per bank (0x700 for the current firmware; common + bank must be ≤ 4096, the
+  4004's 12-bit view). Total ROM = common + N × bank (N=55, ~100 KiB now).
 
-### Cross-bank call ABI (trampoline in the common region)
-A call whose target is in a different bank does NOT `JMS` the target directly
-(the target is not mapped until the latch is set, and setting it would unmap the
-caller). Instead the packer rewrites it to `JMS __bankcall_<target>` where the
-trampoline lives in the common region and does:
-1. push the caller's current bank nibble onto the P7 software stack;
-2. set the latch to the target's bank (`SRC p(chip3); LDM bank; WRR`);
-3. `JMS target` (now mapped);
-4. on return, pop the caller bank and restore the latch (`WRR`);
-5. `BBL` back to the caller.
-The hardware return stack is still ≤3 deep logically; the trampoline adds one
-level, so a cross-bank call costs one extra hardware-stack slot — the packer
-accounts for this when it refuses to deepen a graph past 3 (else it routes the
-subtree through the §4.4 software return stack).
+### Cross-bank call ABI (far-call thunks + forward dispatch)
+A call to a different bank is NOT a direct jump (the target is not mapped until
+the latch is set, and a bank switch from banked code would unmap the running
+instruction). The packer rewrites each cross-bank `jun callee` to `jun thunk`
+where the thunk lives in the CALLER's bank (or common on a full bank) and:
+1. `JMS __save_p4p5` — save P4:P5 (the 2nd i16/ptr arg pair) to RAM;
+2. push a FORWARD token `[tramp.off.lo, off.hi, page, callee_bank.lo,
+   callee_bank.hi]` via `__push_off` + `__push_pb` + `__push1`;
+3. `jun __soft_ret` (COMMON), which pops the token, drives BOTH latch ports to
+   the callee bank, and dispatches to the callee's restore trampoline (in the
+   callee bank), which reloads P4:P5 and `jun`s the real callee.
+The callee returns via its own `jun __soft_ret`, which pops the 5-nibble RETURN
+token (pushed by the CALLSOFT prologue, bank from `__cur_bank`) and restores the
+caller's 8-bit bank. The thunk never touches the latch, so no running
+instruction is swapped out. This replaces the old `__bankcall_*` JMS trampoline
+(which cost a hardware-stack slot); the soft-call path has no such limit.
 
 ### Packer bank assignment
-`i4004_pack.py --banks N` assigns each function to a bank (call-graph aware:
-keep a callee in the same bank as its hot caller where it fits; the common
-region is bank-agnostic), lays out 1 KiB common + N × 3 KiB banked, emits the
-trampolines, and rewrites cross-bank `JMS`/`JUN` to the trampoline. The image
-file is `common(1KiB) || bank0_hi(3KiB) || bank1_hi(3KiB) || …`.
+`i4004_pack.py --banks N --common-bytes C --bank-bytes B` classifies common vs
+banked functions, bin-packs the banked ones call-graph-aware (keep a callee near
+its caller to cut cross-bank calls), assigns per-function RAM frames (bank-0
+overlay), synthesizes the dispatch + far thunks, and rewrites cross-bank calls.
+Image file = `common(C) || bank0(B) || bank1(B) || …`.
 
-### Simulator support (both must honour the latch)
+### Simulator support (both must honour the 8-bit latch)
 - **chips adapter** (`platform/scripts/chips_trace.rs`): the unmodified
-  `external/chips` model has no bank concept, so the adapter watches
-  `b.roms[3].ports`; on a change it rebuilds `b.roms[4..16]` (public `Vec`,
-  `ROM::new` is public) from the selected bank's 3 KiB. Chips #0–#3 stay bank 0.
-- **RTL xl top** (`platform/rtl/busicom_141pf_xl.sv`): a latch register captures
-  `WRR` to chip #3's port and gates the ROM chip-select / data-mux for chips
-  #4–#15 to read the selected bank's mask. Chips #0–#3 are unbanked.
+  `external/chips` model has no bank concept, so the adapter reads
+  `bank = (roms[4].ports << 4) | roms[3].ports`, triggering on the chip-3
+  (commit) write, and rebuilds the banked ROM chips (index ≥ `common/256`) from
+  the selected bank's window. The latch-port chips (#3, #4) lie in the common
+  region so they are never swapped out.
+- **RTL xl top** (`platform/rtl/busicom_141pf_xl.sv`): NOT YET banked. Today it
+  instantiates 16 fixed 4001s covering a flat 4 KiB, so it can run only images
+  that fit 16 banks' worth at the 4 KiB view — NOT the 100 KiB firmware. To run
+  the banked firmware the RTL needs:
+  1. an 8-bit **bank register** that captures `WRR` to chip #3's port (low
+     nibble) and chip #4's port (high nibble), cleared to 0 on reset;
+  2. a **banked ROM backing store** larger than 4 KiB (a memory initialised
+     from the full `common || bankN...` image, 45+ banks ≈ 100 KiB) addressed
+     as `common[addr]` for `addr < common_bytes` else
+     `banked[bank*bank_bytes + (addr - common_bytes)]`;
+  3. the ROM data-mux for the banked address range to read that store at the
+     current bank, while the common range and the chip #0–#2 I/O ports stay
+     unbanked. Only the fetch path changes; the port/translator logic is
+     untouched. This mirrors the chips adapter exactly and is the remaining
+     work to validate the firmware on the authoritative RTL once it passes on
+     chips.
 
 The original ROM (1280 B) never touches chip #3's port, so both runners reproduce
 `rom_port_trace.txt` byte-for-byte with the latch present (it stays at bank 0).
