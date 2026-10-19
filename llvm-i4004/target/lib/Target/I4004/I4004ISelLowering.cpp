@@ -77,25 +77,17 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UDIV, MVT::i8, LibCall);
   setOperationAction(ISD::SREM, MVT::i8, LibCall);
   setOperationAction(ISD::UREM, MVT::i8, LibCall);
-  setOperationAction(ISD::SHL, MVT::i8, LibCall);
-  setOperationAction(ISD::SRL, MVT::i8, LibCall);
-  setOperationAction(ISD::SRA, MVT::i8, LibCall);
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::ROTL, VT, Expand);
     setOperationAction(ISD::ROTR, VT, Expand);
   }
 
-  // i16 arithmetic/bitwise: expand to i8 ops on the two sub-pairs. ADD/SUB
-  // expand to ADDC/SUBC chains over the legal i8 (which our ADDi8/SUBi8
-  // pseudos select). MUL/DIV/shift -> libcalls.
+  // i16 arithmetic: MUL/DIV/REM -> libcalls; shifts are custom-lowered below.
   setOperationAction(ISD::MUL, MVT::i16, LibCall);
   setOperationAction(ISD::SDIV, MVT::i16, LibCall);
   setOperationAction(ISD::UDIV, MVT::i16, LibCall);
   setOperationAction(ISD::SREM, MVT::i16, LibCall);
   setOperationAction(ISD::UREM, MVT::i16, LibCall);
-  setOperationAction(ISD::SHL, MVT::i16, LibCall);
-  setOperationAction(ISD::SRL, MVT::i16, LibCall);
-  setOperationAction(ISD::SRA, MVT::i16, LibCall);
 
   // AND/OR/XOR: the 4004 has no native bitwise ALU. Custom-lower to libi4004rt
   // helpers (__and/__or/__xor qi3/hi3). The runtime agent provides these; names
@@ -108,6 +100,18 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
 
   setMinFunctionAlignment(Align(1));
   setPrefFunctionAlignment(Align(1));
+
+  // Variable shifts have no native 4004 instruction and no standard i8 RTLIB
+  // entry, so custom-lower them (like AND/OR/XOR) to explicit libi4004rt calls
+  // __{ashl,lshr,ashr}{qi,hi}3 (abi.md sec.6). PARTS forms expand first.
+  for (MVT VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::SHL, VT, Custom);
+    setOperationAction(ISD::SRL, VT, Custom);
+    setOperationAction(ISD::SRA, VT, Custom);
+  }
+  setOperationAction(ISD::SHL_PARTS, MVT::i16, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i16, Expand);
+  setOperationAction(ISD::SRA_PARTS, MVT::i16, Expand);
 
   // Control flow: unconditional branch via the BR pseudo. Compares fold into
   // BR_CC, which we custom-lower to an I4004ISD::BRCC (SUB chain + JCN). SETCC
@@ -152,6 +156,9 @@ SDValue I4004TargetLowering::LowerOperation(SDValue Op,
   case ISD::AND:
   case ISD::OR:
   case ISD::XOR:
+  case ISD::SHL:
+  case ISD::SRL:
+  case ISD::SRA:
     return LowerBitwise(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation lowering");
@@ -168,7 +175,10 @@ SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
   case ISD::AND: Name = Wide ? "__andhi3" : "__andqi3"; break;
   case ISD::OR:  Name = Wide ? "__orhi3"  : "__orqi3";  break;
   case ISD::XOR: Name = Wide ? "__xorhi3" : "__xorqi3"; break;
-  default: llvm_unreachable("not a bitwise op");
+  case ISD::SHL: Name = Wide ? "__ashlhi3" : "__ashlqi3"; break;
+  case ISD::SRL: Name = Wide ? "__lshrhi3" : "__lshrqi3"; break;
+  case ISD::SRA: Name = Wide ? "__ashrhi3" : "__ashrqi3"; break;
+  default: llvm_unreachable("not a bitwise/shift op");
   }
 
   SDLoc DL(Op);
