@@ -27,6 +27,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
+# Per-function llc timeout (seconds). llc can enter an infinite legalize/
+# combine/isel loop on some IR; a run exceeding this is treated as a backend
+# bug ('hang'), never waited on. Override with LLC_TIMEOUT in the environment.
+import os
+LLC_TIMEOUT = int(os.environ.get("LLC_TIMEOUT", "30"))
+
+
 def normalise_node(msg: str) -> str:
     """Reduce a 'Cannot select' node line to an op signature for counting."""
     s = msg.strip()
@@ -143,11 +150,22 @@ def main() -> int:
             mod = preamble_text + "\n" + others + "\n" + body
             p = Path(td) / f"fn{idx}.ll"
             p.write_text(mod, encoding="utf-8")
-            r = subprocess.run(
-                [llc, "-mtriple=" + triple, "-filetype=asm", str(p), "-o", str(p) + ".s"],
-                capture_output=True,
-                text=True,
-            )
+            try:
+                r = subprocess.run(
+                    [llc, "-mtriple=" + triple, "-filetype=asm", str(p), "-o", str(p) + ".s"],
+                    capture_output=True,
+                    text=True,
+                    timeout=LLC_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                # llc looping on this function (legalize/combine/isel cycle) is a
+                # backend BUG, recorded as a 'hang' failure -- never waited on.
+                reasons["hang"] += 1
+                ops["hang:infinite-loop"] += 1
+                op_funcs["hang:infinite-loop"].append(name)
+                failed.append((name, "hang:infinite-loop",
+                               f"llc exceeded {LLC_TIMEOUT}s (infinite loop)"))
+                continue
             if r.returncode == 0:
                 ok.append(name)
                 continue
