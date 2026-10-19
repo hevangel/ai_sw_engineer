@@ -207,6 +207,7 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
 }
 
 impl<H: Hal> Printer for PrinterDriver<'_, H> {
+    #[inline(never)]
     fn print(&mut self, row: &Row) {
         // Red ink is latched for the whole line before the drum sweeps.
         if row.red {

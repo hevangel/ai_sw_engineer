@@ -552,6 +552,7 @@ fn sub_shifted(rem: &mut [u8; WIDE], div: &[u8; WIDE], div_hi: usize, s: usize) 
 /// Returns the root as a little-endian digit array (firmware §4.5 method:
 /// bring down two digits per step, find the largest `x` with
 /// `(20*root + x)*x <= remainder`, subtract, append `x`). All `u8` arithmetic.
+#[inline(never)]
 fn isqrt_digits(rad: &[u8; WIDE], hi: usize) -> [u8; DIGITS] {
     let num_pairs = hi / 2 + 1;
     let mut rem = [0u8; WIDE]; // remainder, little-endian
@@ -632,6 +633,7 @@ fn add_small(buf: &mut [u8; WIDE], mut v: u16) {
 }
 
 /// `(20*root + cand) * cand` as a little-endian decimal buffer.
+#[inline(never)]
 fn trial_product(root: &[u8; DIGITS], root_len: usize, cand: u8) -> [u8; WIDE] {
     // base = 2 * root  (little-endian)
     let mut base = [0u8; WIDE];
