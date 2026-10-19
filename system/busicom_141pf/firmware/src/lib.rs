@@ -176,6 +176,15 @@ impl Calculator {
                 self.mode = Mode::New;
             }
             Key::C => self.clear(out),
+            // Operation keys are handled in a separate #[inline(never)] helper
+            // so neither half exceeds a 4004 ROM bank window.
+            _ => self.dispatch_op_key(key, sw, out),
+        }
+    }
+
+    #[inline(never)]
+    fn dispatch_op_key<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
+        match key {
             Key::Plus => self.add_sub(false, sw, out),
             Key::Minus => self.add_sub(true, sw, out),
             Key::Mul => self.mul_div_key(MulOp::Mul, sw, out),
@@ -191,17 +200,8 @@ impl Calculator {
             Key::Rm => self.recall_memory(sw, out),
             Key::Cm => self.clear_memory(sw, out),
             Key::Sqrt => self.sqrt(sw, out),
-            // Digit keys are handled above via `key.digit()`.
-            Key::D0
-            | Key::D1
-            | Key::D2
-            | Key::D3
-            | Key::D4
-            | Key::D5
-            | Key::D6
-            | Key::D7
-            | Key::D8
-            | Key::D9 => {}
+            // entry/digit keys never reach here (handled by dispatch_key).
+            _ => {}
         }
     }
 
@@ -316,6 +316,27 @@ impl Calculator {
     /// reprints only the op glyph with a BLANK value (2-8 `× ÷ ×`), the operand
     /// already latched.
     #[inline(never)]
+    fn mul_div_chain<P: Printer>(&mut self, op: MulOp, entered: bool,
+                                 sw: Switches, out: &mut P) {
+        // Chain: a new op after a pending multiply/divide. Echo the operand in
+        // WR with the new op glyph, then compute the pending product/quotient,
+        // whose result feeds the next op. Extracted from mul_div_key so each
+        // stays under a 4004 ROM bank window.
+        let shown = operand_shown(&self.wr, entered, sw.dp);
+        out.print(&Row::num_a(&shown, sym_for(op)));
+        if let Some(r) = self.compute() {
+            self.wr = r;
+            self.dr = r;
+            self.cr = r;
+            self.mop = op;
+            self.mode = Mode::MulDiv;
+            self.op_from_entry = false; // operand is a computed result
+        } else {
+            self.overflow(out);
+        }
+    }
+
+    #[inline(never)]
     fn mul_div_key<P: Printer>(&mut self, op: MulOp, sw: Switches, out: &mut P) {
         let entered = self.entering;
         if entered {
@@ -338,24 +359,8 @@ impl Calculator {
                 self.op_from_entry = false; // operand recalled, not typed
             }
             Mode::New if matches!(self.mop, MulOp::Mul | MulOp::Div) => {
-                // Chain: a new op after a pending multiply/divide. The ROM first
-                // echoes the operand now in WR with the new op glyph (spec A6 —
-                // e.g. 2-4 `4.56 ×`, 3-4 `6 ÷`, 5-1 `12.4 ÷`, 8-1 `1368 ×`),
-                // then computes the pending product/quotient, whose result feeds
-                // the next op. A freshly typed operand echoes at its entered
-                // scale; a recalled one is aligned to DP.
-                let shown = operand_shown(&self.wr, entered, sw.dp);
-                out.print(&Row::num_a(&shown, sym_for(op)));
-                if let Some(r) = self.compute() {
-                    self.wr = r;
-                    self.dr = r;
-                    self.cr = r;
-                    self.mop = op;
-                    self.mode = Mode::MulDiv;
-                    self.op_from_entry = false; // operand is a computed result
-                } else {
-                    self.overflow(out);
-                }
+                // Chain (extracted to keep mul_div_key under a ROM bank).
+                self.mul_div_chain(op, entered, sw, out);
             }
             Mode::MulDiv if !entered => {
                 // Operation correction: an op key pressed straight after another

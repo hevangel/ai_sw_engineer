@@ -506,7 +506,7 @@ class Linker:
             # advance to next page handled by outer loop
 
     def _synth_bank_stubs(self):
-        """Register a common `__tobank` set-latch stub (12 B) for every distinct
+        """Register a common `__tobank` set-latch stub (10 B) for every distinct
         cross-bank CALLSOFT (target_addr, callee_bank) pair, packed into common
         free slots. The stub sets the ROM bank latch + __cur_bank mirror to the
         callee's bank, then `jun`s the callee. Cross-bank `jun callee` sites are
@@ -515,28 +515,30 @@ class Linker:
         (addr, bank) because a banked PC exists in every bank."""
         pairs = self.cross_bank_callee_pairs()  # {(addr, bank) -> bank}
         self.bank_stubs = {}                     # (addr, bank) -> stub_base
-        slots = self._common_free_slots(12)
+        slots = self._common_free_slots(10)
         for (addr, bank) in sorted(pairs):
             try:
                 base = next(slots)
             except StopIteration:
                 raise LinkError(
                     f"banked soft-call: no room for {len(pairs)} __tobank "
-                    f"stubs ({len(pairs)*12} B) in common free space "
+                    f"stubs ({len(pairs)*10} B) in common free space "
                     f"(common_bytes 0x{self.common_bytes:x}); raise "
                     f"--common-bytes or reduce cross-bank calls")
             self.bank_stubs[(addr, bank)] = base
             self.linker_syms[f"__tobank_{addr:04x}_b{bank:x}"] = base
-            self.common_used = max(self.common_used, base + 12)
+            self.common_used = max(self.common_used, base + 10)
 
     def _write_bank_stubs(self, img):
         """Emit the __tobank stub bytes into a bank image (common region,
-        identical in every bank)."""
+        identical in every bank). 10 bytes: set the ROM bank latch (chip 3) to
+        the callee bank, then the __cur_bank RAM mirror (0x0F) to the SAME value
+        (ACC still holds B after WRR -- no second LDM), then jun the callee."""
         for (addr, bank), sb in getattr(self, "bank_stubs", {}).items():
             B = bank & 0xF
             body = [0x20,0x30, 0x21, 0xd0 | B, 0xe2,   # fim p0,0x30; src p0; ldm B; wrr
-                    0x20,0x0f, 0x21, 0xd0 | B, 0xe0,   # fim p0,0x0f; src p0; ldm B; wrm
-                    0x40 | ((addr >> 8) & 0xF), addr & 0xFF]  # jun <addr>
+                    0x20,0x0f, 0x21, 0xe0,             # fim p0,0x0f; src p0; wrm (ACC=B)
+                    0x40 | ((addr >> 8) & 0xF), addr & 0xFF]  # jun <addr>  (10 bytes)
             for i, by in enumerate(body):
                 img[sb + i] = by
 

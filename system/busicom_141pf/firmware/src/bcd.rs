@@ -230,16 +230,9 @@ impl Num {
     /// 14-digit operands whose product fits 14 digits — the caller still
     /// range-checks the printable width).
     pub fn mul(&self, o: &Num) -> Option<Num> {
-        let mut acc = [0u8; WIDE];
-        for i in 0..DIGITS {
-            let di = self.digit(i);
-            if di == 0 {
-                continue;
-            }
-            if !mul_add_row(&mut acc, di, o, i) {
-                return None;
-            }
-        }
+        // The digit accumulation loop is extracted to a #[inline(never)] helper
+        // so mul stays under a 4004 ROM bank window.
+        let acc = mul_accumulate(self, o)?;
         Num::from_mag(&acc, self.scale + o.scale, self.neg != o.neg)
     }
 
@@ -284,27 +277,9 @@ impl Num {
         let n_digits = self.digits() as usize;
         let d_digits = o.digits() as usize;
 
-        // Leading-digit power of the exact quotient (approx, never too low).
-        let num_exp = n_digits as i16 - 1 - self.scale as i16;
-        let den_exp = d_digits as i16 - 1 - o.scale as i16;
-        let lead_hi = num_exp - den_exp + 1;
-
-        // Fractional digits of the final result.
-        //
-        // Fixed mode: exactly `frac`. Floating mode: generate enough fractional
-        // digits to always cover 13 significant digits regardless of the true
-        // integer size, then trim to 13 significant digits afterwards.
-        let gen_frac: u8 = match frac {
-            Some(n) => n,
-            None => {
-                // The integer part has at most `max(lead_hi,1)` digits; we grind
-                // down to power -(FLOAT_SIG) which is always deep enough.
-                let depth = FLOAT_SIG as i16 - lead_hi.min(0); // >= FLOAT_SIG
-                depth.max(FLOAT_SIG as i16) as u8
-            }
-        };
-        // Grind `gen_frac` fractional digits plus one guard digit.
-        let gen = gen_frac as i16 + 1;
+        // Fractional-digit count to grind, incl. one guard digit (extracted to
+        // a #[inline(never)] helper so `divide` stays under a 4004 ROM bank).
+        let gen = div_gen(frac, n_digits, d_digits, self.scale, o.scale);
 
         // Build dividend integer N (little-endian) and divisor integer D.
         // N occupies digits [0, n_digits); shift it up by `gen + extra` so the
@@ -391,6 +366,25 @@ impl Num {
         n
     }
 }
+/// Number of fractional digits `divide` grinds (incl. one guard digit): `frac`
+/// in fixed mode, else enough to cover FLOAT_SIG significant digits regardless
+/// of the quotient's integer size. `#[inline(never)]` to keep `divide` under a
+/// 4004 ROM bank window.
+#[inline(never)]
+fn div_gen(frac: Option<u8>, n_digits: usize, d_digits: usize,
+           self_scale: u8, o_scale: u8) -> i16 {
+    let num_exp = n_digits as i16 - 1 - self_scale as i16;
+    let den_exp = d_digits as i16 - 1 - o_scale as i16;
+    let lead_hi = num_exp - den_exp + 1;
+    let gen_frac: u8 = match frac {
+        Some(n) => n,
+        None => {
+            let depth = FLOAT_SIG as i16 - lead_hi.min(0); // >= FLOAT_SIG
+            depth.max(FLOAT_SIG as i16) as u8
+        }
+    };
+    gen_frac as i16 + 1
+}
 /// Assemble the final quotient Num from the little-endian integer quotient
 /// `quo_int` (MSD at index `q_msd`), quotient power `qp`, and the fixed/float
 /// `frac` mode; sign `neg`. `#[inline(never)]` to keep `divide` under a bank.
@@ -466,6 +460,23 @@ fn build_div_operands(dividend: &Num, divisor: &Num, gen: i16, n_digits: usize,
     Some((divd, divs, divs_hi))
 }
 
+/// Schoolbook multiply accumulation: acc = sum over digits i of self.digit(i) *
+/// o shifted left i. Returns None on register overflow. Extracted from
+/// `Num::mul` as `#[inline(never)]` so mul stays under a 4004 ROM bank window.
+#[inline(never)]
+fn mul_accumulate(a: &Num, o: &Num) -> Option<[u8; WIDE]> {
+    let mut acc = [0u8; WIDE];
+    for i in 0..DIGITS {
+        let di = a.digit(i);
+        if di == 0 {
+            continue;
+        }
+        if !mul_add_row(&mut acc, di, o, i) {
+            return None;
+        }
+    }
+    Some(acc)
+}
 /// One schoolbook multiply row: acc += di * o, shifted left by `i` digits
 /// (little-endian), with carry propagation into the high tail. Returns false on
 /// register overflow. `#[inline(never)]` to keep `Num::mul` under a ROM bank.
