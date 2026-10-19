@@ -19,7 +19,32 @@ sequences, and the Tier-A firmware/runtime co-design that stores each `Num` in
 one 4002 register) are what close the gap. `size_profile.py` over the whole
 firmware `.s` is re-run after each step; the original baseline mix was:
 
-`system/busicom_141pf/firmware/build/prof.py` over the whole firmware `.s`
+**Where the remaining ~41 KB is (post-spill-fix analysis).** After the FIM
+reductions, `fim` fell from 7,301 to 3,405 (p0 5,340 -> 1,444); the residual
+`fim` is mostly `MOVi8/MOVi16` VALUE materialization (loading constants into
+pairs), not addresses, so it is near-minimal. The image is now dominated by
+GENUINE memory-access instructions: 3,716 `src rdm xch` (i8 reads) + 2,502
+`src ld wrm` (i8 writes) + 4,427 `inc;src` (walking an object one char at a
+time), i.e. one SRC+RDM/WRM+XCH per nibble touched. These cannot be shrunk
+per-access at the backend — each byte genuinely needs its SRC and RDM/WRM.
+**So the backend addressing peepholes are largely exhausted (~41 KB floor from
+codegen alone); the remaining 10x must come from reducing the NUMBER of
+accesses, which is a firmware-shape problem:**
+  - Tier A (biggest): store each `Num`/digit register as a handle to ONE 4002
+    register and do digit work through libi4004rt block primitives
+    (reg_add_digits / reg_shift / reg_cmp / reg_copy / reg_clear), so a 16-digit
+    operation is one SRC + a tight RDM/WRM/INC loop instead of dozens of
+    separately-addressed packed-byte loads/stores. The arithmetic logic stays in
+    Rust; a plain-Rust host impl of the same API keeps host tests 42/42 exact.
+  - Tier B: split `target::run` (8.5 KB), `divide`, `sqrt_at` into
+    `#[inline(never)]` pieces sharing one digit-loop core; u8 counters; drop the
+    `[u8; WIDE=34]` scratch buffers (huge stack traffic) for register-backed
+    scratch.
+  - A MachineOutliner would help the repeated nibble-chain sequences but must
+    use the SOFTWARE return stack, not JMS: the firmware is already <=3 deep by
+    design and JMS-outlining would overflow the 3-level hardware stack.
+
+`size_profile.py` over the whole firmware `.s`
 (36,975 instructions, 45,714 bytes):
 
 | Mnemonic | count | ~bytes | share |
