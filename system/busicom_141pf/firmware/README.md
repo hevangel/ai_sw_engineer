@@ -5,7 +5,7 @@
 | Original year | 1971 (Busicom 141-PF introduction; see [system README](../README.md)) |
 | Original authors | Intel, for Busicom (firmware reverse-engineered by the Busicom 141-PF Replication Project) |
 | Machine | Busicom 141-PF — Intel 4004, 5 × 4001, 2 × 4002, 3 × 4003 |
-| Status | **M3** — host core (M2: 42/42) plus port-level machine drivers: keyboard 4003 scan + 8-key buffer, selectors, drum-printer hammer/`TEST` sequencing, paper advance, red/black ink, lamps, all behind a port-level HAL and proven **42/42** through a host board model validated against the original ROM |
+| Status | **M3** — host core (M2: 42/42) plus port-level machine drivers: keyboard 4003 scan + 8-key buffer, selectors, drum-printer hammer/`TEST` sequencing, paper advance, red/black ink, two-column symbols + lamps, all behind a port-level HAL. Proven **42/42 exactly** against the original ROM's full printed tape (`tests/port_trace.rs` vs `oracle/rom_port_trace.txt`, no relaxations), and **42/42** against the manual oracle through the core and the drivers |
 
 ## History
 
@@ -21,6 +21,7 @@ The 141-PF's 1280-byte firmware was the first commercial microprocessor program:
 | `src/` | `bcd.rs` digit-serial BCD, `keys.rs`, `print.rs` rows, `lib.rs` calculator, `hal.rs` port-level board I/O, `driver_keyboard.rs` / `driver_printer.rs` / `driver_lamps.rs` M3 drivers, `main.rs` target/host entry |
 | `tests/manual_examples.rs` | replays the oracle JSON through the core |
 | `tests/port_level.rs` | replays the oracle JSON through the M3 drivers + a host board model (port-level) |
+| `tests/port_trace.rs` | replays all 42 examples through the drivers + board model and compares the full printed tape (every row's value + both symbol columns + red, and the full 4-bit lamp nibble per step) **exactly** against the original ROM's `oracle/rom_port_trace.txt` |
 | [plans/](plans/implementation_plan.md) | milestones M0–M5, [test plan](plans/testplan.md) |
 | [report/](report/final_report.md) | current results |
 

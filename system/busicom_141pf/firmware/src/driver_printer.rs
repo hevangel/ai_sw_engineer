@@ -20,7 +20,7 @@ use crate::hal::{
     Hal, RAM0_ADVANCE, RAM0_HAMMER, RAM0_RED, RAM_PRINTER, ROM0_PR_CLOCK, ROM0_SERIAL_DATA,
     ROM_SHIFT,
 };
-use crate::print::{Printer, Row, Symbol, COLUMNS};
+use crate::print::{Printer, Row, SymA, SymB, COLUMNS};
 
 /// Drum sectors per revolution.
 pub const SECTORS: usize = 13;
@@ -34,52 +34,76 @@ pub const SYMBOL_B_BIT: u8 = 1;
 /// Numeric-column glyph at each drum sector (sectors 10,11 = `.`, 12 = `-`).
 pub const DRUM_NUMERIC: [u8; SECTORS] = *b"0123456789..-";
 
-/// Symbol-column A glyph (oracle `symbol` string) at each drum sector.
+/// Symbol-column A glyph (original-ROM trace glyph) at each drum sector
+/// (ai_hw_engineer board spec §4.2; sector 7 is the rounded `^` mark).
 pub const DRUM_SYMBOL_A: [&str; SECTORS] = [
-    "ST", // ◇ subtotal / diamond
-    "+", "-", "*op", // × multiply operand
-    "/",   // ÷ divide
-    "M+", "M-", "^", // rounded-up mark
-    "=", "SQRT", // √
-    "%", "C", "RM", // R recall
+    "◇",  // 0 subtotal / diamond
+    "+",  // 1
+    "-",  // 2
+    "×",  // 3 multiply
+    "÷",  // 4 divide
+    "M+", // 5
+    "M-", // 6
+    "^",  // 7 rounded-up mark
+    "=",  // 8
+    "√",  // 9 sqrt
+    "%",  // 10
+    "C",  // 11 clear
+    "R",  // 12 recall memory
 ];
 
-/// Symbol-column B glyph (oracle `symbol` string) at each drum sector.
+/// Symbol-column B glyph (original-ROM trace glyph) at each drum sector.
 pub const DRUM_SYMBOL_B: [&str; SECTORS] = [
-    "#", "*", // total star
-    "I", "II", "III", "M+", "M-", "T", "K", "E", "EX", "C", "CM", // M (clear memory)
+    "#",   // 0 reference
+    "*",   // 1 total star
+    "I",   // 2
+    "II",  // 3
+    "III", // 4
+    "M+",  // 5
+    "M-",  // 6
+    "T",   // 7
+    "K",   // 8
+    "E",   // 9
+    "Ex",  // 10 exchange
+    "C",   // 11
+    "M",   // 12 clear / recall-memory companion
 ];
-
-/// Where a [`Symbol`] prints on the drum: `(sector, is_symbol_column_b)`.
-/// `None` for [`Symbol::None`] (no symbol hammer fires).
-pub fn symbol_sector(sym: Symbol) -> Option<(usize, bool)> {
-    // Column A sectors.
-    let a = |s: usize| Some((s, false));
-    let b = |s: usize| Some((s, true));
-    match sym {
-        Symbol::None => None,
-        Symbol::SubTotal => a(0),
-        Symbol::Plus => a(1),
-        Symbol::Minus => a(2),
-        Symbol::Multiply => a(3),
-        Symbol::Divide => a(4),
-        Symbol::MemPlus => a(5),
-        Symbol::MemMinus => a(6),
-        // `^` (rounded) rides column A sector 7; see `rounded` handling below.
-        Symbol::Equals => a(8),
-        Symbol::Sqrt => a(9),
-        Symbol::Percent => a(10),
-        Symbol::Clear => a(11),
-        Symbol::RecallMemory => a(12),
-        Symbol::Total => b(1),
-        Symbol::Reference => b(0),
-        Symbol::Exchange => b(10),
-        Symbol::ClearMemory => b(12),
-    }
-}
 
 /// Rounded-up `^` mark: column A, drum sector 7.
 pub const ROUNDED_SECTOR: usize = 7;
+
+/// Drum sector for a column-A glyph, or `None` for [`SymA::None`].
+pub fn sym_a_sector(sym: SymA) -> Option<usize> {
+    Some(match sym {
+        SymA::None => return None,
+        SymA::SubTotal => 0,
+        SymA::Plus => 1,
+        SymA::Minus => 2,
+        SymA::Multiply => 3,
+        SymA::Divide => 4,
+        SymA::MemPlus => 5,
+        SymA::MemMinus => 6,
+        SymA::Rounded => ROUNDED_SECTOR, // 7
+        SymA::Equals => 8,
+        SymA::Sqrt => 9,
+        SymA::Percent => 10,
+        SymA::Clear => 11,
+        SymA::Recall => 12,
+    })
+}
+
+/// Drum sector for a column-B glyph, or `None` for [`SymB::None`].
+pub fn sym_b_sector(sym: SymB) -> Option<usize> {
+    Some(match sym {
+        SymB::None => return None,
+        SymB::Reference => 0,
+        SymB::Total => 1,
+        SymB::MemPlus => 5,
+        SymB::MemMinus => 6,
+        SymB::Exchange => 10,
+        SymB::Mem => 12,
+    })
+}
 
 /// The drum-printer driver.
 pub struct PrinterDriver<'a, H: Hal> {
@@ -170,14 +194,13 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
             };
             masks[sector] |= 1 << (NUMERIC_LSB as usize + c);
         }
-        // Symbol column.
-        if let Some((sector, col_b)) = symbol_sector(row.symbol) {
-            let bit = if col_b { SYMBOL_B_BIT } else { SYMBOL_A_BIT };
-            masks[sector] |= 1 << bit;
+        // Symbol column A (includes the rounded `^` mark via SymA::Rounded).
+        if let Some(sector) = sym_a_sector(row.sym_a) {
+            masks[sector] |= 1 << SYMBOL_A_BIT;
         }
-        // Rounded-up `^` rides column A, sector 7.
-        if row.rounded {
-            masks[ROUNDED_SECTOR] |= 1 << SYMBOL_A_BIT;
+        // Symbol column B.
+        if let Some(sector) = sym_b_sector(row.sym_b) {
+            masks[sector] |= 1 << SYMBOL_B_BIT;
         }
         masks
     }

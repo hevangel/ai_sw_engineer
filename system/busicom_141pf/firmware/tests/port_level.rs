@@ -53,14 +53,7 @@ impl From<&CapturedRow> for TapeRow {
         let (value, symbol) = if c.value.is_none() {
             (None, "overflow".to_string())
         } else {
-            let sym = if let Some(a) = c.sym_a {
-                DRUM_SYMBOL_A[a].to_string()
-            } else if let Some(b) = c.sym_b {
-                DRUM_SYMBOL_B[b].to_string()
-            } else {
-                String::new()
-            };
-            (c.value.clone(), sym)
+            (c.value.clone(), oracle_token(c.sym_a, c.sym_b))
         };
         TapeRow {
             value,
@@ -68,6 +61,46 @@ impl From<&CapturedRow> for TapeRow {
             red: c.red,
             rounded: c.rounded,
         }
+    }
+}
+
+/// Collapse the two drum symbol columns back to the single token the scanned
+/// manual's JSON oracle uses (it predates the two-column model). This is the
+/// inverse of how the core sets the columns and mirrors `Row::oracle_symbol`:
+/// `C`+`M` → `CM`, `R`+`M` → `RM`, a column-B result/echo to its own token,
+/// otherwise the column-A glyph's token. The rounded `^` mark is not a token
+/// (reported via `rounded`).
+fn oracle_token(sym_a: Option<usize>, sym_b: Option<usize>) -> String {
+    match (sym_a, sym_b) {
+        (Some(11), Some(12)) => "CM".to_string(), // C + M
+        (Some(12), Some(12)) => "RM".to_string(), // R + M
+        (_, Some(b)) => match b {
+            0 => "#",
+            1 => "*",
+            5 => "M+",
+            6 => "M-",
+            10 => "EX",
+            12 => "M",
+            _ => "",
+        }
+        .to_string(),
+        (Some(a), None) => match a {
+            0 => "ST",
+            1 => "+",
+            2 => "-",
+            3 => "*op",
+            4 => "/",
+            5 => "M+",
+            6 => "M-",
+            8 => "=",
+            9 => "SQRT",
+            10 => "%",
+            11 => "C",
+            12 => "R",
+            _ => "",
+        }
+        .to_string(),
+        (None, None) => String::new(),
     }
 }
 

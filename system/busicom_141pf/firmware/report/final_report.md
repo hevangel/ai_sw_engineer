@@ -6,6 +6,7 @@ Status at milestone M3 (2026-10-18).
 |---|---|
 | Host replay vs original ROM (recovered-ROM profile) | **42/42** examples, all 135 checkpoints |
 | **Port-level replay** (M3 drivers + board model) | **42/42** examples via `tests/port_level.rs` |
+| **Exact full-tape replay** vs original-ROM port trace | **42/42** examples via `tests/port_trace.rs` — every printed row (value + both symbol columns + red) and the full 4-bit RAM1 lamp nibble per step equal `oracle/rom_port_trace.txt`, no relaxations |
 | Original ROM on `external/chips` through the same port wiring | **42/42** (board-model validation; `oracle/port_level_validation.md`) |
 | Unit tests (BCD + 8-key buffer + lamps) | 12/12 |
 | `cargo fmt --check`, `clippy -D warnings` | clean |
@@ -22,9 +23,9 @@ The portable logic + drivers compiled for the host (`cargo build --release`):
 
 | Artifact | Size |
 |---|---|
-| `libsoftware.rlib` (release) | 269,890 bytes (includes metadata, not code size) |
-| `software` lib compiled to one object (`--emit=obj`, release) | 25,204 bytes |
-| Host LLVM IR (`build/host/firmware.ll`) | 111,958 bytes / 2,086 lines |
+| `libsoftware.rlib` (release) | ~270 KB (includes metadata, not code size) |
+| `software` lib compiled to one object (`--emit=obj`, release) | 27,036 bytes (was 25,204 before the exact-tape work: +1,832 for the two-column row model, the A6/A7 echo logic and the bit-3 lamp) |
+| Host LLVM IR (`build/host/firmware.ll`) | 117,181 bytes / 2,115 lines (was 111,958 / 2,086) |
 
 These are **host** (x86-64) figures. The 4004 ROM size is the figure that
 matters against the 1280 / 4096-byte budgets, and it **awaits the `llvm-i4004`
@@ -54,6 +55,15 @@ emits an image.
   scores 42/42 at the port level; the trace is committed as
   `oracle/rom_port_trace.txt` with provenance (no ROM binary), method in
   `oracle/port_level_validation.md`.
+- **Exact full-tape reproduction** (`tests/port_trace.rs`): the core now prints
+  the ROM's complete tape — the `×`/`÷` and `M+`/`M-` operand echoes (A6/A7),
+  two independent symbol columns via `print::Row { sym_a, sym_b }` (A8), and the
+  minus-sign lamp from WR's sign plus RAM1 bit 3 (A9, sourced to the annotated
+  listing's status-light routine). `tests/port_trace.rs` compares the full
+  ordered row stream and the full 4-bit lamp nibble per step **exactly** against
+  `rom_port_trace.txt`, 42/42, with no relaxations; mutation checks confirm it
+  catches a removed echo row, a swapped symbol column and a wrong lamp bit. See
+  `failure_notes/2026-10-18-busicom_141pf-partial-tape.md`.
 
 ## Known gaps
 
@@ -64,5 +74,9 @@ emits an image.
 - No target image: the `llvm-i4004` backend (M4) and the on-RTL run (M5) are out
   of scope for M3. `run_all.sh` correctly skips those stages.
 - Assumptions A1–A4 / M2-D1…M2-O1 / M3-H1…M3-P1 are validated against the
-  recovered-ROM transcripts and the port-level ROM trace; each ledger row names
-  the source to confirm against.
+  recovered-ROM transcripts and the port-level ROM trace; A6–A9 are now
+  reproduced and asserted exactly by `tests/port_trace.rs` (each ledger row
+  names its source). The one residual unknown is the full meaning of
+  `WR.S0.bit1` (RAM1 bit 3): the observable bit is reproduced as
+  `overflow || negative`, recorded as an ASSUMPTION in spec A9 and
+  `driver_lamps.rs`.
