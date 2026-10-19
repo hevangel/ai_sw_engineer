@@ -32,16 +32,42 @@ be >= 0x700 (1,792) and common <= 0x900 (2,304). At common=0x900 the free-slot
 packer finds only ~39 of the 65 stub slots (function page-align padding pushes
 the real 1,390 B of functions out to ~0x6c2 = 1,730 B, wasting ~340 B). So the
 link is ~26 slots (260 B) short.
-To unblock, EITHER:
-  (a) cut the number of cross-bank callees (~65) roughly in half via a
-      graph-partition bank placement (minimise cut call edges) -- a DFS+first-fit
-      clustering attempt INCREASED edges and regressed the exec test, so a real
-      min-cut/affinity partitioner is needed; or
-  (b) reclaim the ~340 B of common function-padding (place common hand-asm
-      sections tightly, padding only where a JCN/ISZ actually crosses a page),
-      which would free ~34 slots -- enough; or
-  (c) split more functions below a ~1,536 B window to allow common=0xA00.
-Option (b) is the cleanest and lowest-risk next step.
+To unblock, one of (ranked by cleanliness):
+  (a) ELIMINATE per-callee common stubs (user-requested). A cross-bank call is
+      a FORWARD jump through the EXISTING __soft_ret dispatch, done by pushing a
+      second ("forward") token for the callee and `jun __soft_ret` -- no new
+      common code beyond one small push helper. Design, worked out and partly
+      scaffolded (then reverted to keep green):
+        - add `__push_pb` (push R0=page, R1=bank; SSP+=2, 8-bit) -- ONE common
+          copy. Bytes verified:
+          2f a0 e0 f1 d1 8f bf d0 8e be 2f a1 e0 f1 d1 8f bf d0 8e be c0
+        - the packer rewrites each cross-bank `jun callee` (2 B) IN THE CALLER's
+          banked section into (12 B, uses only P0 + ACC, so args in P1-P3 and
+          the already-pushed return token are untouched):
+            fim p0, %lo8(callee)   ; offset -> R0:R1   (LO8 reloc)
+            jms __push_off         ; push off.lo, off.hi
+            fim p0, %page(callee)  ; R0 = page          (PAGE4 reloc)
+            ldm <bank>             ; ACC = callee bank  (packer fills the nibble)
+            xch r1                 ; R1 = bank
+            jms __push_pb          ; push page, bank
+            jun __soft_ret         ; pops the forward token, sets latch=callee
+                                   ;   bank, dispatches to callee page:offset
+          callee runs; its `jun __soft_ret` then pops the ORIGINAL return token
+          (pushed by the normal CALLSOFT prologue before this sequence),
+          restoring the caller's bank. Common = runtime + __soft_ret + __srtab +
+          __push_off/__push_pg/__push_pb only -- NO per-callee stubs.
+      The hard part is the in-place section rewrite: inserting +10 B at each
+      cross-bank `jun` shifts every later byte, reloc offset (ADDR12/PAGE8/LO8/
+      PAGE4), and local MBB symbol in that section, and must iterate with
+      placement to a fixed point (a same-bank call can become cross-bank as the
+      section grows). Per-function budget is now < 1792 B so the growth fits.
+  (b) Move the `__tobank` stubs OUT of common into the BANKED region, one copy
+      per (callee, calling-bank), placed during `_place_rom_banked` and reached
+      by a same-bank `jun`. Avoids byte-rewriting; common keeps only runtime +
+      dispatch; banked region (spare at ~25 banks) absorbs the stubs.
+  (c) Reclaim the ~340 B of common function-padding (pad only where a JCN/ISZ
+      actually crosses a page), freeing ~34 slots for the current 12-B stubs.
+Option (a) is the user's choice and the most compact; (b) is the lowest-risk.
 
 ## Item 2 — static per-call frame allocation (spill-corruption fix): DESIGNED
 The backend spills to a FIXED shared RAM region (chip0/reg3 @ 0x30) for EVERY
