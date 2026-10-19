@@ -33,6 +33,18 @@ MCAsmBackend *createI4004MCAsmBackend(const Target &T,
 
 std::unique_ptr<MCObjectTargetWriter> createI4004ELFObjectWriter(uint8_t OSABI);
 
+// Relocation specifiers for code-label operand modifiers (abi.md sec.4.4.1):
+//   %lo8(sym)  -> low 8 bits of sym            (R_I4004_LO8)
+//   %page(sym) -> page nibble (bits 11..8)     (R_I4004_PAGE4)
+// Used by the software-call return token. S_None is a plain immediate.
+namespace I4004 {
+enum Specifier : uint16_t {
+  S_None = 0,
+  S_LO8,
+  S_PAGE,
+};
+} // namespace I4004
+
 } // namespace llvm
 
 // Defines symbolic names for I4004 registers.

@@ -54,6 +54,8 @@ R_I4004_IMM8 = 3
 R_I4004_FIN8 = 4
 R_I4004_ROMADDR12 = 5
 R_I4004_RAMADDR16 = 6
+R_I4004_LO8 = 7
+R_I4004_PAGE4 = 8
 
 RELOC_NAME = {
     R_I4004_NONE: "R_I4004_NONE",
@@ -63,6 +65,8 @@ RELOC_NAME = {
     R_I4004_FIN8: "R_I4004_FIN8",
     R_I4004_ROMADDR12: "R_I4004_ROMADDR12",
     R_I4004_RAMADDR16: "R_I4004_RAMADDR16",
+    R_I4004_LO8: "R_I4004_LO8",
+    R_I4004_PAGE4: "R_I4004_PAGE4",
 }
 
 # ELF section-header types / flags we care about
@@ -637,6 +641,16 @@ class Linker:
             self.rom_image[off] = value & 0xFF
         elif rt == R_I4004_IMM8:
             self.rom_image[off] = value & 0xFF
+        elif rt == R_I4004_LO8:
+            # low 8 bits of a code symbol into the FIM second word (byte at off)
+            self.rom_image[off] = value & 0xFF
+        elif rt == R_I4004_PAGE4:
+            # page nibble (bits 11..8) of a code symbol into the FIM second
+            # word's LOW nibble; keep the (zero) high nibble of the byte.
+            if value > 0xFFF:
+                raise LinkError(self._loc(obj, sec, rel) +
+                                f": PAGE4 target 0x{value:x} exceeds 12 bits")
+            self.rom_image[off] = (value >> 8) & 0x0F
         elif rt == R_I4004_ROMADDR12:
             # 12-bit ROM address stored zero-extended into a 2-byte data cell
             self.rom_image[off] = value & 0xFF

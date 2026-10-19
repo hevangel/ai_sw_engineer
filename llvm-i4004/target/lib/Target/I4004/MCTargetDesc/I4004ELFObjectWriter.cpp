@@ -47,6 +47,10 @@ protected:
       return ELF::R_I4004_IMM8;
     case I4004::fixup_fin8:
       return ELF::R_I4004_FIN8;
+    case I4004::fixup_lo8:
+      return ELF::R_I4004_LO8;
+    case I4004::fixup_page4:
+      return ELF::R_I4004_PAGE4;
     default:
       llvm_unreachable("invalid fixup kind for I4004");
     }

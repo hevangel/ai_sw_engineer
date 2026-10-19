@@ -18,3 +18,9 @@ ELF_RELOC(R_I4004_FIN8,       4)
 ELF_RELOC(R_I4004_ROMADDR12,  5)
 // addrspace-0/2 pointer stored as data (16-bit RAM handle).
 ELF_RELOC(R_I4004_RAMADDR16,  6)
+// Low 8 bits of a code symbol into a FIM second word (software-call return
+// offset, abi.md sec.4.4.1). From %lo8(sym).
+ELF_RELOC(R_I4004_LO8,        7)
+// Page nibble (bits 11..8) of a code symbol into a FIM second word's low
+// nibble (software-call return page, abi.md sec.4.4.1). From %page(sym).
+ELF_RELOC(R_I4004_PAGE4,      8)

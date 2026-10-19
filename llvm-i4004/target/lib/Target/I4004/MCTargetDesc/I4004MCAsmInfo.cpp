@@ -7,10 +7,32 @@
 //===----------------------------------------------------------------------===//
 
 #include "I4004MCAsmInfo.h"
+#include "I4004MCTargetDesc.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Triple.h"
 using namespace llvm;
 
 void I4004MCAsmInfo::anchor() {}
+
+// Print a %lo8(...) / %page(...) specifier expression so an assembled file can
+// be disassembled/re-printed round-trip (the MC round-trip lit test).
+void I4004MCAsmInfo::printSpecifierExpr(raw_ostream &OS,
+                                        const MCSpecifierExpr &Expr) const {
+  switch (Expr.getSpecifier()) {
+  case I4004::S_LO8:
+    OS << "%lo8(";
+    break;
+  case I4004::S_PAGE:
+    OS << "%page(";
+    break;
+  default:
+    OS << "%specifier" << Expr.getSpecifier() << '(';
+    break;
+  }
+  printExpr(OS, *Expr.getSubExpr());
+  OS << ')';
+}
 
 I4004MCAsmInfo::I4004MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
     : MCAsmInfoELF(Options) {
