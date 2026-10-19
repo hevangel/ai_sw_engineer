@@ -1,5 +1,45 @@
 # llvm-i4004 final report
 
+## HEADLINE FINDING (2026-10-19): the compiled firmware is ~11x too big for the 4004
+
+The whole firmware now compiles to a relocatable object (43/43 functions, the
+mem/i16 runtime is complete and chips-tested, build_image.sh drives the full
+pipeline), but it **cannot be linked into a runnable ROM image**, for a reason
+no amount of packing or branch work fixes:
+
+- Total firmware `.text` = **45,714 bytes across 43 functions**
+  (`llc -function-sections -filetype=obj`), versus the 4004's **4096-byte**
+  architectural ROM maximum (16 x 4001). That is **~11.2x over**.
+- The single largest function, `target::run`, is **8,570 bytes** — it alone is
+  more than twice the entire address space. `bcd::Num::divide` is 5,138,
+  `sqrt_at` 4,283, the printer `print` 3,712, `Num::mul` 2,664. Eleven
+  functions exceed 1 KB.
+- Independently, the 4004's `JCN`/`ISZ`/`FIN` are **page-local** (branch only
+  within the current 256-byte ROM page), so EVERY function larger than 256
+  bytes also needs far-conditional-branch relaxation (`JCN !cc,$+ ; JUN far`)
+  before its own internal control flow is even encodable. All 43 functions but
+  the smallest exceed 256 bytes.
+
+Conclusion: the Rust Busicom firmware, compiled through this generic i4004
+backend, does not fit the Intel 4004 — not by a tunable margin but by an order
+of magnitude. The acceptance test ("the toolchain-compiled firmware runs on the
+4004 and reproduces the tape") is therefore **not reachable** by finishing the
+backend/linker alone. It needs one of:
+  (a) a dramatically more compact code model (realistically cannot recover 11x);
+  (b) a substantially rewritten, 4004-sized firmware (small enough that the
+      compiled image fits 4 KB) — a redesign, not a tweak, and arguably at odds
+      with the "compile the existing Rust firmware" premise;
+  (c) accepting the stock hand-written 1280-byte ROM as the only thing that
+      fits, and treating the Rust->4004 path as validated at the
+      component/function level (which it now is) rather than whole-image.
+
+A decision on (a)/(b)/(c) is needed before more backend work is worthwhile; the
+far-branch relaxation and the per-function page-split are only worth building
+once there is a firmware that could fit. See
+`failure_notes/2026-10-19-busicom-firmware-too-big-for-4004.md`.
+
+Everything below is the component-level progress, which is real and green.
+
 ## Status (2026-10-19, branch `system/busicom_141pf-on-4004`): whole firmware now lowers 43/43; NOT yet linked/run
 
 ### Done this session (all committed + pushed to the branch, lit 26/26 green)
