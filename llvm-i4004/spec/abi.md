@@ -293,6 +293,60 @@ The 4004 return stack is **3 levels** (4 slots, one being the live PC — §6 of
 decision (`platform/link.ld` is still TODO); the ABI fixes only the frame
 *layout* and the SSP register, not the base address.
 
+### 4.4.1 Concrete convention (PROVEN on chips, 2026-10-19)
+
+The whole-firmware call depth (`run→press→dispatch→add_sub→add_mag→reg_add…`,
+6+) exceeds the 3-level hardware stack, so compiled calls MUST use the soft
+stack. The following sequences are validated on `external/chips`
+(`rt/tests/softcall_core.s` depth-4 single-page; `rt/tests/softcall_mp.s`
+cross-page) and are the contract the backend + packer implement.
+
+**Return token** — 3 nibbles pushed low-address-first, SSP (P7) grows up:
+```
+[SSP+0] = return offset low nibble
+[SSP+1] = return offset high nibble
+[SSP+2] = return page nibble            (+ bank nibble folded here when banked)
+```
+
+**Compiled call** (`CALLSOFT`, expanded post-RA at the call site):
+```
+    fim  p1, <lo8 of .Lret>     ; R2:R3 = return offset (page-local low byte)
+    fim  <reg>, <page of .Lret> ; return page nibble
+    jms  __push_ret             ; leaf helper: pushes R3,R2,<page>; SSP+=3; bbl
+    jun  <callee>               ; NOT jms — hardware stack bypassed
+.Lret:
+```
+`__push_ret` is a single-level leaf (JMS/BBL, hardware depth 1).
+
+**Compiled return** — the function's epilogue is `jun __soft_ret` instead of
+`bbl`. `__soft_ret` (common, one copy) pops the token and dispatches:
+```
+    ; pop page -> Rp ; pop off-hi -> P0.hi ; pop off-lo -> P0.lo  (SSP-=3)
+    ; P2 = &__srtab + page*2   (two-nibble add; __srtab is page-local to __soft_ret)
+    jin  p2                     ; -> __srtab[page], a `jun <page_stub>`
+__srtab: jun stub_p0 ; jun stub_p1 ; ... one JUN per ROM page
+```
+Each ROM page carries a **one-byte `jin p0` stub at a FIXED reserved offset**
+(proof uses 0xF0). `__srtab[page]` JUNs to that page's stub; `jin p0` sets
+PC[7:0]=P0 (the return offset) keeping the page → lands exactly at `.Lret`.
+
+**Return values** stay in P1/D1; callee-saved pairs unchanged; `__push_ret`/
+`__soft_ret` touch only ACC, P7(SSP), and scratch P0/P2 + one page reg (all
+caller-clobberable at a call boundary).
+
+### 4.4.2 Packer / backend contract
+
+- **Packer reserves** the `jin p0` stub byte at the fixed offset on EVERY ROM
+  page (common region + every bank), emits the stub, builds `__srtab` (16 JUNs)
+  in `__soft_ret`'s page, and resolves each `jun stub_pK` to the reserved offset
+  on page K. With banking, the page reg also drives the bank latch write in
+  `__soft_ret` before dispatch (bank nibble from the token).
+- **Backend** lowers `i4004_call` to `CALLSOFT` (above) and every non-leaf
+  function's return to `jun __soft_ret`. `JMS`/`BBL` remain ONLY for leaf
+  libi4004rt/HAL helpers whose own call graph keeps total hardware depth ≤ 3.
+- **Packer asserts** the leaf rule: any function reached by `JMS` must itself
+  contain no `JMS` to a non-leaf (i.e. the JMS-reachable subgraph is ≤ 3 deep).
+
 ## 5. Relocations and object format
 
 **Object format: ELF**, little-endian, with a **private `e_machine`**. No
