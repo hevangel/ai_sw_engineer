@@ -1,18 +1,71 @@
 # llvm-i4004 final report
 
-## Status: milestone 3b (instruction selection) — CodeGen BACKBONE BUILT
+## Status: milestone 3b — CodeGen compiles 39/43 Busicom firmware functions
 
-`llc -mtriple=i4004` now lowers LLVM IR to real MCS-4 assembly our own
-`llvm-mc` accepts. The backbone is a minimal-but-real target built on LLVM
-23.1's `CodeGenTargetMachineImpl` (legacy pass-config path): `I4004TargetMachine`,
-`I4004Subtarget`, `I4004RegisterInfo`/`I4004InstrInfo` CodeGen classes,
-`I4004FrameLowering`, `I4004ISelLowering`, `I4004CallingConv.td`,
-`I4004ISelDAGToDAG`, `I4004AsmPrinter` + `I4004MCInstLower`, and a post-RA
-`I4004ExpandPseudos` pass. The data layout is the authoritative `abi.md` §1
-string set explicitly on the TargetMachine; the overlay registers the i4004
-16-bit pointer width in `Triple.cpp`.
+`llc -mtriple=i4004` lowers LLVM IR to real MCS-4 assembly our own `llvm-mc`
+accepts, following the AVR model (i8 legal in a register pair `PR8`; i16 /
+pointers legal in a double-pair `DR16` = two 4004 register pairs; i16 arithmetic
+expanded to i8 nibble ops). Built on LLVM 23.1's `CodeGenTargetMachineImpl`:
+`I4004TargetMachine`/`Subtarget`/`RegisterInfo`/`InstrInfo`/`FrameLowering`/
+`ISelLowering`/`ISelDAGToDAG`/`AsmPrinter`/`MCInstLower` + `I4004CallingConv.td`
++ a post-RA `I4004ExpandPseudos` pass. Datalayout is the authoritative `abi.md`
+§1 string; the overlay registers the i4004 arch + 16-bit pointer width in
+`Triple.cpp`.
 
-### What compiles today (verified)
+### Firmware coverage (the acceptance test)
+
+Against the real firmware IR (`system/busicom_141pf/firmware/build/
+firmware_i4004.ll`, produced by the firmware agent), **39 of 43 defined
+functions compile** through `llc -mtriple=i4004` (per-function via
+`llvm-extract`). The remaining 2 (plus 2 non-extractable declarations) hit one
+known bug: an i16 value allocated to the double-pair `D2` (= the callee-saved
+`P4:P5`) trips the callee-saved **super-register** save/restore in PEI
+("undefined physical register $d2"). Restricting `DR16` to `D1` alone fixes
+those 2 but regresses many others to heavy spilling, so `D1,D2` is kept and the
+proper DR16 callee-saved spill is a documented follow-up.
+
+### Selection + lowering implemented
+
+- i8 add/sub (ACC nibble chains, carry via CMC), i16 add/sub (4-nibble chain).
+- i8/i16 RAM load/store (addrspace 0: `SRC`+`RDM`/`WRM`, two 4002 chars/byte);
+  global addresses via `LEA_GA` (low byte `R_I4004_IMM8`, high byte 0 — globals
+  in the low 256 bytes, a linker/`%hi` follow-up).
+- compares + conditional branches (`BR_CC` → SUB chain + `JCN`; EQ/NE per-nibble,
+  ULT/UGE via final borrow, UGT/ULE by operand swap), `SELECT_CC` → a CFG-diamond
+  custom inserter (four compare×value width forms), unconditional `br` → `JUN`.
+- calls → `JMS` (hardware stack), register args P1–P3 and **stack arguments**
+  (RAM outgoing-arg area via frame-index stores); i16 args/returns in `D1`/`D2`.
+- zext/anyext i8→i16, trunc via `EXTRACT_SUBREG`; i16 constants (`MOVi16`);
+  frame-index addressing (`LEA_FI`); register spill/reload to 4002 RAM
+  (`SPILL8`/`16`, `RELOAD8`/`16`).
+- AND/OR/XOR and variable shifts → libi4004rt libcalls (`__and/or/xor` +
+  `__ashl/__lshr/__ashr` `qi3`/`hi3`); mul/div/rem (i8/i16/i32) and
+  memcpy/memset/memmove → the standard RTLIB impls registered in
+  `Subtarget::initLibcallLoweringInfo` (abi.md §6 / the runtime agent's PR #15).
+
+### Verified
+- **lit/FileCheck 24/24** (16 MC + 8 CodeGen).
+- **Execution on external/chips: 40/40** — `exec_fn.py` (i8 add/sub) + `exec_i16.py`
+  (i16 add/sub) run `llc`-compiled code on the real `mcs4::Board` vs the host.
+  The i8 subtract borrow-chain bug (found here, not by FileCheck) is fixed.
+- The BCD digit-add (`isel_bcd_probe.sh`) compiles AND assembles to an ELF object
+  (`bcd_add_digit` = 102 bytes).
+
+### Sizes (honest)
+No single linked firmware ROM image yet — that needs the linker / image packer
+(`asm/i4004_pack.py` from the runtime agent) to resolve the page-local `JCN`/
+`JUN`/`FIN` relocations and lay out 256-byte pages (milestone 5). Per-function
+`.text` is measurable now (e.g. BCD digit-add 102 bytes); a whole-image size vs
+the 1280-byte original / 4096-byte max waits on linking.
+
+### Remaining blockers to a running firmware
+1. The D2 callee-saved super-register spill (2 functions).
+2. Linker / image packer: resolve `R_I4004_PAGE8`/`ADDR12`/`FIN8`, 256-byte page
+   layout, link against libi4004rt + crt0 (milestone 5).
+3. Then: run the linked image on external/chips vs the oracle tape.
+
+---
+### Historical: what compiles today (early backbone)
 
 | Construct | Lowering | Verified |
 |---|---|---|
