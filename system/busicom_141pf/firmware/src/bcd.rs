@@ -236,29 +236,8 @@ impl Num {
             if di == 0 {
                 continue;
             }
-            let mut carry = 0u8;
-            for j in 0..DIGITS {
-                let pos = i + j;
-                let oj = o.digit(j);
-                if pos >= WIDE {
-                    if oj != 0 {
-                        return None;
-                    }
-                    continue;
-                }
-                let p = di * oj + acc[pos] + carry;
-                acc[pos] = p % 10;
-                carry = p / 10;
-            }
-            let mut pos = i + DIGITS;
-            while carry > 0 {
-                if pos >= WIDE {
-                    return None;
-                }
-                let p = acc[pos] + carry;
-                acc[pos] = p % 10;
-                carry = p / 10;
-                pos += 1;
+            if !mul_add_row(&mut acc, di, o, i) {
+                return None;
             }
         }
         Num::from_mag(&acc, self.scale + o.scale, self.neg != o.neg)
@@ -489,6 +468,39 @@ fn build_div_operands(dividend: &Num, divisor: &Num, gen: i16, n_digits: usize,
     }
     Some((divd, divs, divs_hi))
 }
+
+/// One schoolbook multiply row: acc += di * o, shifted left by `i` digits
+/// (little-endian), with carry propagation into the high tail. Returns false on
+/// register overflow. `#[inline(never)]` to keep `Num::mul` under a ROM bank.
+#[inline(never)]
+fn mul_add_row(acc: &mut [u8; WIDE], di: u8, o: &Num, i: usize) -> bool {
+    let mut carry = 0u8;
+    for j in 0..DIGITS {
+        let pos = i + j;
+        let oj = o.digit(j);
+        if pos >= WIDE {
+            if oj != 0 {
+                return false;
+            }
+            continue;
+        }
+        let p = di * oj + acc[pos] + carry;
+        acc[pos] = p % 10;
+        carry = p / 10;
+    }
+    let mut pos = i + DIGITS;
+    while carry > 0 {
+        if pos >= WIDE {
+            return false;
+        }
+        let p = acc[pos] + carry;
+        acc[pos] = p % 10;
+        carry = p / 10;
+        pos += 1;
+    }
+    true
+}
+
 
 
 
