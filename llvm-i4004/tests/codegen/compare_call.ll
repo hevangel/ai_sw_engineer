@@ -41,13 +41,14 @@ define i8 @sel(i8 %a, i8 %b, i8 %t, i8 %f) {
   ret i8 %r
 }
 
-; call -> software-call sequence (abi.md 4.4.1): push the 3-nibble return token
-; via P0/SSP, then JUN the callee (NOT jms -- hardware stack bypassed).
+; call -> software-call sequence (abi.md 4.4.1): stage the 3-nibble return token
+; in P0 and push it via the __push_off/__push_pg leaf helpers (8-bit SSP), then
+; JUN the callee (NOT jms -- hardware stack bypassed).
 ; CHECK-LABEL: caller:
 ; CHECK:      fim p0, %lo8(
-; CHECK:      src p7
-; CHECK:      wrm
+; CHECK:      jms __push_off
 ; CHECK:      fim p0, %page(
+; CHECK:      jms __push_pg
 ; CHECK:      jun callee
 declare i8 @callee(i8, i8)
 define i8 @caller(i8 %a, i8 %b) {

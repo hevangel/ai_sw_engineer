@@ -52,6 +52,8 @@ STUB_OFF = 0xFC          # fixed per-page stub offset (1 byte: jin p0)
 JIN_P0 = 0x31            # `jin p0` encoding (verified, abi.md 4.4.1)
 SOFT_RET_SYM = "__soft_ret"
 SRTAB_SYM = "__srtab"
+PUSH_OFF_SYM = "__push_off"
+PUSH_PG_SYM = "__push_pg"
 
 # e_machine and relocation numbers -- must match the MC backend
 # (I4004ELFObjectWriter.cpp / ELFRelocs/I4004.def).
@@ -351,29 +353,56 @@ class Linker:
 
     # -- software-call return dispatch synthesis (abi.md 4.4.1/4.4.2) --------
     def _soft_ret_bytes(self, srtab_lo):
-        """Return the __soft_ret instruction bytes (verified encodings) that pop
-        the 3-nibble return token off the P7 soft stack and dispatch through
-        the __srtab (placed at page offset `srtab_lo`, which must be 0x80 so the
-        0x80 + 2*page add never carries out of the byte). The jin pointer is
-        built in P4 (R8:R9), the page temp is R10, so the return-value register
-        D1 = P2:P3 (i8 in P1, i16 in D1) is NOT clobbered. P0 = R0:R1 carries the
-        return OFFSET on to the per-page `jin p0` stub. The one case this
-        disturbs is a two-word aggregate return in D2 = P4:P5, which the firmware
-        does not use. The in-body jcn-nc relocation targets `.Lnocar` = `jin p4`
-        (body index 29)."""
+        """Return the __soft_ret instruction bytes (verified encodings). It pops
+        the 3-nibble return token off the P7 soft stack -- decrementing SSP as a
+        full 8-bit pointer (R14:R15) each step, SSP += 0xFF via the ldm/add
+        carry trick, so the stack is the whole 4002 arena, not one 16-char
+        register -- and dispatches through __srtab (page offset `srtab_lo`, must
+        be 0x80 so 0x80 + 2*page never carries out of the byte). The jin pointer
+        is built in P4 (R8:R9), the page temp is R10, so the return-value
+        register D1 = P2:P3 (i8 in P1, i16 in D1) is NOT clobbered; P0 = R0:R1
+        carries the return OFFSET to the per-page `jin p0` stub. The in-body
+        jcn-nc relocation targets `.Lnocar` = `jin p4` (body index 42)."""
         assert srtab_lo == 0x80, "synthesis pins __srtab at page offset 0x80"
-        b = [0xaf,0xf8,0xbf,0x2f,0xe9,0xba,   # 0-5   SSP--; rdm -> R10 (page)
-             0xaf,0xf8,0xbf,0x2f,0xe9,0xb0,   # 6-11  SSP--; rdm -> R0 (off hi)
-             0xaf,0xf8,0xbf,0x2f,0xe9,0xb1,   # 12-17 SSP--; rdm -> R1 (off lo)
-             0xaa,0xf1,0xf5,0xb9,             # 18-21 ld r10; clc; ral; xch r9
-             0xd8,0xb8,                       # 22-23 ldm 8; xch r8
-             0xa8,                            # 24    ld r8
-             0x1a,0x00,                       # 25-26 jcn nc, .Lnocar (byte26 patched)
-             0xf2,0xb8,                       # 27-28 iac; xch r8
-             0x39]                            # 29    jin p4                <- .Lnocar
-        # jcn-nc skips the iac/xch when there is no carry, landing on `jin p4`
-        # (body index 29). The jcn operand byte is index 26.
-        return b, 29, 26  # bytes, .Lnocar index, jcn-operand index
+        def dec_ssp():
+            # SSP (R14:R15) += 0xFF  (== SSP - 1, 8-bit, carry R15->R14)
+            return [0xf1,        # clc
+                    0xdf,0x8f,0xbf,   # ldm 15; add r15; xch r15
+                    0xdf,0x8e,0xbe]   # ldm 15; add r14; xch r14
+        b = []
+        b += dec_ssp(); b += [0x2f,0xe9,0xba]  # src p7; rdm; xch r10 (page)
+        b += dec_ssp(); b += [0x2f,0xe9,0xb0]  # src p7; rdm; xch r0  (off hi)
+        b += dec_ssp(); b += [0x2f,0xe9,0xb1]  # src p7; rdm; xch r1  (off lo)
+        b += [0xaa,0xf1,0xf5,0xb9]             # ld r10; clc; ral; xch r9
+        b += [0xd8,0xb8]                       # ldm 8; xch r8
+        b += [0xa8]                            # ld r8
+        jcn_operand_idx = len(b) + 1
+        b += [0x1a,0x00]                       # jcn nc, .Lnocar (operand patched)
+        b += [0xf2,0xb8]                       # iac; xch r8
+        nocar_idx = len(b)
+        b += [0x39]                            # jin p4   <- .Lnocar
+        return b, nocar_idx, jcn_operand_idx
+
+    def _push_tok_bytes(self):
+        """Two leaf push helpers (JMS/BBL, hardware depth 1), both using ONLY the
+        scratch pair P0 and the SSP (P7) -- no argument register (P1/D1=P2:P3,
+        D2=P4:P5) is touched, so an i16 argument passed in D1/D2 survives:
+          __push_off: write R1(off lo) then R0(off hi) at SSP, SSP += 2
+          __push_pg : write R0(page) at SSP, SSP += 1
+        SSP advances as a full 8-bit pointer (carry R15->R14). Returns
+        (off_bytes, pg_bytes)."""
+        def inc_ssp():
+            return [0xf1,            # clc
+                    0xd1,0x8f,0xbf,  # ldm 1; add r15; xch r15
+                    0xd0,0x8e,0xbe]  # ldm 0; add r14; xch r14
+        off = []
+        off += [0x2f,0xa1,0xe0]; off += inc_ssp()   # src p7; ld r1; wrm; SSP++
+        off += [0x2f,0xa0,0xe0]; off += inc_ssp()   # src p7; ld r0; wrm; SSP++
+        off += [0xc0]                               # bbl 0
+        pg = []
+        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0; wrm; SSP++
+        pg += [0xc0]                                # bbl 0
+        return off, pg
 
     def _synth_softcall(self):
         """Flat-image synthesis: reserve the per-page `jin p0` stub at STUB_OFF
@@ -383,14 +412,19 @@ class Linker:
         is known) and BEFORE _apply (so the symbols resolve)."""
         if not getattr(self, "want_softcall", False):
             return
-        # Dedicated page for __soft_ret + __srtab, just past the placed code.
+        # Dedicated page for __soft_ret (@0x00) + __push_tok (@0x40) + __srtab
+        # (@0x80), just past the placed code.
         sr_page = (self.rom_used + PAGE - 1) // PAGE
         sr_base = sr_page * PAGE
         srtab_base = sr_base + 0x80
         self.soft_ret_base = sr_base
+        self.push_off_base = sr_base + 0x40
+        self.push_pg_base = sr_base + 0x60
         self.srtab_base = srtab_base
         self.soft_ret_page = sr_page
         self.linker_syms[SOFT_RET_SYM] = sr_base
+        self.linker_syms[PUSH_OFF_SYM] = self.push_off_base
+        self.linker_syms[PUSH_PG_SYM] = self.push_pg_base
         self.linker_syms[SRTAB_SYM] = srtab_base
         # the synthesized page occupies the whole 256 bytes (stub at 0xFC too)
         self.rom_used = max(self.rom_used, sr_base + PAGE)
@@ -421,6 +455,12 @@ class Linker:
         # patch the jcn-nc target (.Lnocar) low byte (page-local)
         nocar_addr = sr + nocar_idx
         img[sr + jcn_operand_idx] = nocar_addr & 0xFF
+        # __push_off / __push_pg leaf helpers (8-bit SSP advance; no relocations)
+        off_b, pg_b = self._push_tok_bytes()
+        for i, byte in enumerate(off_b):
+            img[self.push_off_base + i] = byte
+        for i, byte in enumerate(pg_b):
+            img[self.push_pg_base + i] = byte
         # __srtab: 16 entries `jun <stub on page k>` = 0x4<k>, 0xFC
         st = self.srtab_base
         for k in range(16):

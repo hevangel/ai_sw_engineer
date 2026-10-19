@@ -270,17 +270,18 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
       MI.eraseFromParent();
       return true;
     }
-    // Software call (abi.md 4.4.1), expanded post-RA. The return token is
-    // pushed INLINE through the scratch pair P0 and the SSP (P7), so NO
-    // argument register (P1/P2/P3) is disturbed and no hardware-stack level is
-    // spent (a JMS __push_ret would clobber P1 and cost a HW level):
-    //   fim  p0, %lo8(.Lret)   ; R0 = off.hi, R1 = off.lo
-    //   src p7 ; ld r1 ; wrm ; inc r15     ; [SSP+0] = off.lo
-    //   src p7 ; ld r0 ; wrm ; inc r15     ; [SSP+1] = off.hi
-    //   fim  p0, %page(.Lret)  ; R0 = page nibble (high nibble of the byte)
-    //   src p7 ; ld r0 ; wrm ; inc r15     ; [SSP+2] = page
-    //   jun  <callee>          ; NOT jms -- hardware stack bypassed
+    // Software call (abi.md 4.4.1), expanded post-RA. The 3-nibble return token
+    // is pushed through the scratch pair P0 ONLY (no argument register --
+    // P1/D1=P2:P3/D2=P4:P5 -- is touched, so i16 args in D1/D2 survive), by two
+    // leaf helpers that each advance the SSP (P7) as a full 8-bit pointer so
+    // depth is bounded by the whole 4002 arena, not one 16-char register:
+    //   fim p0, %lo8(.Lret)   ; R0 = off.hi, R1 = off.lo
+    //   jms __push_off        ; push off.lo, off.hi ; SSP += 2 ; bbl
+    //   fim p0, %page(.Lret)  ; R0 = page (byte hi nibble)
+    //   jms __push_pg         ; push page ; SSP += 1 ; bbl
+    //   jun <callee>          ; NOT jms -- hardware stack bypassed
     // .Lret:
+    // __push_off/__push_pg are leaves (hardware depth 1).
     MachineFunction &MF = *MBB.getParent();
     MachineBasicBlock *RetBB = MF.CreateMachineBasicBlock(MBB.getBasicBlock());
     MF.insert(std::next(MBB.getIterator()), RetBB);
@@ -290,29 +291,14 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     RetBB->setLabelMustBeEmitted();
 
     MachineOperand Callee = MI.getOperand(0);
-    Register R0 = TRI->getSubReg(I4004::P0, I4004::sub_hi);
-    Register R1 = TRI->getSubReg(I4004::P0, I4004::sub_lo);
-    Register R15 = TRI->getSubReg(I4004::P7, I4004::sub_lo);
-
-    auto pushNibble = [&](Register NibReg) {
-      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P7);
-      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(NibReg);
-      BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
-      BuildMI(MBB, MI, DL, TII->get(I4004::INC)).addReg(R15);
-    };
-
-    // offset: R0 = hi, R1 = lo. Push low first (frame layout: SSP+0 = off.lo).
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
         .addReg(I4004::P0)
         .addMBB(RetBB, I4004II::MO_LO8);
-    pushNibble(R1);
-    pushNibble(R0);
-    // page: %page puts the page nibble in the byte's high nibble -> R0.
+    BuildMI(MBB, MI, DL, TII->get(I4004::JMS)).addExternalSymbol("__push_off");
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM))
         .addReg(I4004::P0)
         .addMBB(RetBB, I4004II::MO_PAGE);
-    pushNibble(R0);
-
+    BuildMI(MBB, MI, DL, TII->get(I4004::JMS)).addExternalSymbol("__push_pg");
     BuildMI(MBB, MI, DL, TII->get(I4004::JUN)).add(Callee);
     MI.eraseFromParent();
     return true;

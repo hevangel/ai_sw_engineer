@@ -56,44 +56,35 @@ reset:	jun start
 	.globl start
 start:
 	fim	p7, 0x40        ; SSP base (4002 chip 1, char 0)
-	; push return token for `halt` (so entry's final __soft_ret lands at halt)
+	; push return token for `halt` via the same leaf helpers compiled code uses
 	fim	p0, %lo8(halt)
-	src	p7
-	ld	r1
-	wrm
-	inc	r15
-	src	p7
-	ld	r0
-	wrm
-	inc	r15
+	jms	__push_off
 	fim	p0, %page(halt)
-	src	p7
-	ld	r0
-	wrm
-	inc	r15
+	jms	__push_pg
 	jun	entry
 	.globl halt
 halt:	jun halt
 EOF
 
-# --- test IR: deep chain + value preserved across a call + i16 return --------
+# --- test IR: depth-8 chain + value preserved across a call + i16 return -----
 # All exceed the 3-level HARDWARE stack, so they prove the software return
-# stack and that callee-saved/return state survives a soft call. Depth stays
-# within the first soft-stack 4002 register (<= 5 three-nibble frames incl.
-# reset's halt frame): the inline push bumps only the SSP char nibble (R15), so
-# an 8-bit SSP carry (R15->R14) is the separate next step for depth > 5.
-# (Recursion value-accumulation still exposes a register-spill bug tracked
-# separately; it is NOT a soft-call-mechanism bug -- the mechanism returns
-# correctly here, including the i16 return value through a 2-deep call.)
+# stack. The depth-8 chain (8 soft frames = 24 nibbles) also proves the 8-bit
+# SSP pointer carries the char nibble (R15) into R14 and walks across 4002
+# registers -- 24 > the 16 chars of a single register.
 cat > "$WORK/t.ll" <<'EOF'
 target datalayout = "e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8"
 target triple = "i4004"
 
-; depth-4 chain (4 live soft frames > 3 HW levels): chain4(0) = 4.
-define i8 @f4(i8 %x) { %r = add i8 %x, 1 ret i8 %r }
+; depth-8 chain (8 live soft frames > 3 HW levels, > 5 one-register frames):
+; chain8(0) = 8.
+define i8 @f7(i8 %x) { %r = add i8 %x, 1 ret i8 %r }
+define i8 @f6(i8 %x) { %a = add i8 %x,1 %r = call i8 @f7(i8 %a) ret i8 %r }
+define i8 @f5(i8 %x) { %a = add i8 %x,1 %r = call i8 @f6(i8 %a) ret i8 %r }
+define i8 @f4(i8 %x) { %a = add i8 %x,1 %r = call i8 @f5(i8 %a) ret i8 %r }
 define i8 @f3(i8 %x) { %a = add i8 %x,1 %r = call i8 @f4(i8 %a) ret i8 %r }
 define i8 @f2(i8 %x) { %a = add i8 %x,1 %r = call i8 @f3(i8 %a) ret i8 %r }
-define i8 @chain4(i8 %x) { %a = add i8 %x,1 %r = call i8 @f2(i8 %a) ret i8 %r }
+define i8 @f1(i8 %x) { %a = add i8 %x,1 %r = call i8 @f2(i8 %a) ret i8 %r }
+define i8 @chain8(i8 %x) { %a = add i8 %x,1 %r = call i8 @f1(i8 %a) ret i8 %r }
 
 ; value preserved across a soft call: g(2) = h(2) + 2 = 12 + 2 = 14.
 define i8 @h(i8 %x) { %r = add i8 %x, 10 ret i8 %r }
@@ -104,8 +95,8 @@ define i16 @addw2(i16 %a, i16 %b) { %r = add i16 %a, %b ret i16 %r }
 define i16 @wide(i16 %a, i16 %b) { %r = call i16 @addw2(i16 %a, i16 %b) ret i16 %r }
 
 define void @entry() {
-  ; case 1: chain4(0) -> 4  ; store at RAM[0]
-  %c = call i8 @chain4(i8 0)
+  ; case 1: chain8(0) -> 8  ; store at RAM[0]
+  %c = call i8 @chain8(i8 0)
   store volatile i8 %c, ptr inttoptr (i16 0 to ptr)
   ; case 2: g(2) -> 14      ; store at RAM[2]
   %s = call i8 @g(i8 2)
@@ -131,10 +122,10 @@ timeout 120 python3 "$PACK" "$WORK/reset.o" "$WORK/t.o" \
 status "run on chips"
 # chars 0,1 = case1 (i8, low/hi nibble) ; 2,3 = case2 ; 4,5,6,7 = case3 (i16)
 got=$("$HARNESS" "$WORK/img.bin" 20000 8)
-# chain4(0)=4 -> 4,0 ; g(2)=14 -> 14,0 ; wide=0x0406 -> 6,0,4,0
-want="4 0 14 0 6 0 4 0"
+# chain8(0)=8 -> 8,0 ; g(2)=14 -> 14,0 ; wide=0x0406 -> 6,0,4,0
+want="8 0 14 0 6 0 4 0"
 if [[ "$got" == "$want" ]]; then
-  echo "SOFTCALL EXEC: PASS (chain4=4 depth-4; g=14 value preserved; wide=0x0406 i16 return through a call)" >&2
+  echo "SOFTCALL EXEC: PASS (chain8=8 depth-8 across 4002 regs; g=14 value preserved; wide=0x0406 i16 return)" >&2
   exit 0
 else
   echo "SOFTCALL EXEC: got [$got] want [$want]" >&2

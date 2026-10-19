@@ -11,24 +11,13 @@ declare i8 @deep(i8)
 declare i8 @__mulqi3(i8, i8)
 
 ; CHECK-LABEL: softcaller:
-; token push: two FIM p0 (lo8/page of the return label) + three SRC P7;WRM;INC.
+; token staged in P0 only; jms __push_off (off), fim %page, jms __push_pg; jun.
 ; CHECK:      fim p0, %lo8(.LBB0_1)
-; CHECK:      src p7
-; CHECK-NEXT: ld r1
-; CHECK-NEXT: wrm
-; CHECK-NEXT: inc r15
-; CHECK:      src p7
-; CHECK-NEXT: ld r0
-; CHECK-NEXT: wrm
-; CHECK-NEXT: inc r15
+; CHECK:      jms __push_off
 ; CHECK:      fim p0, %page(.LBB0_1)
-; CHECK:      src p7
-; CHECK-NEXT: ld r0
-; CHECK-NEXT: wrm
-; CHECK-NEXT: inc r15
+; CHECK:      jms __push_pg
 ; CHECK:      jun deep
 ; CHECK: .LBB0_1:
-; and the function itself returns through the soft stack.
 ; CHECK:      jun __soft_ret
 define i8 @softcaller(i8 %x) {
   %r = call i8 @deep(i8 %x)
