@@ -63,27 +63,40 @@ bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineFunction &MF = *MI.getParent()->getParent();
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex);
 
-  // SPILL/RELOAD/LEA_FI carry the slot as a frame index in a dedicated
-  // operand. Per-function frames (abi.md 4.4, brief decision 1): instead of a
-  // single fixed shared RAM region (the old 0x30/reg3 base, which every
-  // function reused so a callee clobbered its caller's spills), convert the FI
-  // to the WITHIN-FRAME char offset. I4004ExpandPseudos then emits the access
-  // against the external symbol __frame_<fn> (RAM char base, assigned
-  // per-function by the packer's call-graph overlay, bank 0). We use the frame
-  // INDEX (not getObjectOffset) as the slot number so each distinct stack
-  // object -- including a callee-saved-register spill slot -- gets its own
-  // chars; StackGrowsUp can map two distinct objects to offset 0, which would
-  // alias a CSR save with a spill in the same function.
+  // SPILL/RELOAD/LEA_FI carry the slot as a frame index. Per-function frames
+  // (abi.md 4.4, brief decision 1): convert the FI to the WITHIN-FRAME char
+  // offset. I4004ExpandPseudos emits the access against the external symbol
+  // __frame_<fn> (RAM char base assigned per-function by the packer overlay,
+  // bank 0). The char offset is 2*(objectOffset - minObjectOffset): the REAL
+  // frame layout, so each object -- including a multi-byte alloca -- occupies
+  // its true extent and distinct objects never alias. (Using FrameIndex*2 was
+  // wrong: it ignored object SIZE, so a 68-byte Calculator alloca and the next
+  // slot differed by 2 chars, and the memset that zeroes it overran the soft
+  // stack.) The frame's TOTAL size is published separately as
+  // __framesize_<fn> (AsmPrinter) so the packer reserves the full frame.
   unsigned Op = MI.getOpcode();
   if (Op == I4004::SPILL8 || Op == I4004::SPILL16 || Op == I4004::RELOAD8 ||
       Op == I4004::RELOAD16 || Op == I4004::LEA_FI) {
-    int Slot = FrameIndex < 0 ? -FrameIndex : FrameIndex; // index -> slot
-    (void)Offset;
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    // minimum object offset across the frame (StackGrowsUp => offsets >= 0, but
+    // normalize defensively so the frame is 0-based).
+    int MinOff = 0;
+    bool First = true;
+    for (int I = MFI.getObjectIndexBegin(), E = MFI.getObjectIndexEnd();
+         I < E; ++I) {
+      if (MFI.isDeadObjectIndex(I))
+        continue;
+      int O = MFI.getObjectOffset(I);
+      if (First || O < MinOff) { MinOff = O; First = false; }
+    }
+    int CharOff = 2 * (Offset - MinOff);
     if (getenv("I4004_FRAME_DEBUG"))
       errs() << "FRAME " << MF.getName() << " op=" << Op
              << " FI=" << FrameIndex << " off=" << Offset
-             << " -> char " << (Slot * 2) << "\n";
-    MI.getOperand(FIOperandNum).ChangeToImmediate((Slot * 2) & 0xFF);
+             << " size=" << MFI.getObjectSize(FrameIndex)
+             << " -> char " << CharOff << " (framesize_chars="
+             << (MFI.getStackSize() * 2) << ")\n";
+    MI.getOperand(FIOperandNum).ChangeToImmediate(CharOff & 0xFF);
     return false;
   }
 

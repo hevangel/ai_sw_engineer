@@ -339,9 +339,16 @@ class Linker:
     # -- symbol resolution --------------------------------------------------
     def _collect_globals(self):
         STB_GLOBAL = 1
+        SHN_ABS = 0xFFF1
         for obj in self.objs:
             for sym in obj.symbols:
                 bind = sym.info >> 4
+                # SHN_ABS symbols (e.g. the AsmPrinter's __framesize_<fn> frame-
+                # size constants) are metadata, not placeable sections; skip
+                # them here (read directly by name where needed) so later code
+                # never indexes obj.sections[SHN_ABS].
+                if sym.shndx == SHN_ABS:
+                    continue
                 if bind == STB_GLOBAL and sym.shndx not in (0,):  # defined
                     if sym.name in self.global_syms:
                         raise LinkError(f"duplicate global symbol '{sym.name}'")
@@ -1261,7 +1268,15 @@ class Linker:
         FRAME_PREFIX = "__frame_"
         # 1. frame sizes, and map fn-name -> its .text section id (for the graph)
         frame_size = {}          # fn-name -> size in chars
+        SHN_ABS = 0xFFF1
+        framesize_sym = {}   # fn -> total frame chars, from __framesize_<fn>
         for obj in self.objs:
+            for sym in obj.symbols:
+                nm = sym.name or ""
+                if nm.startswith("__framesize_"):
+                    fn = nm[len("__framesize_"):]
+                    # absolute symbol: value is the constant (stack bytes * 2).
+                    framesize_sym[fn] = sym.value
             for sec in obj.sections:
                 rels = obj.relocs.get(sec.index)
                 if not rels:
@@ -1274,6 +1289,13 @@ class Linker:
                         need = (rel.addend & 0xFF) + 2
                         if need > frame_size.get(fn, 0):
                             frame_size[fn] = need
+        # The authoritative frame size is __framesize_<fn> (AsmPrinter-emitted
+        # total stack size in chars): it covers a large alloca reached only by a
+        # base pointer, which the reloc-offset scan undercounts. Use it where
+        # present; keep the reloc-derived lower bound otherwise.
+        for fn, sz in framesize_sym.items():
+            if sz > frame_size.get(fn, 0):
+                frame_size[fn] = sz
         if not frame_size:
             return   # nothing spills / takes a frame address
         # section base address -> fn-name (a .text.<fn> section), for edges.
