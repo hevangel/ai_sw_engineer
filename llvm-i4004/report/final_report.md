@@ -39,23 +39,42 @@ A. **`llvm-i4004/scripts/build_image.sh` is still the exit-2 stub.** It must cha
    `.s`, hal.s) → `asm/i4004_pack.py --board xl` (link_xl.ld, `--pad-pages
    --pad 4096`). All the pieces exist; only the driver is missing.
 
-B. **libi4004rt is missing the i16 (`hi3`) arithmetic/shift helpers.** The
-   firmware references `__andhi3 __orhi3 __xorhi3 __ashlhi3 __ashrhi3 __lshrhi3
-   __mulhi3 __udivhi3`. **Done this session: the three BITWISE hi3 helpers**
-   (`llvm-i4004/rt/logic16.s`, bit-serial per byte like the qi3 forms) —
-   execution-tested on `external/chips` (`rt/tests/run_rt_tests.sh quick`:
-   **867/867 pass**, incl. 243 new i16 bitwise cases; the harness `gen_rt_test.py`
-   now supports `--wide` i16 args in D1/D2 and a 4-nibble i16 result). **Still
-   TODO:** `__ashlhi3 __ashrhi3 __lshrhi3` (i16 variable shifts — a per-bit loop
-   over 16 bits with the n-counter), `__mulhi3` (i16×i16→i16, shift-and-add over
-   16 bits), `__udivhi3` (i16 restoring division). Write each in MCS-4 asm and
-   add a `--wide` case to the harness (the shift/mul/udiv wide refs are easy to
-   compute in the bash oracle). Also: the firmware emits `memset`/`memcpy`
-   (standard RTLIB names) but the runtime defines `__memset_ram`/`__memcpy_ram`
-   — add `.set memset, __memset_ram` aliases (nibble-vs-byte count: the RTLIB
-   count is bytes, the _ram helper counts nibbles = 2×bytes, so the alias needs
-   a count-doubling shim, not a bare alias) or retarget the libcall names in
-   `Subtarget::initLibcallLoweringInfo`.
+B. **libi4004rt i16 (`hi3`) helpers — DONE and execution-tested.** All the i16
+   helpers the firmware calls now exist and pass on `external/chips`
+   (`rt/tests/run_rt_tests.sh quick`: **1347/1347 pass**, 0 fail — qi3, i16
+   bitwise, i16 shifts, i16 mul/udiv/umod, each vs a host oracle; the harness
+   `gen_rt_test.py --wide` drives i16 args in D1/D2 + a 4-nibble i16 result and
+   inits SSP):
+   - `llvm-i4004/rt/logic16.s`: `__andhi3 __orhi3 __xorhi3` (bit-serial per byte).
+   - `llvm-i4004/rt/shift16.s`: `__ashlhi3 __lshrhi3 __ashrhi3` (one-bit loop;
+     n>=16 clamps to 0 / sign-fill).
+   - `llvm-i4004/rt/arith16.s`: `__mulhi3` (shift-and-add, terminate on a==0),
+     `__udivmod16` (16-iter restoring division; trial = compare-only SUB chain;
+     R12/P6 counter saved/restored at SSP via ACC+P7 so the remainder in P0:P1
+     and P6's callee-saved contract both survive), `__udivhi3`, `__umodhi3`.
+
+   **Still TODO — the `memset`/`memcpy`/`memmove` entry points.** The firmware's
+   `llvm.mem*` intrinsics lower (via RTLIB) to standard C-ABI calls the runtime
+   does not provide under those names, and with a DIFFERENT ABI and count unit
+   than the existing `__memset_ram`/`__memcpy_ram` (which count nibbles and take
+   P1/P2/P3). The lowered ABI, confirmed by compiling tiny cases:
+     - `memset`: dst = D1 (P2:P3), val = P1 (i8), len = D2 (P4:P5), len in BYTES.
+     - `memcpy`: dst = D1 (P2:P3), src = D2 (P4:P5), len spilled to the outgoing-
+       arg RAM slot, len in BYTES.
+   A byte at RAM address C occupies TWO consecutive 4002 chars (char C = low
+   nibble, C+1 = high nibble; see `I4004ExpandPseudos` LDRAMi8/STRAMi8), so N
+   bytes = 2N chars and the address advances 2 chars per byte. **Key finding /
+   open design point:** the SRC char index is a 4-bit nibble that `INC` wraps
+   within one 4002 register (16 chars = 8 bytes), so a `memcpy`/`memset` over a
+   10-byte `bcd::Num` (20 chars) CROSSES a register boundary and must advance
+   the SRC register bits [5:4], not just the char nibble. The right place to
+   settle this is together with the xl memory map / `build_image.sh` (A): decide
+   whether each `bcd::Num`/array is placed to fit one register or the mem helper
+   is made to carry the full SRC address across register/chip boundaries. Then
+   write `memset`/`memcpy`/`memmove` in a new `rt/mem_rtlib.s` matching the
+   lowered ABI above and `--wide`-test them on chips. (A bare `.set memset,
+   __memset_ram` alias is WRONG — different ABI, different arg regs, and the
+   byte-vs-nibble count.)
 
 C. Only then: `run_image.sh secondary --board xl` over the 42 examples, diff with
    `platform/scripts/compare.sh` against `firmware/oracle/rom_port_trace.txt`,
