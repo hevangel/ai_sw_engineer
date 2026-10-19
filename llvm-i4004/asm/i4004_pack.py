@@ -353,54 +353,58 @@ class Linker:
 
     # -- software-call return dispatch synthesis (abi.md 4.4.1/4.4.2) --------
     def _soft_ret_bytes(self, srtab_lo):
-        """Return the __soft_ret instruction bytes (verified encodings). It pops
-        the 3-nibble return token off the P7 soft stack -- decrementing SSP as a
-        full 8-bit pointer (R14:R15) each step, SSP += 0xFF via the ldm/add
-        carry trick, so the stack is the whole 4002 arena, not one 16-char
-        register -- and dispatches through __srtab (page offset `srtab_lo`, must
-        be 0x80 so 0x80 + 2*page never carries out of the byte). The jin pointer
-        is built in P4 (R8:R9), the page temp is R10, so the return-value
-        register D1 = P2:P3 (i8 in P1, i16 in D1) is NOT clobbered; P0 = R0:R1
-        carries the return OFFSET to the per-page `jin p0` stub. The in-body
-        jcn-nc relocation targets `.Lnocar` = `jin p4` (body index 42)."""
+        """__soft_ret (verified encodings). Pops the 4-nibble return token off
+        the P7 soft stack, top nibble first: BANK, then page, off.hi, off.lo
+        (SSP decremented as a full 8-bit pointer, SSP += 0xFF per pop). The bank
+        nibble is written to the ROM bank latch (4001 chip-3 output port, SRC
+        0x30, WRR) AND to the __cur_bank RAM mirror (SRC 0x0F, WRM), restoring
+        the CALLER's bank before control returns. Then it builds the jin pointer
+        in P4 (R8:R9) from __srtab (page offset `srtab_lo` = 0x80) + 2*page and
+        JINs via the per-page stub. Scratch: R11 (bank), R10 (page), P4, P0; the
+        return-value register D1 = P2:P3 (and P1) is NOT clobbered; P0 = R0:R1
+        carries the return OFFSET to the stub. jcn-nc -> .Lnocar = `jin p4`."""
         assert srtab_lo == 0x80, "synthesis pins __srtab at page offset 0x80"
         def dec_ssp():
             # SSP (R14:R15) += 0xFF  (== SSP - 1, 8-bit, carry R15->R14)
-            return [0xf1,        # clc
-                    0xdf,0x8f,0xbf,   # ldm 15; add r15; xch r15
-                    0xdf,0x8e,0xbe]   # ldm 15; add r14; xch r14
+            return [0xf1, 0xdf,0x8f,0xbf, 0xdf,0x8e,0xbe]
         b = []
-        b += dec_ssp(); b += [0x2f,0xe9,0xba]  # src p7; rdm; xch r10 (page)
-        b += dec_ssp(); b += [0x2f,0xe9,0xb0]  # src p7; rdm; xch r0  (off hi)
-        b += dec_ssp(); b += [0x2f,0xe9,0xb1]  # src p7; rdm; xch r1  (off lo)
-        b += [0xaa,0xf1,0xf5,0xb9]             # ld r10; clc; ral; xch r9
-        b += [0xd8,0xb8]                       # ldm 8; xch r8
-        b += [0xa8]                            # ld r8
+        # pop BANK -> R11 ; latch <- R11 (SRC 0x30 WRR) ; __cur_bank <- R11 (0x0F)
+        b += dec_ssp(); b += [0x2f,0xe9,0xbb]          # src p7; rdm; xch r11
+        b += [0x20,0x30,0x21,0xab,0xe2]                # fim p0,0x30; src p0; ld r11; wrr
+        b += [0x20,0x0f,0x21,0xab,0xe0]                # fim p0,0x0f; src p0; ld r11; wrm
+        b += dec_ssp(); b += [0x2f,0xe9,0xba]          # src p7; rdm; xch r10 (page)
+        b += dec_ssp(); b += [0x2f,0xe9,0xb0]          # src p7; rdm; xch r0  (off hi)
+        b += dec_ssp(); b += [0x2f,0xe9,0xb1]          # src p7; rdm; xch r1  (off lo)
+        b += [0xaa,0xf1,0xf5,0xb9]                     # ld r10; clc; ral; xch r9
+        b += [0xd8,0xb8]                               # ldm 8; xch r8
+        b += [0xa8]                                    # ld r8
         jcn_operand_idx = len(b) + 1
-        b += [0x1a,0x00]                       # jcn nc, .Lnocar (operand patched)
-        b += [0xf2,0xb8]                       # iac; xch r8
+        b += [0x1a,0x00]                               # jcn nc, .Lnocar
+        b += [0xf2,0xb8]                               # iac; xch r8
         nocar_idx = len(b)
-        b += [0x39]                            # jin p4   <- .Lnocar
+        b += [0x39]                                    # jin p4   <- .Lnocar
         return b, nocar_idx, jcn_operand_idx
 
     def _push_tok_bytes(self):
         """Two leaf push helpers (JMS/BBL, hardware depth 1), both using ONLY the
         scratch pair P0 and the SSP (P7) -- no argument register (P1/D1=P2:P3,
-        D2=P4:P5) is touched, so an i16 argument passed in D1/D2 survives:
+        D2=P4:P5) is touched, so an i16 argument in D1/D2 survives:
           __push_off: write R1(off lo) then R0(off hi) at SSP, SSP += 2
-          __push_pg : write R0(page) at SSP, SSP += 1
+          __push_pg : write R0(page), then the CALLER bank read from the
+                      __cur_bank RAM mirror (SRC 0x0F), at SSP; SSP += 2
+        so the pushed token is [off.lo, off.hi, page, bank] low-address-first.
         SSP advances as a full 8-bit pointer (carry R15->R14). Returns
         (off_bytes, pg_bytes)."""
         def inc_ssp():
-            return [0xf1,            # clc
-                    0xd1,0x8f,0xbf,  # ldm 1; add r15; xch r15
-                    0xd0,0x8e,0xbe]  # ldm 0; add r14; xch r14
+            return [0xf1, 0xd1,0x8f,0xbf, 0xd0,0x8e,0xbe]
         off = []
         off += [0x2f,0xa1,0xe0]; off += inc_ssp()   # src p7; ld r1; wrm; SSP++
         off += [0x2f,0xa0,0xe0]; off += inc_ssp()   # src p7; ld r0; wrm; SSP++
         off += [0xc0]                               # bbl 0
         pg = []
-        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0; wrm; SSP++
+        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(page); wrm; SSP++
+        pg += [0x20,0x0f,0x21,0xe9,0xb0]            # fim p0,0x0f; src p0; rdm; xch r0 (cur bank)
+        pg += [0x2f,0xa0,0xe0]; pg += inc_ssp()     # src p7; ld r0(bank); wrm; SSP++
         pg += [0xc0]                                # bbl 0
         return off, pg
 
@@ -438,14 +442,14 @@ class Linker:
                 f"({self.rom_used} > {self.rom_len}); raise --max")
 
     def _synth_softcall_banked(self):
-        """Banked soft-call: the return-dispatch region (__soft_ret, push
-        helpers, __srtab) lives on ONE page in the COMMON region (mapped in every
-        bank) so every bank can reach it; the per-page `jin p0` stub sits at
-        STUB_OFF on every page of every bank. The soft-call page is reserved as
-        extra common usage AFTER the common functions have been placed by
-        _place_rom_banked. Must run after _place_rom (banked) / before
-        _build_banked_images."""
-        # Reserve one common page just past the placed common functions.
+        """Banked soft-call: the return-dispatch region (__soft_ret @ 0x00, the
+        push helpers, __srtab @ 0x80) lives on ONE common page (mapped in every
+        bank); the per-page `jin p0` stub sits at STUB_OFF on every page. The
+        cross-bank `__tobank_<addr>` set-latch stubs are packed into the common
+        FREE bytes (the gap before the dispatch page, the unused parts of the
+        dispatch page, and the tail after it) so the common region stays small.
+        Runs after _place_rom (banked) / before _build_banked_images."""
+        self._common_used_fns = self.common_used  # functions end here
         sr_page = (self.common_used + PAGE - 1) // PAGE
         sr_base = sr_page * PAGE
         if sr_base + PAGE > self.common_bytes:
@@ -466,6 +470,74 @@ class Linker:
         self.common_used = max(self.common_used, sr_base + PAGE)
         # pages per bank image = common_bytes + bank_bytes, all 256-byte pages.
         self.n_pages = (self.common_bytes + self.bank_bytes) // PAGE
+        self._synth_bank_stubs()
+
+    def _common_free_slots(self, width):
+        """Yield `width`-byte free slots in the common region for synthesized
+        stubs, avoiding: the placed common functions [0, _common_used_fns), the
+        dispatch block (soft_ret 0..0x40, push_off 0x40..0x58, push_pg
+        0x60..0x7a, srtab 0x80..0xa0 on the dispatch page), and the per-page
+        `jin p0` stub byte at STUB_OFF on every page. A slot never straddles a
+        256-byte page (so a 12-byte stub's `jun` stays simple)."""
+        srp = self.soft_ret_page
+        off_end = self.push_off_base + 24 - srp * PAGE   # 0x40+24=0x58
+        pg_end = self.push_pg_base + 26 - srp * PAGE      # 0x60+26=0x7a
+        used_on_srp = set()
+        for a, b in [(0x00, 0x3e), (0x40, off_end), (0x60, pg_end), (0x80, 0xa0)]:
+            used_on_srp.update(range(a, b))
+        start = self._common_used_fns
+        for page_base in range(0, self.common_bytes, PAGE):
+            if page_base < (start & ~(PAGE - 1)):
+                continue
+            off = 0
+            while off + width <= PAGE:
+                abs_lo = page_base + off
+                if abs_lo < start:
+                    off += 1; continue
+                win = range(off, off + width)
+                if STUB_OFF in win:
+                    off = STUB_OFF + 1; continue
+                if page_base == srp * PAGE and any(o in used_on_srp for o in win):
+                    off += 1; continue
+                if page_base + off + width > self.common_bytes:
+                    break
+                yield page_base + off
+                off += width
+            # advance to next page handled by outer loop
+
+    def _synth_bank_stubs(self):
+        """Register a common `__tobank_<addr>` set-latch stub (12 B) for every
+        distinct cross-bank CALLSOFT target, packed into common free slots. The
+        stub sets the ROM bank latch + __cur_bank mirror to the callee's bank,
+        then `jun`s the callee. Cross-bank `jun callee` sites are rewritten to
+        the stub in _build_banked_images; the token's 4th (bank) nibble restores
+        the caller's bank in __soft_ret."""
+        callees = self.cross_bank_callees()  # {target_addr -> callee bank}
+        self.bank_stubs = {}                 # addr -> (stub_base, callee_bank)
+        slots = self._common_free_slots(12)
+        for addr in sorted(callees):
+            try:
+                base = next(slots)
+            except StopIteration:
+                raise LinkError(
+                    f"banked soft-call: no room for {len(callees)} __tobank "
+                    f"stubs ({len(callees)*12} B) in common free space "
+                    f"(common_bytes 0x{self.common_bytes:x}); raise "
+                    f"--common-bytes or reduce cross-bank calls")
+            self.bank_stubs[addr] = (base, callees[addr])
+            self.linker_syms[f"__tobank_{addr:04x}"] = base
+            self.common_used = max(self.common_used, base + 12)
+
+    def _write_bank_stubs(self, img):
+        """Emit the __tobank_<addr> stub bytes into a bank image (common region,
+        identical in every bank)."""
+        for addr, (sb, bank) in getattr(self, "bank_stubs", {}).items():
+            B = bank & 0xF
+            body = [0x20,0x30, 0x21, 0xd0 | B, 0xe2,   # fim p0,0x30; src p0; ldm B; wrr
+                    0x20,0x0f, 0x21, 0xd0 | B, 0xe0,   # fim p0,0x0f; src p0; ldm B; wrm
+                    0x40 | ((addr >> 8) & 0xF), addr & 0xFF]  # jun <addr>
+            for i, by in enumerate(body):
+                img[sb + i] = by
 
     def _emit_softcall(self):
         """Write the synthesized soft-call bytes into self.rom_image (FLAT path).
@@ -679,30 +751,35 @@ class Linker:
         # Banked region: greedy first-fit bin-pack by descending size. Then run
         # the page-align pass (NOP-pad page-local instructions off page ends) and
         # RE-PACK to a fixed point, since padding grows sections and moves bases.
+        # Order functions by call-graph clustering (a callee right after its
+        # caller) so first-fit keeps call chains within one bank -> far fewer
+        # cross-bank calls (and thus __tobank stubs + runtime latch switches).
+        pack_order = self._callgraph_order(banked_items)
         for _iter in range(8):
             base = self.common_bytes
             bank_fill = [0] * self.banks
             # drop prior banked placements (keep common ones)
             self.placed = [p for p in self.placed
                            if self.sec_bank.get(id(p.sec), -1) == -1]
-            for obj, sec in sorted(banked_items, key=lambda it: -it[1].size):
+            cur = 0  # pure next-fit in call-graph order: a DFS-adjacent call
+                     # chain stays in one bank; advance only when it won't fit.
+            for obj, sec in pack_order:
                 if sec.size > self.bank_bytes:
                     raise LinkError(
                         f"{obj.path}:{sec.name} is {sec.size} bytes > one bank's "
                         f"banked region {self.bank_bytes}; split the function")
-                placed_ok = False
-                for k in range(self.banks):
-                    if bank_fill[k] + sec.size <= self.bank_bytes:
-                        sec.base = base + bank_fill[k]
-                        self.sec_bank[id(sec)] = k
-                        self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
-                        bank_fill[k] += sec.size
-                        placed_ok = True
-                        break
-                if not placed_ok:
-                    raise LinkError(
-                        f"no bank has room for {obj.path}:{sec.name} "
-                        f"({sec.size} B); raise --banks")
+                if bank_fill[cur] + sec.size > self.bank_bytes:
+                    cur += 1
+                    while cur < self.banks and bank_fill[cur] + sec.size > self.bank_bytes:
+                        cur += 1
+                    if cur >= self.banks:
+                        raise LinkError(
+                            f"no bank has room for {obj.path}:{sec.name} "
+                            f"({sec.size} B) in next-fit order; raise --banks")
+                sec.base = base + bank_fill[cur]
+                self.sec_bank[id(sec)] = cur
+                self.placed.append(Placed(obj, sec, sec.base, -1, "rom"))
+                bank_fill[cur] += sec.size
             # page-align each banked section at its assigned base
             changed = False
             for obj, sec in banked_items:
@@ -713,6 +790,64 @@ class Linker:
         self.bank_fill = bank_fill
         # rom_used = common + the largest bank (image size per bank is uniform).
         self.rom_used = self.common_bytes + self.bank_bytes
+
+    def _callgraph_order(self, banked_items):
+        """Order banked (obj, sec) items so a caller is immediately followed by
+        the callees it calls (DFS over the ADDR12 call graph restricted to
+        banked sections), falling back to descending size for anything not
+        reached. First-fit bin-packing this order clusters each call chain into
+        one bank, minimising cross-bank calls. Pure reordering -- placement and
+        correctness are unchanged."""
+        # Map a banked section id -> (obj, sec); and section defining a global.
+        items = list(banked_items)
+        by_id = {id(s): (o, s) for (o, s) in items}
+        # name -> section id for call-target resolution.
+        name_to_sec = {}
+        for o, s in items:
+            # the function symbol shares the section; find its defining global
+            for sym in o.symbols:
+                if sym.shndx < len(o.sections) and o.sections[sym.shndx] is s \
+                        and (sym.info >> 4) == 1 and sym.name:
+                    name_to_sec[sym.name] = id(s)
+        # edges: section id -> list of callee section ids (banked only).
+        edges = {id(s): [] for (o, s) in items}
+        for o, s in items:
+            for rel in o.relocs.get(s.index, []):
+                if rel.rtype != R_I4004_ADDR12:
+                    continue
+                sym = o.symbols[rel.sym]
+                tid = None
+                if (sym.info & 0xf) == 3 or sym.name == "":   # section symbol
+                    tsec = o.sections[sym.shndx]
+                    if id(tsec) in by_id:
+                        tid = id(tsec)
+                elif sym.name in name_to_sec:
+                    tid = name_to_sec[sym.name]
+                if tid is not None and tid != id(s):
+                    edges[id(s)].append(tid)
+        # DFS from the largest functions first (entry points tend to be large),
+        # then anything unvisited, to produce a caller-then-callees order.
+        order, seen = [], set()
+        roots = [id(s) for (o, s) in sorted(items, key=lambda it: -it[1].size)]
+        def dfs(nid):
+            stack = [nid]
+            while stack:
+                n = stack.pop()
+                if n in seen:
+                    continue
+                seen.add(n)
+                order.append(by_id[n])
+                # push callees (reverse so first-listed is visited first)
+                for c in reversed(edges.get(n, [])):
+                    if c not in seen:
+                        stack.append(c)
+        for r in roots:
+            dfs(r)
+        # any items not reached (shouldn't happen) appended by size
+        for o, s in sorted(items, key=lambda it: -it[1].size):
+            if id(s) not in seen:
+                order.append((o, s)); seen.add(id(s))
+        return order
 
 
     def _place_ram(self):
@@ -1040,8 +1175,21 @@ class Linker:
                 for k in banks:
                     self.rom_image = images[k]       # _patch writes self.rom_image
                     for rel in rels:
-                        # Redirect a cross-bank ADDR12 call to its common-region
-                        # trampoline (__bankcall_<addr>) when rewriting.
+                        # Soft-call cross-bank forward switch: redirect a `jun
+                        # callee` whose callee is in a DIFFERENT bank to the
+                        # callee's common `__tobank_<addr>` set-latch stub (which
+                        # sets the latch + __cur_bank to the callee bank, then
+                        # juns the callee). Same-bank calls are untouched.
+                        if (getattr(self, "want_softcall", False)
+                                and rel.rtype == R_I4004_ADDR12 and b != -1):
+                            to = self._sec_bank_of_symbol(obj, rel)
+                            addr = self._target_addr(obj, rel)
+                            if (to != -1 and to != b and addr is not None
+                                    and addr in getattr(self, "bank_stubs", {})):
+                                stub_base = self.bank_stubs[addr][0]
+                                self._patch(obj, sec, sec.base, rel, stub_base)
+                                continue
+                        # Legacy __bankcall_* trampoline rewrite (non-softcall).
                         if (self.rewrite_cross_bank and rel.rtype == R_I4004_ADDR12
                                 and b != -1):
                             to = self._sec_bank_of_symbol(obj, rel)
@@ -1070,18 +1218,17 @@ class Linker:
                 # Soft-call banking: the return dispatch (__soft_ret, push
                 # helpers, __srtab, per-page jin-p0 stubs) lives in the common
                 # region, mapped identically in every bank. A compiled call is a
-                # CALLSOFT `jun callee` to the callee's common PC; __soft_ret
-                # restores control via the token. Image builds and is measurable
-                # here. NOTE: the cross-bank FORWARD latch switch (set the ROM
-                # bank latch to the callee's bank before the jun, restore from
-                # the token's bank nibble in __soft_ret) is the remaining
-                # correctness piece; until it lands a call whose callee sits in a
-                # different bank reaches the right PC in the WRONG bank. Tracked
-                # in the report.
+                # CALLSOFT `jun callee` to the callee's common PC. The cross-bank
+                # FORWARD switch is handled by per-callee common `__tobank_<addr>`
+                # set-latch stubs (set latch + __cur_bank to the callee bank,
+                # then jun), and the RETURN restore is the token's 4th bank
+                # nibble written back to the latch + __cur_bank in __soft_ret.
+                # The old __bankcall_* JMS trampolines are not used.
                 self._synth_softcall_banked()
                 self.bank_images = self._build_banked_images()
                 for k in range(self.banks):
                     self._write_softcall(self.bank_images[k], self.n_pages)
+                    self._write_bank_stubs(self.bank_images[k])
                 self._assert_leaf_depth()
                 return
             xb = self._cross_bank_calls()
