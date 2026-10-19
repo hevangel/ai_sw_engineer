@@ -356,6 +356,9 @@ class Linker:
         self.linker_syms["__data_end"] = data_run_end if data_run_end is not None else self.ram_origin
         self.linker_syms["__bss_start"] = bss_start if bss_start is not None else (data_run_end or self.ram_origin)
         self.linker_syms["__bss_end"] = bss_end if bss_end is not None else (data_run_end or self.ram_origin)
+        # byte-count sizes for crt0 count-down loops (nibbles in RAM / bytes in ROM)
+        self.linker_syms["__data_size"] = self.linker_syms["__data_end"] - self.linker_syms["__data_start"]
+        self.linker_syms["__bss_size"] = self.linker_syms["__bss_end"] - self.linker_syms["__bss_start"]
 
     # -- relocation resolution ---------------------------------------------
     def _sym_addr(self, obj: ObjFile, rel: Reloc) -> int:
