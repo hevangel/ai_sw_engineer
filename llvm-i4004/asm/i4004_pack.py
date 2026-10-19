@@ -1459,30 +1459,31 @@ class Linker:
                 bk, _dcl, lo, hi = w
             norm_windows.append((bk, DCL_CODE[bk], lo, hi))
         total = max((base[fn] + frame_size[fn] for fn in allfns), default=0)
-        # Order distinct frames by linear base, then size, for a stable monotone
-        # remap. We assign each a (bank_index, within-bank offset).
+        # Order distinct frames by linear OVERLAY base. base[fn] is already the
+        # absolute linear position the overlay assigned (simultaneously-live
+        # frames have disjoint [base, base+size) intervals). We remap the linear
+        # axis onto the usable bank windows with a MONOTONE shift that only ever
+        # inserts gaps at a window boundary -- never reorders, never compresses
+        # -- so disjointness is preserved. For each frame the window offset is
+        # `base[fn] + shift`; if that frame would run past the current window's
+        # end, bump `shift` so the frame's base lands at the next window's `lo`.
         order = sorted(allfns, key=lambda fn: (base[fn], frame_size[fn], fn))
-        win_i = 0                 # current window index
-        win_cursor = norm_windows[0][2]  # next free offset in current window
-        last_lin = 0              # linear base already consumed
-        placed_bank = {}          # fn -> (bank, dcl, offset)
+        win_i = 0                          # current window index
+        bk0, dcl0, lo0, hi0 = norm_windows[0]
+        shift = lo0                        # base 0 maps to the first window's lo
+        placed_bank = {}                   # fn -> (bank, dcl, offset)
         for fn in order:
             sz = frame_size[fn]
-            # advance the window cursor by the gap since the previous frame's
-            # base (preserves the overlay's relative spacing / disjointness).
-            gap = base[fn] - last_lin
-            last_lin = base[fn]
-            win_cursor += gap
-            # find a window that can hold [cursor, cursor+sz) without straddle.
+            off = base[fn] + shift
+            # advance to a window that holds [off, off+sz) without straddle.
             while True:
                 bk, dcl, lo, hi = norm_windows[win_i]
-                if win_cursor < lo:
-                    win_cursor = lo
-                if win_cursor + sz <= hi:
+                if off < lo:
+                    # a later-window base before its lo: snap up (monotone).
+                    shift += lo - off
+                    off = lo
+                if off + sz <= hi:
                     break
-                # does not fit in this window -> move to the next, snapping the
-                # cursor to its base (a boundary gap; disjointness preserved as
-                # order is unchanged and no earlier frame is revisited).
                 win_i += 1
                 if win_i >= len(norm_windows):
                     worst = max(allfns, key=lambda f: frame_size[f])
@@ -1494,9 +1495,12 @@ class Linker:
                         f"largest single frame is '{worst}' "
                         f"({frame_size[worst]} chars). Add a frame bank or "
                         f"shrink spilling.")
-                win_cursor = norm_windows[win_i][2]
-            placed_bank[fn] = (bk, dcl, win_cursor)
-            win_cursor += sz
+                # snap this frame's base to the next window's lo; `shift` grows
+                # by exactly the boundary gap so every LATER base shifts too.
+                nlo = norm_windows[win_i][2]
+                shift += nlo - off
+                off = nlo
+            placed_bank[fn] = (bk, dcl, off)
         for fn in allfns:
             bk, dcl, off = placed_bank[fn]
             self.linker_syms[FRAME_PREFIX + fn] = off
