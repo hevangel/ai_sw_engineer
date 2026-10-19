@@ -218,7 +218,7 @@ impl Calculator {
             return;
         }
         self.wr.shl(1);
-        self.wr.d[0] = digit;
+        self.wr.set_digit(0, digit);
         if self.point {
             self.wr.scale += 1;
         }

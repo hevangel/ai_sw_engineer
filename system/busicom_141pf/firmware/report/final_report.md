@@ -112,7 +112,7 @@ full mapping and the refusal guards). Output: `build/firmware_i4004.ll`.
 | IR instruction lines (rough) | ~2,400 |
 | `float`/`double`/`i128`/`core::fmt`/panic strings | **none** (verified) |
 | `i32` uses | 43 |
-| `i64` uses | 59 (mostly `llvm.memset` size args + one 8-byte buffer init) |
+| `i64` uses | 68 (mostly `llvm.memset` size args + an 8-byte buffer init; packing shifts a few byte copies) |
 
 ### Fit analysis — the main risk, and it does NOT fit the stock board
 
@@ -145,54 +145,81 @@ ROM actually used (the original kept its ~7 working registers directly in the
 
 ### What fixes it, and the honest limit
 
-1. **Pack two BCD digits per byte** (`Num.d: [u8;16]` → `[u8;8]`, behind
-   `digit(i)`/`set_digit(i,v)` accessors so the arithmetic is unchanged):
-   `Num` 18 → 10 bytes, `Calculator` 116 → ~68 bytes, scratch `[u8;34]` → 17
-   bytes. This halves the RAM and the IR's data traffic. It is a behaviour-
-   preserving change (the algorithms operate on the same digit values) and must
-   keep all host tests 42/42 — see "Representation packing" below for status.
-2. **Even fully packed, the persistent register file is ~68 B (`Calculator`)
-   + ~24 B (`KeyBuffer`) ≈ 92 B > 64 B.** So packing is *necessary but not
+1. **Pack two BCD digits per byte** — **DONE in this milestone.** `Num.d` is now
+   a private `[u8; 8]` (two nibbles per byte) behind `digit(i)` / `set_digit(i,v)`
+   accessors; every call site (`bcd.rs` arithmetic, `lib.rs`, `print.rs`, the
+   tests) goes through them, and the digit-serial algorithms are byte-for-byte
+   the same on the same digit values. **Measured** result (`size_of`, host):
+   `Num` 18 → **10 bytes**, `Calculator` 116 → **68 bytes**. The transient
+   mul/div/sqrt `[u8; WIDE=34]` scratch is deliberately left one-digit-per-byte
+   (it is not resident between keystrokes, so it does not affect the persistent-
+   RAM verdict). All host tests stay **42/42** (incl. the exact tape); `fmt` and
+   `clippy -D warnings` clean.
+2. **Even fully packed, the persistent register file is 68 B (`Calculator`)
+   + 24 B (`KeyBuffer`) = 92 B > 64 B.** So packing is *necessary but not
    sufficient* for the stock board. To fit the stock 2×4002 board the firmware
    would additionally have to stop holding all six registers live at once as one
    struct and instead allocate them into the 4002 nibble files with the reuse
    the original ROM used (WR/DR/CR/SR/TR/MR were not all simultaneously
    resident), plus move `KeyBuffer` into status characters / index registers.
-3. **Minimal board that fits without that re-architecture:** a packed
-   `Calculator` (~68 B) + `KeyBuffer` (~24 B) + transient scratch (~20 B) needs
-   on the order of **~112 bytes of main RAM**, i.e. **4 × 4002** (256 nibbles =
+3. **Minimal board that fits without that re-architecture:** the packed
+   `Calculator` (68 B) + `KeyBuffer` (24 B) + transient scratch (~20 B) needs on
+   the order of **~112 bytes of main RAM**, i.e. **4 × 4002** (256 nibbles =
    128 bytes) rather than the stock 2. ROM: the 4004 architecture allows up to
    16 × 4001 = **4096 bytes**; the generated image size against both the 1280-
    byte original budget and the 4096-byte ceiling is **pending the codegen
    backend** (llc cannot yet lower the firmware).
 
-### Representation packing — status
+### RAM: before and after the packing
 
-The packing (item 1) is a ~40-site change inside `src/bcd.rs` (every `d[i]`
-digit access, the mul/div/sqrt scratch, the `from_mag`/`copy_from_slice` paths)
-plus its test helpers and 2 `pub` field uses in `lib.rs`. Because `bcd.rs` is
-the exact-tape-verified arithmetic core, the change is high-risk and is being
-done as an isolated, independently-revertable step gated on all host tests
-staying 42/42. See the README's milestone note for the current state; if the
-packed `bcd.rs` is present, the "after" column of the fit table is regenerated
-by `scripts/fit_analysis.py` on the repacked IR.
+| Object | Before (1 digit/byte) | After (2 digits/byte) |
+|---|---|---|
+| `Num` | 18 B | **10 B** |
+| `Calculator` (6 × `Num` + flags) | 116 B | **68 B** |
+| biggest single IR object (`dereferenceable`) | 116 B | **68 B** |
+| `KeyBuffer` | 24 B | 24 B (unchanged) |
+| persistent register file (`Calculator`+`KeyBuffer`) | 140 B | **92 B** |
+
+Stock board main memory is **64 B** throughout: the firmware does not fit the
+stock board before OR after packing; packing takes the gap from 2.2× to 1.4×
+and halves the biggest object, and the stock-board fit needs the register re-
+architecture in item 2 (or the 4×4002 board in item 3).
+
+### Representation packing — applied
+
+The packing was a ~40-site change inside `src/bcd.rs` (every `d[i]` digit
+access in `cmp_mag`, `shl`, `shr`, `inc_mag`, `add_mag`, `sub_mag`, `mul`,
+`divide`, `sqrt_at`, `from_mag`), plus the test helpers (`num`, `render`, a new
+`low_digits`) and the `pub` field uses in `lib.rs` (`wr.set_digit(0, …)`) and
+`print.rs` (`n.digit(i)`). `Num.d` is now **private**, so no code can touch the
+byte layout without the accessors. The change is behaviour-preserving (the
+algorithms run on the same digit values) and is validated by the full host
+suite staying **42/42**, including the exact-tape `port_trace` — the strongest
+possible regression gate for a representation change, since it compares the
+entire printed tape and lamp stream against the original ROM. `fmt` and
+`clippy -D warnings` are clean. The "after" sizes are **measured** (host
+`size_of`), not estimates.
 
 ### Codegen work list (`llvm-i4004/rust/codegen_worklist.md`)
 
 `llc` aborts on the first unselectable node, so `scripts/gen_worklist.py` splits
-the module into one function per run and aggregates. Current result: **1 / 40
-functions select**, the rest blocked. Top blockers by number of functions:
+the module into one function per run and aggregates. On the **packed** firmware
+IR: **2 / 43 functions select**, the rest blocked. Top blockers:
 
-| Rank | Operation (first unselected node) | Functions blocked |
+| Rank | Failure bucket (first blocking node) | Functions |
 |---|---|---|
-| 1 | `zero_extend` (i8→i16 on indexed byte loads) | 11 |
-| 2 | `Constant` (i16 constant materialisation) | 9 |
-| 3 | `SELECT` / `SELECT_CC` legalisation | ~7 |
-| 4 | AsmPrinter crash (missing mnemonic) | 4 |
-| 5 | `load` | 3 |
+| 1 | `assert:*` — incomplete DAG legalisation (SELECT/SELECT_CC, …) | 12 |
+| 2 | `llvm-error` — `Cannot select` on an unmapped node | 11 |
+| 3 | AsmPrinter crash (missing instruction mnemonic) | 7 |
+| 4 | `load` | 5 |
+| 5 | `store` | 4 |
 
-Each function reports only its *first* unselected node, so the list is a
+Each function reports only its *first* blocking node, so the list is a
 burn-down: re-run after each codegen landing to reveal the next layer. This is
-the backlog the codegen agent needs; the packing (item 1) will also shrink it
-by removing much of the i16 index arithmetic (`zero_extend` + i16 `Constant`
-dominate today precisely because digit addressing widens `i8` indices to `i16`).
+the backlog the codegen agent needs. Packing shifted the profile from the
+unpacked firmware's `zero_extend` (11) + i16 `Constant` (9) dominance — digit
+addressing no longer widens an `i8` index to `i16` per access — toward the
+nibble shift/mask `load`/`store` traffic and the still-missing `SELECT`
+legalisation and AsmPrinter mnemonics. The generated table in
+`codegen_worklist.md` has the per-operation detail and the function lists, and
+is regenerated by `gen_worklist.py` on each rebuild.

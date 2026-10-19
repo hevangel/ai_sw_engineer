@@ -156,7 +156,7 @@ impl Row {
                 row.cols[col] = b'.';
             }
             col -= 1;
-            row.cols[col] = b'0' + n.d[i];
+            row.cols[col] = b'0' + n.digit(i);
         }
         row
     }
