@@ -109,13 +109,13 @@ if [[ "${CLEAN_OBJ:-0}" == "1" || ! -f $LLVM_OBJ/build.ninja ]]; then
     -DCMAKE_INSTALL_PREFIX="$INSTALL"
 fi
 
-echo "==> building MC tools"
+echo "==> building MC + CodeGen tools"
 cmake --build "$LLVM_OBJ" -j "$JOBS" --target \
-  llvm-mc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump
+  llvm-mc llc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump
 
 echo "==> installing tools into $INSTALL/bin"
 mkdir -p "$INSTALL/bin"
-for t in llvm-mc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump; do
+for t in llvm-mc llc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump; do
   if [[ -f $LLVM_OBJ/bin/$t ]]; then
     cp -f "$LLVM_OBJ/bin/$t" "$INSTALL/bin/"
   fi

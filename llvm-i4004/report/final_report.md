@@ -1,58 +1,90 @@
 # llvm-i4004 final report
 
-## Status: milestone 3b (instruction selection) — STARTED, codegen backbone not yet built
+## Status: milestone 3b (instruction selection) — CodeGen BACKBONE BUILT
 
-The isel milestone is scoped and its acceptance harness is in place, but the
-LLVM **CodeGen backbone is not yet implemented**, so `llc -mtriple=i4004`
-cannot lower IR. This section states exactly what exists and the blocker.
+`llc -mtriple=i4004` now lowers LLVM IR to real MCS-4 assembly our own
+`llvm-mc` accepts. The backbone is a minimal-but-real target built on LLVM
+23.1's `CodeGenTargetMachineImpl` (legacy pass-config path): `I4004TargetMachine`,
+`I4004Subtarget`, `I4004RegisterInfo`/`I4004InstrInfo` CodeGen classes,
+`I4004FrameLowering`, `I4004ISelLowering`, `I4004CallingConv.td`,
+`I4004ISelDAGToDAG`, `I4004AsmPrinter` + `I4004MCInstLower`, and a post-RA
+`I4004ExpandPseudos` pass. The data layout is the authoritative `abi.md` §1
+string set explicitly on the TargetMachine; the overlay registers the i4004
+16-bit pointer width in `Triple.cpp`.
 
-**Done in 3b:**
-- `plans/implementation_plan.md` now carries the full 7-step isel plan, pinned
-  to `abi.md` (data layout, C int = 16, i8 native on pairs, P0 scratch, P7 SSP,
-  args P1–P3, P4–P6 callee-saved, 3-level hw stack then software stack).
-- `scripts/isel_bcd_probe.sh` is the reproducible acceptance harness for the
-  milestone function. It transcribes the BCD digit-add from
-  `system/busicom_141pf/firmware/src/bcd.rs` (`add_mag`, plus an even smaller
-  single-digit `bcd_add_digit`) into a standalone `no_std` function — **without
-  modifying the firmware crate** — emits its LLVM IR with the pinned nightly
-  rustc (LLVM 23.1.3, the same LLVM the backend is built from), swaps in the
-  i4004 data layout + triple (`abi.md` §1), and runs `llc`.
+### What compiles today (verified)
 
-**The IR extracts cleanly.** `bcd_add_digit` lowers to i8 add/sub + a compare
-and an i16 pack; `bcd_add_mag` to a 16-iteration loop of i8 add/sub/compare
-with a pointer load/store each step — exactly the add/sub/constants/branch/
-RAM-load-store subset the isel plan targets first.
+| Construct | Lowering | Verified |
+|---|---|---|
+| empty fn | — | `llc -filetype=null` accepts |
+| `ret void` / `ret i8 c` | `FIM p1, c` (i8 in P1, abi.md sec.4.2) + `BBL 0` | lit + exec |
+| `ret i16` | split to two i8 (P1:P2) | lit (`elf_machine`), compiles |
+| `add i8` | `CLC; LD; ADD; XCH` per nibble, carry chained | **exec 10/10 on chips** |
+| `sub i8` | `CLC; LD; SUB; XCH` low, `CMC`, then high nibble | **exec 10/10 on chips** |
+| args (i8) | P1, P2, P3 then RAM-stack slot (abi.md sec.4.1) | lit + exec |
+| pair copy | `LD/XCH` x2 (`copyPhysReg` -> `COPYpr`) | compiles, used by RA |
+| unconditional `br` | `JUN <mbb>` (addr12 reloc resolves the label) | lit |
+| ELF object | `-filetype=obj` carries `e_machine 0x4004` | lit |
+| MC round-trip | `llc` `.s` re-assembled by independent `llvm-mc` | lit |
 
-**Blocker (honest):** `llc -mtriple=i4004` reports
+Multiply/divide/shift are set to libcalls (`__mulqi3`, `__udivqi3`, ... into a
+future `libi4004rt`, abi.md sec.6). AND/OR/XOR are `Expand` (the 4004 has no
+native bitwise ALU).
+
+### Verification (in the ai-sw-engineer container)
+
+- **lit/FileCheck: 22/22** — 16 MC tests + 6 CodeGen tests
+  (`tests/codegen/{ret_const,add_i8,sub_i8,branch,elf_machine,mc_roundtrip}.ll`).
+- **Execution on external/chips: 20/20** — `scripts/exec_fn.py` compiles
+  `add8`/`sub8` with `llc`, runs the compiled MCS-4 code on chips' real
+  `mcs4::Board` (`tools/chips_xcheck/run_fn`) for 10 input pairs each, and
+  compares against the host. This is an EXECUTION test, not FileCheck: it caught
+  and fixed a real backend bug — the i8 subtract borrow chain was wrong on every
+  case (both an STC-once and a CLC-once form failed; the correct form is CLC
+  then CMC between nibbles, because the 4004 SUB uses `ACC + ~R + ~CY` so the
+  carry-out polarity must be flipped between nibbles).
+- MC differential disassembler cross-check on chips still green (unchanged).
+
+Both lit and the execution test are wired into `scripts/run_tests.sh`.
+
+### Honest blockers (remaining to run the firmware)
+
+The yardstick `scripts/isel_bcd_probe.sh` (the BCD digit-add) does **not** yet
+compile. The probe advances past target lookup and `br`, then stops at:
 
 ```
-llc: error: unable to get target for 'i4004', see --version and --triple.
+LLVM ERROR: Do not know how to expand this operator's operand!
 ```
 
-because the installed toolchain registers only the **MC layer + disassembler**,
-not a CodeGen `TargetMachine`. `LLVMInitializeI4004Target` is still the MC-only
-stub that registers no TargetMachine (by design through milestone 3a). Making
-`llc` work requires the full backbone — `I4004TargetMachine` (on LLVM 23.1's
-`CodeGenTargetMachineImpl` + `buildCodeGenPipeline`), `I4004Subtarget`,
-`I4004RegisterInfo`/`I4004InstrInfo` CodeGen classes, `I4004FrameLowering`,
-`I4004ISelLowering` (legalize i8, expand i16/i32, lower ret/add/sub/setcc/
-br/load/store, and the AND/OR/XOR expansion the 4004 lacks), `I4004CallingConv`,
-`I4004ISelDAGToDAG`, `I4004AsmPrinter` + `MCInstLower` — roughly 18 inter-
-dependent files that must all compile together against LLVM 23.1's exact APIs.
-That is a multi-day backend bring-up; it was **not** completed in this session,
-and a half-written, non-compiling backbone was deliberately **not committed**
-(it would break the shared LLVM build for the whole repo, including the
-concurrent firmware worktree).
+Isolated to two missing layers (minimal IR reproduces each):
 
-**Where this stops:** at a reproducible IR → `llc` probe that pinpoints the
-missing TargetMachine. The next session resumes by building the backbone in the
-smallest-first order in the plan, re-running `isel_bcd_probe.sh` after each
-piece until it emits assembly our `llvm-mc` accepts, then reporting the BCD
-`.text` byte size. No rustc custom-target integration until then (plan step 7).
+1. **Loads/stores to 4002 RAM** (`load i8, ptr` / `store`). addrspace-0 memory
+   access via `SRC` + `RDM`/`WRM` (two nibbles per byte) is not lowered yet;
+   the exact AS-0 pointer bit-packing is abi.md §7 open-question 2. This is the
+   gateway to any firmware code that touches memory (the BCD `a[i]` accesses).
+2. **Comparisons / conditional branches** (`icmp` + `br i1`). `SETCC` to the
+   4004's single `ACC==0` / `CY` test and `BR_CC` lowering are not built; the
+   `BRZ`/`BRNZ` pseudos and their `JCN` expansion are in place awaiting the
+   `SETCC` lowering that feeds them.
+
+Not started beyond those: i16/i32 expansion to byte ops, the `libi4004rt`
+mul/div/shift helpers, calls deeper than a leaf with the software return stack,
+a linker/ROM image packer, and rustc custom-target integration (plan step 7).
+So there is still **no compiled firmware image and no real BCD `.text` size**;
+the original ROM is 1280 bytes (4096 max) and that comparison must wait until
+loads/stores + compares land and `isel_bcd_probe.sh` emits assembly.
+
+### Where this stops
+
+At a verified arithmetic/control-flow/return/call-ABI backbone with lit +
+on-silicon-model execution tests, and a BCD probe that pinpoints the two
+remaining selection layers (memory + compares). The next session resumes by
+implementing addrspace-0 load/store (SRC+RDM/WRM) and SETCC/BR_CC, re-running
+`isel_bcd_probe.sh` after each, then reporting the BCD `.text` byte size.
 
 ---
 
-# llvm-i4004 final report
+# llvm-i4004 final report (milestone 3a, historical)
 
 ## Status: milestone 3a (disassembler + independent validation) complete
 

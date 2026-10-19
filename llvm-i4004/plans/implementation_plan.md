@@ -1,6 +1,13 @@
 # llvm-i4004 implementation plan
 
-## Milestone 3b — instruction selection backbone (IN PROGRESS, branch `llvm/i4004-isel`)
+## Milestone 3b — instruction selection backbone (BACKBONE BUILT, branch `llvm/i4004-codegen`)
+
+STATUS: `llc -mtriple=i4004` compiles real code. Steps 1,2,5 DONE; steps 3,4
+PARTIAL (ret/add/sub/const/unconditional-br/args/copy done; loads/stores,
+compares/cond-branches, i16 expansion, deep calls remain). Step 6 PARTIAL (BCD
+probe pinpoints the load/store + compare blockers). Verified: 22/22 lit +
+20/20 execution on external/chips. See report/final_report.md for the table and
+the honest remaining blockers.
 
 Goal: a **minimum** CodeGen backbone so `llc -mtriple=i4004` compiles small
 functions to assembly our own `llvm-mc` accepts, with a lit/FileCheck test per
