@@ -234,12 +234,18 @@ tiny register budget.
 
 ### 4.3 Caller/callee-saved
 
-- **Caller-saved (clobbered):** `ACC`, `CY`, `P0` (scratch pointer), `P1`–`P3`
-  (argument/return), and all imaginary registers `IR0`–`IR7`.
-- **Callee-saved (preserved):** `P4`, `P5`, `P6` (R8:R9, R10:R11, R12:R13). A
-  callee that uses them saves/restores via the software stack or imaginary
-  file. Keeping three callee-saved pairs lets a leaf's caller hold loop state
-  across a call without spilling to RAM.
+- **Caller-saved (clobbered):** `ACC`, `CY`, `P0` (scratch pointer), `P1`–`P5`
+  (argument/return), and all imaginary registers `IR0`–`IR7`. `P1`–`P3` carry
+  i8 arguments/returns; `P2:P3` (**D1**) and `P4:P5` (**D2**) are the two
+  i16/pointer argument-and-return double-pairs (§4.1). A Rust multi-field
+  return such as `{ i16, ptr }` places its first word in D1 and its second in
+  D2, so **D2 cannot also be callee-saved** — a call defines (clobbers) P4:P5.
+- **Callee-saved (preserved):** `P6` (R12:R13) only. A callee that uses it
+  saves/restores via the software stack or imaginary file. (Earlier drafts kept
+  P4,P5,P6 callee-saved; that was incompatible with returning a two-word
+  aggregate in D2 — LiveIntervals rejected the `COPY $d2` reading the second
+  return slot because the call never defined it. Making D2 caller-saved resolves
+  it and lets the two i16 arg/return pairs D1,D2 both be freely clobbered.)
 - `P7` (SSP) is **reserved**, neither caller- nor callee-saved — it is the
   stack machinery itself (§4.4).
 

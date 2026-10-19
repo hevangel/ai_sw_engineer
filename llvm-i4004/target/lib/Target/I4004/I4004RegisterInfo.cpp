@@ -29,8 +29,10 @@ I4004RegisterInfo::I4004RegisterInfo() : I4004GenRegisterInfo(I4004::P7) {}
 
 const MCPhysReg *
 I4004RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  // abi.md sec.4.3: P4, P5, P6 are callee-saved.
-  static const MCPhysReg CSR[] = {I4004::P4, I4004::P5, I4004::P6, 0};
+  // abi.md sec.4.3: P6 is the only callee-saved pair. P4:P5 (double-pair D2)
+  // is a caller-saved i16 argument/return pair (a `{ i16, ptr }` return places
+  // its second word in D2), so it is clobbered by a call, not preserved.
+  static const MCPhysReg CSR[] = {I4004::P6, 0};
   return CSR;
 }
 

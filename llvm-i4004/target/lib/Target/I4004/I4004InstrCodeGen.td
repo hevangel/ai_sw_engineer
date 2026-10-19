@@ -131,7 +131,15 @@ def RETpseudo : Pseudo<(outs), (ins), [(i4004_ret)]>;
 // Call to a known address -> JMS (hardware stack, depth <= 3; the software
 // return stack for deeper graphs is a later step). The callee is an addr12
 // symbol. Variadic to carry the argument-register uses/defs the DAG attaches.
-let isCall = 1, Uses = [P7], Defs = [ACC, CY, P0, P1, P2, P3] in {
+//
+// Defs cover the caller-clobbered set AND every register that can hold a
+// RETURN value. RetCC_I4004 returns an i16/aggregate in D1 (P2:P3) then D2
+// (P4:P5) -- a Rust `{ i16, ptr }` return occupies both -- so P4:P5 must be
+// listed as defined by the call, or LiveIntervals rejects the `COPY $d2` that
+// reads the second return slot ("Using an undefined physical register $d2").
+// Consequently D1 and D2 are the two caller-saved i16 arg/return pairs; only
+// P6 remains callee-saved (abi.md sec.4.3).
+let isCall = 1, Uses = [P7], Defs = [ACC, CY, P0, P1, P2, P3, P4, P5] in {
   def CALL : Pseudo<(outs), (ins addr12:$dst, variable_ops),
                     [(i4004_call (i16 tglobaladdr:$dst))]>;
 }

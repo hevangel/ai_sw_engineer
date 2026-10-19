@@ -173,7 +173,19 @@ def main() -> int:
             if fx is None:
                 reasons["unknown"] += 1
                 tail = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "?"
+                # Record under an 'unknown' op bucket so the function names and a
+                # representative message are still emitted (otherwise an
+                # unclassified failure is counted but never attributed).
+                ops["unknown"] += 1
+                op_funcs["unknown"].append(name)
                 failed.append((name, "unknown", tail))
+                # Persist the full stderr next to the IR for post-mortem.
+                try:
+                    dbg = Path(out_md).with_name("worklist_unknown.log")
+                    with dbg.open("a", encoding="utf-8") as fh:
+                        fh.write(f"===== {name} =====\n{r.stderr}\n")
+                except Exception:
+                    pass
             else:
                 cat, op, sig = fx
                 reasons[cat] += 1
