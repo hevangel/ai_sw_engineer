@@ -62,5 +62,18 @@ chk "map marks _RNvFb bank0" 'grep -qE "bank0 .*_RNvFb" "$W/ok.map"'
 python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" -o "$W/flat.bin" --max 4096 --pad 256 >/dev/null 2>"$W/e4"
 chk "flat (no --banks) still works" '[[ -f "$W/flat.bin" ]]'
 
+# Test 5: trampoline synthesis. Force fa and fb into different banks (tiny bank),
+# emit trampolines, assemble, and rewrite-link. fa->fb is cross-bank so a
+# __bankcall_<fb> trampoline must be generated and the link must succeed.
+TB="--banks 2 --common-bytes 0x100 --bank-bytes 0x8"
+python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" $TB --emit-trampolines "$W/tr.s" >/dev/null 2>"$W/e5a"
+chk "emit-trampolines writes a file" '[[ -s "$W/tr.s" ]]'
+chk "trampoline generated for the cross-bank callee" 'grep -qE "__bankcall__RNvF" "$W/tr.s"'
+$B/llvm-mc -triple i4004 --filetype=obj "$W/tr.s" -o "$W/tr.o" 2>"$W/e5b"
+chk "trampoline source assembles" '[[ -f "$W/tr.o" ]]'
+python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" "$W/tr.o" $TB --rewrite-cross-bank -o "$W/tr.bin" >/dev/null 2>"$W/e5c"
+chk "rewrite-cross-bank link succeeds" '[[ -f "$W/tr.bin" ]]'
+chk "without trampolines, cross-bank still errors" '! python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" $TB -o "$W/no.bin" >/dev/null 2>&1'
+
 echo "PACK-BANK UNIT: $pass passed, $fail failed" >&2
 [[ "$fail" -eq 0 ]]
