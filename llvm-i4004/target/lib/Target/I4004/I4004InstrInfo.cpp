@@ -28,36 +28,59 @@ void I4004InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  const DebugLoc &DL, Register DestReg,
                                  Register SrcReg, bool KillSrc,
                                  bool RenamableDest, bool RenamableSrc) const {
-  // 16-bit double-pair copy: copy each 8-bit sub-pair via COPYpr.
+  // Emit the real nibble moves directly (LD src; XCH dst, per nibble). We do
+  // NOT use a pseudo here because copyPhysReg can be invoked by passes that run
+  // after I4004ExpandPseudos (e.g. post-RA copy lowering), which would leave an
+  // unexpanded pseudo for the AsmPrinter.
+  auto copyPair = [&](Register D, Register S) {
+    Register DHi = RI.getSubReg(D, I4004::sub_hi);
+    Register DLo = RI.getSubReg(D, I4004::sub_lo);
+    Register SHi = RI.getSubReg(S, I4004::sub_hi);
+    Register SLo = RI.getSubReg(S, I4004::sub_lo);
+    BuildMI(MBB, MI, DL, get(I4004::LD)).addReg(SHi);
+    BuildMI(MBB, MI, DL, get(I4004::XCH)).addReg(DHi, RegState::Define);
+    BuildMI(MBB, MI, DL, get(I4004::LD)).addReg(SLo);
+    BuildMI(MBB, MI, DL, get(I4004::XCH)).addReg(DLo, RegState::Define);
+  };
+
   if (I4004::DR16RegClass.contains(DestReg, SrcReg)) {
-    Register DLo = RI.getSubReg(DestReg, I4004::sub_pair_lo);
-    Register DHi = RI.getSubReg(DestReg, I4004::sub_pair_hi);
-    Register SLo = RI.getSubReg(SrcReg, I4004::sub_pair_lo);
-    Register SHi = RI.getSubReg(SrcReg, I4004::sub_pair_hi);
-    BuildMI(MBB, MI, DL, get(I4004::COPYpr), DLo).addReg(SLo);
-    BuildMI(MBB, MI, DL, get(I4004::COPYpr), DHi)
-        .addReg(SHi, getKillRegState(KillSrc));
+    copyPair(RI.getSubReg(DestReg, I4004::sub_pair_lo),
+             RI.getSubReg(SrcReg, I4004::sub_pair_lo));
+    copyPair(RI.getSubReg(DestReg, I4004::sub_pair_hi),
+             RI.getSubReg(SrcReg, I4004::sub_pair_hi));
     return;
   }
-  // Pair-to-pair copy: COPYpr, expanded later into two nibble moves.
-  BuildMI(MBB, MI, DL, get(I4004::COPYpr), DestReg)
-      .addReg(SrcReg, getKillRegState(KillSrc));
+  copyPair(DestReg, SrcReg);
 }
 
 void I4004InstrInfo::storeRegToStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
     bool isKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,
     MachineInstr::MIFlag Flags) const {
-  // Spills to 4002 RAM are a later milestone (abi.md sec.2.1 imaginary regs).
-  // Emitting nothing would miscompile; report so the limitation is explicit.
-  report_fatal_error("I4004: register spilling to 4002 RAM is not yet "
-                     "implemented (milestone: imaginary-register frame)");
+  // Spill to the 4002-RAM spill region (abi.md sec.2.1). The frame index is
+  // carried on a SPILL pseudo and turned into a concrete RAM address by the
+  // post-RA expander (I4004ExpandPseudos). DR16 spills as two i8 halves.
+  DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
+  if (I4004::DR16RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, MI, DL, get(I4004::SPILL16))
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addFrameIndex(FrameIndex);
+  } else {
+    BuildMI(MBB, MI, DL, get(I4004::SPILL8))
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addFrameIndex(FrameIndex);
+  }
 }
 
 void I4004InstrInfo::loadRegFromStackSlot(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
     int FrameIndex, const TargetRegisterClass *RC, Register VReg,
     unsigned SubReg, MachineInstr::MIFlag Flags) const {
-  report_fatal_error("I4004: register reloading from 4002 RAM is not yet "
-                     "implemented (milestone: imaginary-register frame)");
+  DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
+  if (I4004::DR16RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, MI, DL, get(I4004::RELOAD16), DestReg)
+        .addFrameIndex(FrameIndex);
+  } else {
+    BuildMI(MBB, MI, DL, get(I4004::RELOAD8), DestReg).addFrameIndex(FrameIndex);
+  }
 }

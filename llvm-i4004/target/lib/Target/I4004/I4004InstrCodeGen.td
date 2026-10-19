@@ -40,11 +40,12 @@ def SDT_I4004BrCC : SDTypeProfile<0, 4,
 def i4004_brcc : SDNode<"I4004ISD::BRCC", SDT_I4004BrCC,
                         [SDNPHasChain]>;
 
-// select_cc: (selectcc lhs(i8), rhs(i8), tval, fval, ccimm). The compare is on
-// i8 (the firmware compares bytes); the selected values match the result type.
+// select_cc: (selectcc lhs, rhs, tval, fval, ccimm). lhs/rhs are the compare
+// operands (i8 or i16, same type); tval/fval match the result type. The custom
+// inserter picks BRCCi8/BRCCi16 from the compare width.
 def SDT_I4004SelCC : SDTypeProfile<1, 5,
-    [SDTCisSameAs<0, 3>, SDTCisSameAs<3, 4>, SDTCisVT<1, i8>,
-     SDTCisVT<2, i8>, SDTCisVT<5, i8>]>;
+    [SDTCisSameAs<0, 3>, SDTCisSameAs<3, 4>, SDTCisSameAs<1, 2>,
+     SDTCisVT<5, i8>]>;
 def i4004_selectcc : SDNode<"I4004ISD::SELECT_CC", SDT_I4004SelCC>;
 
 // Call-frame setup/destroy chains (required even with a reserved call frame).
@@ -82,6 +83,17 @@ def MOVi16 : Pseudo<(outs DR16:$dst), (ins i16imm:$imm),
 // Register copy between pairs (expands to two LD/XCH nibble moves). Used by
 // copyPhysReg; also matched for plain i8 copies.
 def COPYpr : Pseudo<(outs PR8:$dst), (ins PR8:$src), []>;
+
+// Spill / reload to the 4002-RAM spill region (abi.md sec.2.1). The frame index
+// is resolved to a concrete RAM char offset by the post-RA expander.
+let mayStore = 1, Defs = [ACC, CY, P0] in {
+  def SPILL8  : Pseudo<(outs), (ins PR8:$src, i16imm:$fi), []>;
+  def SPILL16 : Pseudo<(outs), (ins DR16:$src, i16imm:$fi), []>;
+}
+let mayLoad = 1, Defs = [ACC, CY, P0] in {
+  def RELOAD8  : Pseudo<(outs PR8:$dst), (ins i16imm:$fi), []>;
+  def RELOAD16 : Pseudo<(outs DR16:$dst), (ins i16imm:$fi), []>;
+}
 
 // 8-bit add/sub, result in $dst (expands to CLC;LD;ADD;XCH nibble sequences
 // with carry propagation across the two nibbles).
@@ -183,15 +195,26 @@ def : Pat<(i4004_brcc DR16:$lhs, DR16:$rhs, timm:$cc, bb:$dst),
 // I4004TargetLowering::EmitInstrWithCustomInserter. $lhs/$rhs feed the compare,
 // $cc the condition; $t is chosen when the condition holds, else $f.
 let usesCustomInserter = 1 in {
-  def SELECTi8  : Pseudo<(outs PR8:$dst),
+  // Naming: SELECT_c<cmpWidth>_v<valWidth>.
+  def SELECT_c8_v8   : Pseudo<(outs PR8:$dst),
                          (ins PR8:$lhs, PR8:$rhs, i8imm:$cc, PR8:$t, PR8:$f),
                          [(set PR8:$dst,
                            (i4004_selectcc PR8:$lhs, PR8:$rhs, PR8:$t, PR8:$f,
                                            timm:$cc))]>;
-  def SELECTi16 : Pseudo<(outs DR16:$dst),
+  def SELECT_c8_v16  : Pseudo<(outs DR16:$dst),
                          (ins PR8:$lhs, PR8:$rhs, i8imm:$cc, DR16:$t, DR16:$f),
                          [(set DR16:$dst,
-                           (i4004_selectcc PR8:$lhs, PR8:$rhs, DR16:$t,
+                           (i4004_selectcc PR8:$lhs, PR8:$rhs, DR16:$t, DR16:$f,
+                                           timm:$cc))]>;
+  def SELECT_c16_v8  : Pseudo<(outs PR8:$dst),
+                         (ins DR16:$lhs, DR16:$rhs, i8imm:$cc, PR8:$t, PR8:$f),
+                         [(set PR8:$dst,
+                           (i4004_selectcc DR16:$lhs, DR16:$rhs, PR8:$t, PR8:$f,
+                                           timm:$cc))]>;
+  def SELECT_c16_v16 : Pseudo<(outs DR16:$dst),
+                         (ins DR16:$lhs, DR16:$rhs, i8imm:$cc, DR16:$t, DR16:$f),
+                         [(set DR16:$dst,
+                           (i4004_selectcc DR16:$lhs, DR16:$rhs, DR16:$t,
                                            DR16:$f, timm:$cc))]>;
 }
 

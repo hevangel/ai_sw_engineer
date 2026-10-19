@@ -422,15 +422,15 @@ I4004TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   Register TVal = MI.getOperand(4).getReg();
   Register FVal = MI.getOperand(5).getReg();
 
-  const bool Wide = (MI.getOpcode() == I4004::SELECTi16);
-  (void)Wide;
-  // The compare operands are always i8 (the firmware compares bytes), so the
-  // branch is BRCCi8 regardless of the selected value width.
-  unsigned BrOpc = I4004::BRCCi8;
-
+  // Pick the compare width from the LHS operand's register class: a DR16 (i16)
+  // compare uses BRCCi16, otherwise BRCCi8. Operands are virtual at this stage.
+  MachineFunction *MF = BB->getParent();
+  const MachineRegisterInfo &MRI = MF->getRegInfo();
+  const TargetRegisterClass *LhsRC = MRI.getRegClass(Lhs);
+  bool CmpWide = I4004::DR16RegClass.hasSubClassEq(LhsRC);
+  unsigned BrOpc = CmpWide ? I4004::BRCCi16 : I4004::BRCCi8;
   // thisMBB: compare lhs,rhs; if cc true branch to sinkMBB taking TVal (via the
   // PHI's thisMBB edge), else fall through to copyMBB.
-  MachineFunction *MF = BB->getParent();
   MachineBasicBlock *ThisMBB = BB;
   MachineBasicBlock *CopyMBB = MF->CreateMachineBasicBlock(LLVM_BB);
   MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVM_BB);

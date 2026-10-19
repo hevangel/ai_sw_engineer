@@ -246,14 +246,21 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
 
   case I4004::ZEXT8TO16:
   case I4004::ANYEXT8TO16: {
-    // dst(i16) low sub-pair = x (i8); high sub-pair = 0 (zext) or undef.
+    // dst(i16) low sub-pair = x (i8); high sub-pair = 0.
     Register Dst = MI.getOperand(0).getReg();
     Register X = MI.getOperand(1).getReg();
     Register DLoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
     Register DHiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
-    // low pair = COPYpr x
-    BuildMI(MBB, MI, DL, TII->get(I4004::COPYpr), DLoP).addReg(X);
-    // high pair = 0 (FIM Phi, 0) for zext; anyext still zeroes for determinism.
+    // low pair = x, via real nibble moves (LD/XCH).
+    Register DHi = TRI->getSubReg(DLoP, I4004::sub_hi);
+    Register DLo = TRI->getSubReg(DLoP, I4004::sub_lo);
+    Register XHi = TRI->getSubReg(X, I4004::sub_hi);
+    Register XLo = TRI->getSubReg(X, I4004::sub_lo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(XHi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DHi, RegState::Define);
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(XLo);
+    BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(DLo, RegState::Define);
+    // high pair = 0.
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(DHiP).addImm(0);
     MI.eraseFromParent();
     return true;
@@ -389,6 +396,69 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     emitBrCC(MBB, MI, /*Wide=*/true);
     MI.eraseFromParent();
     return true;
+
+  case I4004::SPILL8:
+  case I4004::SPILL16: {
+    // RAM[spillslot] = src. Operand1 is the resolved char-base immediate.
+    Register Src = MI.getOperand(0).getReg();
+    int64_t Base = MI.getOperand(1).getImm() & 0xFF;
+    const bool Wide = (MI.getOpcode() == I4004::SPILL16);
+    // Collect the byte-pairs to store (1 for i8, 2 for i16), each as {hi,lo}.
+    SmallVector<Register, 2> Pairs;
+    if (Wide) {
+      Pairs.push_back(TRI->getSubReg(Src, I4004::sub_pair_lo));
+      Pairs.push_back(TRI->getSubReg(Src, I4004::sub_pair_hi));
+    } else {
+      Pairs.push_back(Src);
+    }
+    int64_t Char = Base;
+    for (Register P : Pairs) {
+      Register PHi = TRI->getSubReg(P, I4004::sub_hi);
+      Register PLo = TRI->getSubReg(P, I4004::sub_lo);
+      // low nibble -> Char, high nibble -> Char+1.
+      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Char & 0xFF);
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PLo);
+      BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm((Char + 1) & 0xFF);
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(PHi);
+      BuildMI(MBB, MI, DL, TII->get(I4004::WRM));
+      Char += 2;
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case I4004::RELOAD8:
+  case I4004::RELOAD16: {
+    Register Dst = MI.getOperand(0).getReg();
+    int64_t Base = MI.getOperand(1).getImm() & 0xFF;
+    const bool Wide = (MI.getOpcode() == I4004::RELOAD16);
+    SmallVector<Register, 2> Pairs;
+    if (Wide) {
+      Pairs.push_back(TRI->getSubReg(Dst, I4004::sub_pair_lo));
+      Pairs.push_back(TRI->getSubReg(Dst, I4004::sub_pair_hi));
+    } else {
+      Pairs.push_back(Dst);
+    }
+    int64_t Char = Base;
+    for (Register P : Pairs) {
+      Register PHi = TRI->getSubReg(P, I4004::sub_hi);
+      Register PLo = TRI->getSubReg(P, I4004::sub_lo);
+      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm(Char & 0xFF);
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
+      BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
+      BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(PLo, RegState::Define);
+      BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(I4004::P0).addImm((Char + 1) & 0xFF);
+      BuildMI(MBB, MI, DL, TII->get(I4004::SRC)).addReg(I4004::P0);
+      BuildMI(MBB, MI, DL, TII->get(I4004::RDM));
+      BuildMI(MBB, MI, DL, TII->get(I4004::XCH)).addReg(PHi, RegState::Define);
+      Char += 2;
+    }
+    MI.eraseFromParent();
+    return true;
+  }
   }
 }
 

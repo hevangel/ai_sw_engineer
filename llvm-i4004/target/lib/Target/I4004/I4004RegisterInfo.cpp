@@ -55,16 +55,28 @@ BitVector I4004RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                             int SPAdj, unsigned FIOperandNum,
                                             RegScavenger *RS) const {
-  // No real stack frames in the milestone-3b backbone (leaf functions only,
-  // abi.md sec.4.4 hardware-stack path). A frame index reaching here means a
-  // spill the backbone cannot yet place in 4002 RAM; replace the FI operand
-  // with the soft-SP register and a zero offset so the verifier is satisfied
-  // and the limitation surfaces as wrong runtime behavior, not a crash, until
-  // the RAM frame lowering lands.
   MachineInstr &MI = *II;
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   MachineFunction &MF = *MI.getParent()->getParent();
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex);
+
+  // SPILL/RELOAD carry the slot as a frame index in a dedicated operand; turn
+  // it into an absolute 4002-RAM char offset (spill region base + byte offset,
+  // 2 chars per byte cell). The spill region is RAM chip0 reg3 (chars 0..15),
+  // giving 8 byte-cells (abi.md sec.2.1 reserves chip0/reg0 for the imaginary
+  // file; we use reg3 for compiler spills). Base char = 0x30 | char (chip0
+  // reg3 => SRC high nibble bits [5:4]=3). Each slot is a byte = 2 chars.
+  unsigned Op = MI.getOpcode();
+  if (Op == I4004::SPILL8 || Op == I4004::SPILL16 || Op == I4004::RELOAD8 ||
+      Op == I4004::RELOAD16) {
+    int Slot = Offset < 0 ? -Offset : Offset; // normalize
+    int CharBase = 0x30 + (Slot * 2);          // reg3, 2 chars/byte
+    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
+    return false;
+  }
+
+  // Generic case (none emitted by the backbone yet): point the FI operand at
+  // the soft-SP register with the object offset.
   MI.getOperand(FIOperandNum).ChangeToRegister(I4004::P7, false);
   if (MI.getNumOperands() > FIOperandNum + 1 &&
       MI.getOperand(FIOperandNum + 1).isImm())

@@ -115,10 +115,10 @@ def GR4 : RegisterClass<"I4004", [i8], 8, (sequence "R%u", 0, 15)>;
 def PR8 : RegisterClass<"I4004", [i8], 8, (sequence "P%u", 0, 7)>;
 
 // 16-bit double-pairs: the i16 / pointer class (AVR DREGS analog). D0 contains
-// the reserved P0 and D3 contains the reserved P7, so the allocatable i16 pool
-// is effectively D1 (P2:P3) and D2 (P4:P5); the allocator still sees all four
-// but will not pick a reserved sub-pair.
-def DR16 : RegisterClass<"I4004", [i16], 8, (sequence "D%u", 0, 3)>;
+// the reserved P0 and D3 contains the reserved P7, so only D1 (P2:P3) and D2
+// (P4:P5) are allocatable. D0/D3 are still defined (for the sub-register
+// structure and fixed ABI uses) but kept out of the allocation order.
+def DR16 : RegisterClass<"I4004", [i16], 8, (add D1, D2)>;
 
 // Fixed single-register classes (so TableGen can reference ACC/CY as implicit
 // operands and the printer/parser know their class).
