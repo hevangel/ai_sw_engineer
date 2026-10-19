@@ -16,6 +16,7 @@ add_public_tablegen_target(I4004CommonTableGen)
 
 add_llvm_target(I4004CodeGen
   I4004AsmPrinter.cpp
+  I4004BranchRelax.cpp
   I4004ExpandPseudos.cpp
   I4004FrameLowering.cpp
   I4004ISelDAGToDAG.cpp

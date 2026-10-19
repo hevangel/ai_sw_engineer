@@ -36,9 +36,14 @@ FunctionPass *createI4004ExpandPseudosPass();
 // largest single source of code size on this target).
 FunctionPass *createI4004PeepholePass();
 
+// Far-branch relaxation: makes JCN/ISZ page-independent (JCN !cc,.L; JUN Dest)
+// so a function may span 256-byte ROM pages.
+FunctionPass *createI4004BranchRelaxPass();
+
 void initializeI4004DAGToDAGISelLegacyPass(PassRegistry &);
 void initializeI4004ExpandPseudosPass(PassRegistry &);
 void initializeI4004PeepholePass(PassRegistry &);
+void initializeI4004BranchRelaxPass(PassRegistry &);
 
 } // namespace llvm
 

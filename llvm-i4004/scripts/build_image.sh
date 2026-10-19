@@ -73,9 +73,11 @@ objs+=("$out_dir/$software.o")
 
 # 3. link + page-pack into a ROM image.
 status "i4004_pack: link $((${#objs[@]})) objects -> $out_dir/$software.bin (max $maxrom)"
+# No --pad-pages: I4004BranchRelax made every JCN/ISZ page-independent (JCN !cc,
+# .L; JUN Dest), so functions may freely span 256-byte ROM pages.
 timeout 120 python3 "$root/asm/i4004_pack.py" "${objs[@]}" \
     -o "$out_dir/$software.bin" -m "$out_dir/$software.map" \
-    --linker-script "$link" --max "$maxrom" --pad-pages --pad "$maxrom"
+    --linker-script "$link" --max "$maxrom" --pad "$maxrom"
 
 size=$(wc -c < "$out_dir/$software.bin" | tr -d ' ')
 status "image: $out_dir/$software.bin = $size bytes (budget $maxrom)"
