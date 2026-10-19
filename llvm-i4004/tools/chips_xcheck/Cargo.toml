@@ -1,0 +1,19 @@
+[package]
+name = "chips_xcheck"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Differential cross-check: execute every i4004 encoding on the external/chips emulator and verify our llvm-mc disassembly predicts the observed effect. Not shipped; not part of any target crate. Depends on external/chips by path at build time; never copies its code."
+
+# external/chips has NO stated package license on its own; we depend on it by
+# path and read/run it only. This crate is a test tool, never published.
+[dependencies]
+chips = { path = "../../../external/chips" }
+arbitrary-int = { version = "1.2.6", features = ["num-traits"] }
+
+[[bin]]
+name = "chips_xcheck"
+path = "src/main.rs"
+
+[profile.dev]
+panic = "unwind"

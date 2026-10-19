@@ -6,7 +6,7 @@
 | Word / address width | 4-bit data, 8-bit instructions (1–2 bytes), 12-bit ROM address |
 | Strategy | new experimental LLVM target on `llvm/llvm-project` (no existing backend) |
 | Rust target | `rust/i4004-none.json` — data-layout `e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8` |
-| Status | **milestone 3a complete** — MC layer + **disassembler** on LLVM 23.1.3. `llvm-mc -triple=i4004 -show-encoding` assembles all 46 instructions to the `isa.md` opcode table; `llvm-mc --disassemble` / `llvm-objdump -d` decode them back (asm->disasm->re-asm is byte-identical); ELF writer emits `e_machine 0x4004` + `R_I4004_*` (incl. `R_I4004_FIN8`). Independently cross-checked against `external/chips` and the ai_hw_engineer RTL (no disagreements). 16/16 MC+disasm tests pass. Codegen is next (milestone 3b, branch `llvm/i4004-isel`). See [report](report/final_report.md). |
+| Status | **milestone 3a complete** — MC layer + **disassembler** on LLVM 23.1.3. `llvm-mc -triple=i4004 -show-encoding` assembles all 46 instructions to the `isa.md` opcode table; `llvm-mc --disassemble` / `llvm-objdump -d` decode them back (asm->disasm->re-asm is byte-identical); ELF writer emits `e_machine 0x4004` + `R_I4004_*` (incl. `R_I4004_FIN8`). Differentially cross-checked by **executing every encoding on `external/chips`** and verifying our disassembly (mnemonic + operands) predicts the observed effect — no disagreements; mutation-tested. The ai_hw_engineer RTL half is not yet run (no Verilog simulator available). 16/16 MC+disasm tests pass. Codegen is next (milestone 3b, branch `llvm/i4004-isel`). See [report](report/final_report.md). |
 
 ## Strategy
 

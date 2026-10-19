@@ -61,6 +61,34 @@ The `tests/mc/` fixture is generated directly from the `isa.md` tables — one
 - One assertion per **two-word** instruction that the second word is emitted and
   carries the right `R_I4004_*` fixup.
 
+## Milestone-3a status -- disassembler + differential cross-check DONE
+
+Implemented: the disassembler (`tests/mc/disasm/`, 16/16 lit pass incl.
+byte-identical round trip) and a DIFFERENTIAL cross-check that EXECUTES every
+encoding on `external/chips` and verifies our `llvm-mc --disassemble` output
+(mnemonic + operands) predicts the observed effect.
+
+- Tool: `tools/chips_xcheck` (Rust; depends on `external/chips` by path, read &
+  run only). Driver: `scripts/crosscheck_disasm.py`; wired into
+  `scripts/run_tests.sh`.
+- Oracle = chips EXECUTION (not a hand table). 336 data/ALU/IO assertions +
+  operand-field sweeps (all registers, immediates, FIM pairs) + 17
+  control-transfer landings (JUN/JMS/JCN matrix/ISZ/JIN). No disagreements.
+- Mutation-tested: `MUTATE=swap_acc` and `MUTATE=reg_off1` both produce the
+  expected findings, so the check can fail.
+- Findings logged: 0xFF panics on chips (vs spec "NOP"); JCN TEST-pin polarity
+  differs from `isa.md` §4. Both in `report/final_report.md`.
+
+**Owed — RTL half of the cross-check.** AGENTS.md wants chips-vs-RTL
+disagreements treated as findings. The `ai_hw_engineer` 4004 RTL
+(`design/intel_4004/src/intel_4004.sv`) is present but **cannot be run here**:
+no `verilator`/`iverilog` in the `ai-sw-engineer` container or on the host, and
+no 4004 ISS / prebuilt sim. To close this: add a Verilog simulator to the
+container image, build the RTL, and extend `tools/chips_xcheck` with a second
+executor backend that drives the RTL testbench with the same encodings + states
+and diffs chips vs RTL. Until then chips (MAME-validated upstream) is the only
+executed oracle.
+
 ## Milestone-2/3 MC error + codegen lit tests (per pattern)
 
 MC error tests (`llvm-mc` must fail with the spec diagnostic):

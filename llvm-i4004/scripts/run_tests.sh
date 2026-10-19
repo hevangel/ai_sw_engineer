@@ -12,12 +12,26 @@ BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$BACKEND_DIR/install/bin"
 LIT="${LIT:-lit}"
 
+# Prefer the installed tools; fall back to the shared LLVM build volume used by
+# scripts/build_llvm.sh (ai-sw-llvm-build mounted at /llvm-build) when the repo
+# has no local install/ yet.
+if [[ ! -x $BIN/llvm-mc ]]; then
+  if [[ -x /llvm-build/llvm-obj/bin/llvm-mc ]]; then
+    BIN="/llvm-build/llvm-obj/bin"
+  fi
+fi
+
 [[ -x $BIN/llvm-mc ]] || {
-  echo "ERROR: $BIN/llvm-mc missing; run scripts/build_llvm.sh first" >&2
+  echo "ERROR: llvm-mc not found in $BACKEND_DIR/install/bin or " \
+       "/llvm-build/llvm-obj/bin; run scripts/build_llvm.sh first" >&2
   exit 1
 }
 
 export PATH="$BIN:$PATH"
 echo "==> llvm-mc: $(llvm-mc --version | head -n1)"
 echo "==> running lit on tests/mc"
-exec "$LIT" -v "$BACKEND_DIR/tests/mc"
+"$LIT" -v "$BACKEND_DIR/tests/mc"
+
+echo
+echo "==> differential disassembler cross-check (executes every encoding on external/chips)"
+LLVM_MC="$BIN/llvm-mc" "$BACKEND_DIR/scripts/crosscheck_disasm.py"
