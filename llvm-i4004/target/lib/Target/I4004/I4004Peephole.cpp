@@ -35,10 +35,13 @@
 #include "I4004RegisterInfo.h"
 #include "I4004Subtarget.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include <string>
 
 using namespace llvm;
 
@@ -229,6 +232,169 @@ bool I4004Peephole::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
+
+  // Second pass: dead-DCL elimination. The DCL-banked frame scheme
+  // (I4004ExpandPseudos) brackets EVERY spill/reload with
+  //   FIM __framebank; LD; DCL        ; SRC; <I/O> ;  LDM 0; DCL   (reset)
+  // so two adjacent frame accesses emit `... <I/O>; LDM 0; DCL; FIM; LD; DCL;
+  // SRC; <I/O> ...`. The reset `DCL` (to bank 0) is then IMMEDIATELY overwritten
+  // by the next bracket's select `DCL` with NO RAM I/O in between -- its bank-0
+  // selection is never observed, so the reset DCL is DEAD. Removing it (and the
+  // symmetric redundancy) is what keeps a spill-heavy function (e.g.
+  // bcd::isqrt_digits, 69 brackets) from bloating past a ROM bank.
+  //
+  // Rule: a `DCL` is dead iff, scanning forward in the SAME block, the next
+  // instruction that matters -- a RAM I/O (any 4002 character/port op, which is
+  // what a DCL bank selection exists to gate), OR a control transfer
+  // (JMS/JUN/JIN/BBL/RET/call: the bank MUST be correct before control leaves,
+  // e.g. the soft-call push assumes bank 0), OR the block end -- is reached
+  // THROUGH another `DCL`. I.e. another DCL executes first, overwriting the
+  // bank with no I/O or exit observing this one. Then this DCL has no effect and
+  // is removed. Conservative: anything that is a RAM I/O or a barrier BEFORE the
+  // next DCL keeps this DCL live.
+  auto isRamIO = [](unsigned Op) {
+    switch (Op) {
+    case I4004::WRM: case I4004::WMP: case I4004::WRR: case I4004::WPM:
+    case I4004::WR0: case I4004::WR1: case I4004::WR2: case I4004::WR3:
+    case I4004::SBM: case I4004::RDM: case I4004::RDR: case I4004::ADM:
+    case I4004::RD0: case I4004::RD1: case I4004::RD2: case I4004::RD3:
+      return true;
+    default:
+      return false;
+    }
+  };
+  auto isBarrier = [&](MachineInstr &MI) {
+    unsigned Op = MI.getOpcode();
+    return Op == I4004::JMS || Op == I4004::JUN || Op == I4004::JIN ||
+           Op == I4004::BBL || Op == I4004::RETpseudo || MI.isCall() ||
+           MI.isInlineAsm() || MI.isTerminator();
+  };
+
+  // Pass 2a: dead-reset elimination. A `DCL` whose bank selection is overwritten
+  // by a later `DCL` before any RAM I/O / control transfer / block end is dead.
+  for (MachineBasicBlock &MBB : MF) {
+    for (auto It = MBB.begin(), E = MBB.end(); It != E;) {
+      MachineInstr &MI = *It++;
+      if (MI.getOpcode() != I4004::DCL)
+        continue;
+      bool dead = false;
+      for (auto J = It; J != E; ++J) {
+        if (J->getOpcode() == I4004::DCL) { dead = true; break; }
+        if (isRamIO(J->getOpcode()) || isBarrier(*J)) { dead = false; break; }
+      }
+      if (dead) { MI.eraseFromParent(); Changed = true; }
+    }
+  }
+
+  // Pass 2b: redundant same-bank DCL elimination. After 2a removed the dead
+  // reset DCLs, two frame accesses to the SAME function's frame leave a
+  // `FIM __framebank_<fn>; LD r1; DCL` that re-selects the bank ALREADY active
+  // (a RAM I/O does not change the bank, and within one function __framebank is
+  // a single constant symbol). Track the symbolic bank the hardware currently
+  // holds; drop a `DCL` that re-selects it, plus its now-dead `FIM __framebank;
+  // LD` setup. Barriers reset the known bank to Unknown (a callee may DCL). An
+  // integer `LDM k; DCL` and a symbolic `FIM sym; LD; DCL` are both tracked, so
+  // this also removes a redundant `LDM 0; DCL` when bank 0 is already current.
+  //
+  // Bank value is Unknown, Int(k), or Sym(externalSymbolName). Two Sym values
+  // are equal iff the symbol names match (same __framebank_<fn> -> same bank);
+  // an Int and a Sym are never assumed equal (a frame bank is link-time).
+  enum class BK { Unknown, Int, Sym };
+  for (MachineBasicBlock &MBB : MF) {
+    BK bkKind = BK::Unknown;
+    int64_t bkInt = 0;
+    std::string bkSym;
+    // ACC-pending value (set by LDM / by LD of a pair FIM'd with a symbol).
+    BK accKind = BK::Unknown;
+    int64_t accInt = 0;
+    std::string accSym;
+    // Which pair (if any) currently holds a __framebank_ symbol, and the name.
+    Register symPair;
+    std::string symPairName;
+    // The DCL setup instructions to erase if the next DCL proves redundant:
+    // the FIM __framebank and the LD that fed ACC. Tracked as the window since
+    // the last barrier / I/O.
+    SmallVector<MachineInstr *, 2> setup;
+
+    auto clearAll = [&]() {
+      bkKind = BK::Unknown; accKind = BK::Unknown;
+      symPair = Register(); symPairName.clear(); setup.clear();
+    };
+
+    for (auto It = MBB.begin(), E = MBB.end(); It != E;) {
+      MachineInstr &MI = *It++;
+      unsigned Op = MI.getOpcode();
+
+      if (isBarrier(MI)) { clearAll(); continue; }
+
+      if (Op == I4004::FIM) {
+        Register Pair = MI.getOperand(0).getReg();
+        Register PR = pairOf(Pair, TRI);
+        const MachineOperand &Src = MI.getOperand(1);
+        if (PR && Src.isSymbol() && StringRef(Src.getSymbolName())
+                                        .starts_with("__framebank_")) {
+          symPair = PR; symPairName = Src.getSymbolName();
+          setup.clear(); setup.push_back(&MI);
+        } else if (PR) {
+          // FIM of some other value: if it targets the sym pair, it is no longer
+          // a framebank handle.
+          if (symPair == PR) { symPair = Register(); symPairName.clear(); }
+        }
+        continue;
+      }
+      if (Op == I4004::LDM) {
+        accKind = BK::Int; accInt = MI.getOperand(0).getImm() & 0xF;
+        setup.clear(); setup.push_back(&MI);
+        continue;
+      }
+      if (Op == I4004::LD) {
+        Register R = MI.getOperand(0).getReg();
+        Register PR = pairOf(R, TRI);
+        if (symPair && PR == symPair) {
+          accKind = BK::Sym; accSym = symPairName;
+          setup.push_back(&MI);     // LD completes the symbolic bank setup
+        } else {
+          accKind = BK::Unknown; setup.clear();
+        }
+        continue;
+      }
+      if (Op == I4004::DCL) {
+        bool redundant =
+            (accKind == BK::Int && bkKind == BK::Int && accInt == bkInt) ||
+            (accKind == BK::Sym && bkKind == BK::Sym && accSym == bkSym);
+        if (redundant) {
+          // Drop this DCL and its dead setup (FIM __framebank / LDM / LD).
+          for (MachineInstr *S : setup) S->eraseFromParent();
+          MI.eraseFromParent();
+          Changed = true;
+          setup.clear();
+          // bank unchanged; accKind consumed.
+          accKind = BK::Unknown;
+          continue;
+        }
+        // Commit the new bank.
+        bkKind = accKind;
+        if (accKind == BK::Int) bkInt = accInt;
+        else if (accKind == BK::Sym) bkSym = accSym;
+        accKind = BK::Unknown; setup.clear();
+        continue;
+      }
+      // RAM I/O does NOT change the bank; it only means a following same-bank
+      // DCL is still "redundant". But it DOES consume the setup window (a DCL
+      // after I/O must re-run its own setup). Keep bkKind.
+      if (isRamIO(Op)) { accKind = BK::Unknown; setup.clear(); continue; }
+      // SRC and other ops: leave bank tracking; but a def of the sym pair's
+      // sub-registers invalidates the symbolic handle.
+      for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
+          if (symPair && pairOf(MO.getReg(), TRI) == symPair) {
+            symPair = Register(); symPairName.clear();
+          }
+        }
+      }
+    }
+  }
+
   return Changed;
 }
 
