@@ -68,7 +68,7 @@ chk "flat (no --banks) still works" '[[ -f "$W/flat.bin" ]]'
 TB="--banks 2 --common-bytes 0x100 --bank-bytes 0x8"
 python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" $TB --emit-trampolines "$W/tr.s" >/dev/null 2>"$W/e5a"
 chk "emit-trampolines writes a file" '[[ -s "$W/tr.s" ]]'
-chk "trampoline generated for the cross-bank callee" 'grep -qE "__bankcall__RNvF" "$W/tr.s"'
+chk "trampoline generated for the cross-bank callee" 'grep -qE "__bankcall_[0-9a-f]+" "$W/tr.s"'
 $B/llvm-mc -triple i4004 --filetype=obj "$W/tr.s" -o "$W/tr.o" 2>"$W/e5b"
 chk "trampoline source assembles" '[[ -f "$W/tr.o" ]]'
 python3 "$PACK" "$W/common.o" "$W/fa.o" "$W/fb.o" "$W/tr.o" $TB --rewrite-cross-bank -o "$W/tr.bin" >/dev/null 2>"$W/e5c"
