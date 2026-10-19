@@ -329,23 +329,10 @@ impl Num {
 
         // Q value = quo_int (little-endian integer). The quotient value is
         //   Q * 10^qp,  qp = o.scale - self.scale - gen.
-        // The mantissa for a Num with scale `s` is Q * 10^(qp + s). We pick the
-        // final scale now:
-        //   fixed mode  -> s = frac (requested)
-        //   float mode  -> s = max(0, 13 - integer_digits_of_quotient)
-        // Find Q's most-significant index.
-        let mut q_msd = 0usize;
-        for i in (0..WIDE).rev() {
-            if quo_int[i] != 0 {
-                q_msd = i;
-                break;
-            }
-        }
-        let q_is_zero = quo_int.iter().all(|&x| x == 0);
-        // Power of the quotient's most-significant digit: q_msd + qp.
+        // assemble_quotient finds Q's most-significant index itself (the scan
+        // lives there so `divide` stays under a ROM bank).
         let qp = o.scale as i16 - self.scale as i16 - gen;
-        assemble_quotient(&quo_int, q_msd, q_is_zero, qp, frac,
-                          self.neg != o.neg)
+        assemble_quotient(&quo_int, qp, frac, self.neg != o.neg)
     }
 
     /// Round or truncate to `frac` fractional digits per the rounding switch.
@@ -408,8 +395,18 @@ impl Num {
 /// `quo_int` (MSD at index `q_msd`), quotient power `qp`, and the fixed/float
 /// `frac` mode; sign `neg`. `#[inline(never)]` to keep `divide` under a bank.
 #[inline(never)]
-fn assemble_quotient(quo_int: &[u8; WIDE], q_msd: usize, q_is_zero: bool,
-                     qp: i16, frac: Option<u8>, neg: bool) -> Option<Num> {
+fn assemble_quotient(quo_int: &[u8; WIDE], qp: i16, frac: Option<u8>,
+                     neg: bool) -> Option<Num> {
+    // Most-significant index of the little-endian integer quotient (folded in
+    // from `divide` to keep that function under a ROM bank).
+    let mut q_msd = 0usize;
+    for i in (0..WIDE).rev() {
+        if quo_int[i] != 0 {
+            q_msd = i;
+            break;
+        }
+    }
+    let q_is_zero = quo_int.iter().all(|&x| x == 0);
     let msd_power = q_msd as i16 + qp;
     let int_digits = (msd_power + 1).max(0);
     let final_frac: u8 = match frac {

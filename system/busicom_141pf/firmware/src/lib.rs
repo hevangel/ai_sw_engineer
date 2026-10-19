@@ -458,15 +458,9 @@ impl Calculator {
     /// `symbol`, and update constant-operation state. `scale_pct` scales the
     /// result for percent (divide → ×100, multiply → ÷100 already folded).
     #[inline(never)]
-    fn do_mul_div_equals<P: Printer>(
-        &mut self,
-        sw: Switches,
-        out: &mut P,
-        sym_b: SymB,
-        pct: Option<MulOp>,
-    ) -> Option<Num> {
+    fn compute_mul_div(&mut self, sw: Switches, pct: Option<MulOp>) -> Option<Num> {
         // Determine the concrete operation and whether a constant is reused.
-        let result = match self.mop {
+        match self.mop {
             MulOp::Mul => {
                 let r = self.dr.mul(&self.wr);
                 // After `=`, the multiplicand constant stays in CR (const mul).
@@ -509,7 +503,21 @@ impl Calculator {
                     Self::div_result(&self.dr, &self.wr, sw)
                 }
             }
-        };
+        }
+    }
+
+    #[inline(never)]
+    fn do_mul_div_equals<P: Printer>(
+        &mut self,
+        sw: Switches,
+        out: &mut P,
+        sym_b: SymB,
+        pct: Option<MulOp>,
+    ) -> Option<Num> {
+        // Operation selection (which product/quotient, and the const-operand
+        // bookkeeping) is extracted into its own #[inline(never)] helper so
+        // do_mul_div_equals stays under a 4004 ROM bank.
+        let result = self.compute_mul_div(sw, pct);
         let mut value = match result {
             Some(v) => v,
             None => {
