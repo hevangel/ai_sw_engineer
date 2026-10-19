@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -61,6 +62,12 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   }
   setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
+  // Sign-extend is expanded (the BCD firmware is unsigned; zext/anyext are
+  // handled by pseudos). Refine if a signed consumer appears.
+  setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
+
   // i8 ALU the 4004 lacks natively -> libcalls (libi4004rt, abi.md sec.6) or
   // expand. AND/OR/XOR are expanded via nibble sequences in the post-RA pass
   // (no native bitwise ALU); here they are Expand so DAG tries the generic
@@ -90,25 +97,32 @@ I4004TargetLowering::I4004TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL, MVT::i16, LibCall);
   setOperationAction(ISD::SRA, MVT::i16, LibCall);
 
-  // AND/OR/XOR: the 4004 has no native bitwise ALU. Expand so the DAG breaks
-  // them down; the actual nibble-table / libcall lowering is a later step.
+  // AND/OR/XOR: the 4004 has no native bitwise ALU. Custom-lower to libi4004rt
+  // helpers (__and/__or/__xor qi3/hi3). The runtime agent provides these; names
+  // follow abi.md sec.6's helper convention.
   for (MVT VT : {MVT::i8, MVT::i16}) {
-    setOperationAction(ISD::AND, VT, Expand);
-    setOperationAction(ISD::OR, VT, Expand);
-    setOperationAction(ISD::XOR, VT, Expand);
+    setOperationAction(ISD::AND, VT, Custom);
+    setOperationAction(ISD::OR, VT, Custom);
+    setOperationAction(ISD::XOR, VT, Custom);
   }
 
   setMinFunctionAlignment(Align(1));
   setPrefFunctionAlignment(Align(1));
 
-  // Control flow (this increment): unconditional branch works via the BR
-  // pseudo. Compares/conditional branches are Expand here and lowered to the
-  // 4004's ACC==0 / CY test in the next increment (SETCC/BR_CC custom).
-  setOperationAction(ISD::BR_CC, MVT::i8, Expand);
-  setOperationAction(ISD::BR_CC, MVT::i16, Expand);
-  setOperationAction(ISD::SELECT_CC, MVT::i8, Expand);
-  setOperationAction(ISD::SELECT_CC, MVT::i16, Expand);
-  setOperationAction(ISD::BRCOND, MVT::Other, Legal);
+  // Control flow: unconditional branch via the BR pseudo. Compares fold into
+  // BR_CC, which we custom-lower to an I4004ISD::BRCC (SUB chain + JCN). SETCC
+  // and SELECT_CC are expanded so they funnel through BR_CC / branch selects.
+  setOperationAction(ISD::BR_CC, MVT::i8, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i16, Custom);
+  setOperationAction(ISD::SETCC, MVT::i8, Expand);
+  setOperationAction(ISD::SETCC, MVT::i16, Expand);
+  setOperationAction(ISD::SELECT, MVT::i8, Expand);
+  setOperationAction(ISD::SELECT, MVT::i16, Expand);
+  // SELECT_CC -> custom: a SELECT pseudo expanded to a CFG diamond by
+  // EmitInstrWithCustomInserter (the standard small-target pattern).
+  setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i16, Custom);
+  setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   setOperationAction(ISD::BRIND, MVT::Other, Expand);
 }
@@ -131,9 +145,95 @@ SDValue I4004TargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::BR_CC:
+    return LowerBR_CC(Op, DAG);
+  case ISD::SELECT_CC:
+    return LowerSELECT_CC(Op, DAG);
+  case ISD::AND:
+  case ISD::OR:
+  case ISD::XOR:
+    return LowerBitwise(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation lowering");
   }
+}
+
+// AND/OR/XOR -> a call into libi4004rt. i8 uses __{and,or,xor}qi3 (two i8 args,
+// i8 result); i16 uses the hi3 variants. The runtime agent implements these.
+SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
+  EVT VT = Op.getValueType();
+  const bool Wide = (VT == MVT::i16);
+  const char *Name = nullptr;
+  switch (Op.getOpcode()) {
+  case ISD::AND: Name = Wide ? "__andhi3" : "__andqi3"; break;
+  case ISD::OR:  Name = Wide ? "__orhi3"  : "__orqi3";  break;
+  case ISD::XOR: Name = Wide ? "__xorhi3" : "__xorqi3"; break;
+  default: llvm_unreachable("not a bitwise op");
+  }
+
+  SDLoc DL(Op);
+  SmallVector<SDValue, 2> Ops{Op.getOperand(0), Op.getOperand(1)};
+  SDValue Callee = DAG.getExternalSymbol(Name, getPointerTy(DAG.getDataLayout()));
+  TargetLowering::ArgListTy Args;
+  for (SDValue V : Ops) {
+    TargetLowering::ArgListEntry Entry(V, VT.getTypeForEVT(*DAG.getContext()));
+    Entry.IsZExt = true;
+    Args.push_back(Entry);
+  }
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(DL)
+      .setChain(DAG.getEntryNode())
+      .setLibCallee(CallingConv::C, VT.getTypeForEVT(*DAG.getContext()), Callee,
+                    std::move(Args));
+  return LowerCallTo(CLI).first;
+}
+
+// Map an IR CondCode to our I4004CC, swapping LHS/RHS for the strict/swapped
+// relations so only EQ/NE/ULT/UGE remain. Signed relations are approximated by
+// unsigned for the backbone (the BCD firmware is unsigned).
+static int mapCC(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
+  switch (CC) {
+  case ISD::SETEQ:                   return I4004CC::EQ;
+  case ISD::SETNE:                   return I4004CC::NE;
+  case ISD::SETULT: case ISD::SETLT: return I4004CC::ULT;
+  case ISD::SETUGE: case ISD::SETGE: return I4004CC::UGE;
+  case ISD::SETUGT: case ISD::SETGT: std::swap(LHS, RHS); return I4004CC::ULT;
+  case ISD::SETULE: case ISD::SETLE: std::swap(LHS, RHS); return I4004CC::UGE;
+  default:
+    report_fatal_error("I4004: unsupported condition code");
+  }
+}
+
+SDValue I4004TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  SDLoc DL(Op);
+
+  // Map the IR condition to our BRCC code (helper handles canonicalization).
+  int Code = mapCC(CC, LHS, RHS);
+
+  SDValue CCVal = DAG.getTargetConstant(Code, DL, MVT::i8);
+  return DAG.getNode(I4004ISD::BRCC, DL, MVT::Other, Chain, LHS, RHS, CCVal,
+                     Dest);
+}
+
+SDValue I4004TargetLowering::LowerSELECT_CC(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue TVal = Op.getOperand(2);
+  SDValue FVal = Op.getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+  SDLoc DL(Op);
+
+  int Code = mapCC(CC, LHS, RHS);
+  SDValue CCVal = DAG.getTargetConstant(Code, DL, MVT::i8);
+  // (selectcc lhs, rhs, tval, fval, cc) -> SELECT pseudo (custom inserter).
+  return DAG.getNode(I4004ISD::SELECT_CC, DL, Op.getValueType(), LHS, RHS, TVal,
+                     FVal, CCVal);
 }
 
 SDValue I4004TargetLowering::LowerGlobalAddress(SDValue Op,
@@ -301,4 +401,67 @@ SDValue I4004TargetLowering::LowerCallResult(
     InVals.push_back(Val);
   }
   return Chain;
+}
+
+//===----------------------------------------------------------------------===//
+// Custom inserter: expand SELECTi8/SELECTi16 into a compare-and-branch CFG
+// diamond with a PHI. Operands: dst = SELECT lhs, rhs, cc, tval, fval.
+//===----------------------------------------------------------------------===//
+MachineBasicBlock *
+I4004TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                                 MachineBasicBlock *BB) const {
+  const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+  const BasicBlock *LLVM_BB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Lhs = MI.getOperand(1).getReg();
+  Register Rhs = MI.getOperand(2).getReg();
+  int64_t CC = MI.getOperand(3).getImm();
+  Register TVal = MI.getOperand(4).getReg();
+  Register FVal = MI.getOperand(5).getReg();
+
+  const bool Wide = (MI.getOpcode() == I4004::SELECTi16);
+  (void)Wide;
+  // The compare operands are always i8 (the firmware compares bytes), so the
+  // branch is BRCCi8 regardless of the selected value width.
+  unsigned BrOpc = I4004::BRCCi8;
+
+  // thisMBB: compare lhs,rhs; if cc true branch to sinkMBB taking TVal (via the
+  // PHI's thisMBB edge), else fall through to copyMBB.
+  MachineFunction *MF = BB->getParent();
+  MachineBasicBlock *ThisMBB = BB;
+  MachineBasicBlock *CopyMBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MF->insert(It, CopyMBB);
+  MF->insert(It, SinkMBB);
+
+  // Move everything after MI in ThisMBB to SinkMBB.
+  SinkMBB->splice(SinkMBB->begin(), ThisMBB,
+                  std::next(MachineBasicBlock::iterator(MI)), ThisMBB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(ThisMBB);
+
+  ThisMBB->addSuccessor(CopyMBB);
+  ThisMBB->addSuccessor(SinkMBB);
+
+  // ThisMBB: BRCC lhs, rhs, cc, SinkMBB  (taken => use TVal).
+  BuildMI(ThisMBB, DL, TII.get(BrOpc))
+      .addReg(Lhs)
+      .addReg(Rhs)
+      .addImm(CC)
+      .addMBB(SinkMBB);
+
+  // CopyMBB: fall through to SinkMBB (carries FVal).
+  CopyMBB->addSuccessor(SinkMBB);
+
+  // SinkMBB: dst = PHI [TVal, ThisMBB], [FVal, CopyMBB].
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), Dst)
+      .addReg(TVal)
+      .addMBB(ThisMBB)
+      .addReg(FVal)
+      .addMBB(CopyMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
 }

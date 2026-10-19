@@ -31,6 +31,22 @@ def i4004_call : SDNode<"I4004ISD::CALL", SDT_I4004Call,
                          SDNPVariadic]>;
 def i4004_wrapper : SDNode<"I4004ISD::WRAPPER", SDT_I4004Wrap>;
 
+// Compare-and-branch: (brcc lhs, rhs, ccimm, dest). Custom-lowered from
+// ISD::BR_CC. ccimm is an i8 immediate carrying the condition code (see
+// I4004CC below). The expander does a SUB chain over lhs,rhs and a JCN keyed on
+// the condition.
+def SDT_I4004BrCC : SDTypeProfile<0, 4,
+    [SDTCisSameAs<0, 1>, SDTCisVT<2, i8>, SDTCisVT<3, OtherVT>]>;
+def i4004_brcc : SDNode<"I4004ISD::BRCC", SDT_I4004BrCC,
+                        [SDNPHasChain]>;
+
+// select_cc: (selectcc lhs(i8), rhs(i8), tval, fval, ccimm). The compare is on
+// i8 (the firmware compares bytes); the selected values match the result type.
+def SDT_I4004SelCC : SDTypeProfile<1, 5,
+    [SDTCisSameAs<0, 3>, SDTCisSameAs<3, 4>, SDTCisVT<1, i8>,
+     SDTCisVT<2, i8>, SDTCisVT<5, i8>]>;
+def i4004_selectcc : SDNode<"I4004ISD::SELECT_CC", SDT_I4004SelCC>;
+
 // Call-frame setup/destroy chains (required even with a reserved call frame).
 def SDT_I4004CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_I4004CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
@@ -58,6 +74,11 @@ let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def MOVi8 : Pseudo<(outs PR8:$dst), (ins i8imm:$imm),
                    [(set PR8:$dst, (i8 imm:$imm))]>;
 
+// Materialize a 16-bit immediate into a DR16 (expands to FIM into both pairs).
+let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in
+def MOVi16 : Pseudo<(outs DR16:$dst), (ins i16imm:$imm),
+                    [(set DR16:$dst, (i16 imm:$imm))]>;
+
 // Register copy between pairs (expands to two LD/XCH nibble moves). Used by
 // copyPhysReg; also matched for plain i8 copies.
 def COPYpr : Pseudo<(outs PR8:$dst), (ins PR8:$src), []>;
@@ -84,7 +105,34 @@ let Defs = [ACC, CY] in {
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RETpseudo : Pseudo<(outs), (ins), [(i4004_ret)]>;
 
+// Call to a known address -> JMS (hardware stack, depth <= 3; the software
+// return stack for deeper graphs is a later step). The callee is an addr12
+// symbol. Variadic to carry the argument-register uses/defs the DAG attaches.
+let isCall = 1, Uses = [P7], Defs = [ACC, CY, P0, P1, P2, P3] in {
+  def CALL : Pseudo<(outs), (ins addr12:$dst, variable_ops),
+                    [(i4004_call (i16 tglobaladdr:$dst))]>;
+}
+
 } // isPseudo
+
+// External-symbol callee (libcalls like __orhi3) uses the same JMS path.
+def : Pat<(i4004_call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
+
+//===----------------------------------------------------------------------===//
+// Extend / truncate between i8 and i16.
+//===----------------------------------------------------------------------===//
+
+// trunc i16 -> i8: take the low sub-pair.
+def : Pat<(i8 (trunc DR16:$x)), (EXTRACT_SUBREG DR16:$x, sub_pair_lo)>;
+
+// zext/anyext i8 -> i16: low sub-pair = x, high sub-pair = 0. A pseudo builds
+// the DR16 (post-RA: a COPY into the low pair + FIM 0 into the high pair).
+let isPseudo = 1, hasSideEffects = 0 in {
+  def ZEXT8TO16  : Pseudo<(outs DR16:$dst), (ins PR8:$x),
+                          [(set DR16:$dst, (i16 (zext PR8:$x)))]>;
+  def ANYEXT8TO16 : Pseudo<(outs DR16:$dst), (ins PR8:$x),
+                           [(set DR16:$dst, (i16 (anyext PR8:$x)))]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Control flow (milestone 3b: unconditional + zero/nonzero conditional).
@@ -115,6 +163,37 @@ let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
 // BRZ/BRNZ are defined above so the expander and a later custom BR_CC lowering
 // can emit them, but no isel Pat references them yet (that needs working
 // setcc, a documented later milestone).
+
+// Compare-and-branch pseudos (selected from I4004ISD::BRCC). $cc is the
+// condition-code immediate; the expander does a SUB chain and a JCN.
+let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
+    Defs = [ACC, CY] in {
+  def BRCCi8  : Pseudo<(outs), (ins PR8:$lhs, PR8:$rhs, i8imm:$cc,
+                                    brtarget:$dst), []>;
+  def BRCCi16 : Pseudo<(outs), (ins DR16:$lhs, DR16:$rhs, i8imm:$cc,
+                                    brtarget:$dst), []>;
+}
+
+def : Pat<(i4004_brcc PR8:$lhs, PR8:$rhs, timm:$cc, bb:$dst),
+          (BRCCi8 PR8:$lhs, PR8:$rhs, timm:$cc, brtarget:$dst)>;
+def : Pat<(i4004_brcc DR16:$lhs, DR16:$rhs, timm:$cc, bb:$dst),
+          (BRCCi16 DR16:$lhs, DR16:$rhs, timm:$cc, brtarget:$dst)>;
+
+// SELECT pseudos: expanded to a compare + branch CFG diamond by
+// I4004TargetLowering::EmitInstrWithCustomInserter. $lhs/$rhs feed the compare,
+// $cc the condition; $t is chosen when the condition holds, else $f.
+let usesCustomInserter = 1 in {
+  def SELECTi8  : Pseudo<(outs PR8:$dst),
+                         (ins PR8:$lhs, PR8:$rhs, i8imm:$cc, PR8:$t, PR8:$f),
+                         [(set PR8:$dst,
+                           (i4004_selectcc PR8:$lhs, PR8:$rhs, PR8:$t, PR8:$f,
+                                           timm:$cc))]>;
+  def SELECTi16 : Pseudo<(outs DR16:$dst),
+                         (ins PR8:$lhs, PR8:$rhs, i8imm:$cc, DR16:$t, DR16:$f),
+                         [(set DR16:$dst,
+                           (i4004_selectcc PR8:$lhs, PR8:$rhs, DR16:$t,
+                                           DR16:$f, timm:$cc))]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Extra selection patterns.

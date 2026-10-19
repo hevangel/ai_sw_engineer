@@ -16,6 +16,7 @@
 
 #include "I4004.h"
 #include "I4004InstrInfo.h"
+#include "I4004ISelLowering.h"
 #include "I4004Subtarget.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -53,6 +54,7 @@ private:
   void emitAddSub(MachineBasicBlock &MBB, MachineInstr &MI, unsigned AluOpc);
   void emitAddSub16(MachineBasicBlock &MBB, MachineInstr &MI, unsigned AluOpc);
   void emitCopy(MachineBasicBlock &MBB, MachineInstr &MI);
+  void emitBrCC(MachineBasicBlock &MBB, MachineInstr &MI, bool Wide);
 };
 
 } // namespace
@@ -145,6 +147,85 @@ void I4004ExpandPseudos::emitAddSub16(MachineBasicBlock &MBB, MachineInstr &MI,
   }
 }
 
+// Compare-and-branch. Operands: lhs, rhs, cc(imm), dest(MBB). EQ/NE compare
+// each nibble independently (CLC;LD;SUB;JCN Z/NZ); the relational codes do a
+// full SUB chain (CMC between nibbles) and test the final borrow in CY.
+// JCN condition nibble (isa.md sec.4): C1=invert, C2=Z(ACC==0), C3=CY. So
+// Z=0x4, NZ=0xC, CY-set=0x2, CY-clear=0xA.
+void I4004ExpandPseudos::emitBrCC(MachineBasicBlock &MBB, MachineInstr &MI,
+                                  bool Wide) {
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register Lhs = MI.getOperand(0).getReg();
+  Register Rhs = MI.getOperand(1).getReg();
+  int CC = MI.getOperand(2).getImm();
+  MachineBasicBlock *Dest = MI.getOperand(3).getMBB();
+
+  auto nibsI8 = [&](Register P) -> SmallVector<Register, 4> {
+    return {TRI->getSubReg(P, I4004::sub_lo), TRI->getSubReg(P, I4004::sub_hi)};
+  };
+  auto nibsI16 = [&](Register D) -> SmallVector<Register, 4> {
+    Register LoP = TRI->getSubReg(D, I4004::sub_pair_lo);
+    Register HiP = TRI->getSubReg(D, I4004::sub_pair_hi);
+    return {TRI->getSubReg(LoP, I4004::sub_lo),
+            TRI->getSubReg(LoP, I4004::sub_hi),
+            TRI->getSubReg(HiP, I4004::sub_lo),
+            TRI->getSubReg(HiP, I4004::sub_hi)};
+  };
+  SmallVector<Register, 4> LN = Wide ? nibsI16(Lhs) : nibsI8(Lhs);
+  SmallVector<Register, 4> RN = Wide ? nibsI16(Rhs) : nibsI8(Rhs);
+  const unsigned N = LN.size();
+
+  auto jcn = [&](int cond, MachineBasicBlock *T) {
+    BuildMI(MBB, MI, DL, TII->get(I4004::JCN)).addImm(cond).addMBB(T);
+  };
+
+  if (CC == I4004CC::EQ || CC == I4004CC::NE) {
+    // Per-nibble independent equality. NE: branch if ANY nibble differs.
+    // EQ: branch only if ALL nibbles equal -> for all but the last, a nonzero
+    // nibble means "not equal" so jump to the fall-through successor; the last
+    // uses JCN Z to dest.
+    MachineBasicBlock *FallThru = nullptr;
+    for (MachineBasicBlock *S : MBB.successors())
+      if (S != Dest)
+        FallThru = S;
+    for (unsigned i = 0; i < N; ++i) {
+      BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
+      BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LN[i]);
+      BuildMI(MBB, MI, DL, TII->get(I4004::SUB)).addReg(RN[i]);
+      if (CC == I4004CC::NE) {
+        jcn(0xC, Dest); // NZ -> this nibble differs -> a != b
+      } else { // EQ
+        if (i + 1 < N) {
+          if (FallThru)
+            jcn(0xC, FallThru); // nonzero here -> not equal -> fall through
+        } else {
+          jcn(0x4, Dest); // last nibble zero and all prior zero -> equal
+        }
+      }
+    }
+    return;
+  }
+
+  // Relational: full SUB chain, final CY = unsigned (lhs >= rhs). CMC between
+  // nibbles (same borrow-polarity fix as emitAddSub).
+  BuildMI(MBB, MI, DL, TII->get(I4004::CLC));
+  for (unsigned i = 0; i < N; ++i) {
+    BuildMI(MBB, MI, DL, TII->get(I4004::LD)).addReg(LN[i]);
+    BuildMI(MBB, MI, DL, TII->get(I4004::SUB)).addReg(RN[i]);
+    if (i + 1 < N)
+      BuildMI(MBB, MI, DL, TII->get(I4004::CMC));
+  }
+  // After the chain CY=1 means no borrow => lhs >= rhs (unsigned). UGT/ULE were
+  // canonicalized to ULT/UGE by operand swap in LowerBR_CC.
+  switch (CC) {
+  case I4004CC::UGE: jcn(0x2, Dest); break; // CY=1
+  case I4004CC::ULT: jcn(0xA, Dest); break; // CY=0 (invert|CY)
+  default:
+    report_fatal_error("I4004: unexpected BRCC relational code after "
+                       "canonicalization");
+  }
+}
+
 bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
   const DebugLoc &DL = MI.getDebugLoc();
   switch (MI.getOpcode()) {
@@ -157,11 +238,44 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     MI.eraseFromParent();
     return true;
 
+  case I4004::CALL:
+    // Call to a known address: JMS <target> (hardware stack).
+    BuildMI(MBB, MI, DL, TII->get(I4004::JMS)).add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return true;
+
+  case I4004::ZEXT8TO16:
+  case I4004::ANYEXT8TO16: {
+    // dst(i16) low sub-pair = x (i8); high sub-pair = 0 (zext) or undef.
+    Register Dst = MI.getOperand(0).getReg();
+    Register X = MI.getOperand(1).getReg();
+    Register DLoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
+    Register DHiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
+    // low pair = COPYpr x
+    BuildMI(MBB, MI, DL, TII->get(I4004::COPYpr), DLoP).addReg(X);
+    // high pair = 0 (FIM Phi, 0) for zext; anyext still zeroes for determinism.
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(DHiP).addImm(0);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case I4004::MOVi8: {
     // FIM Pdst, imm8.
     Register Dst = MI.getOperand(0).getReg();
     int64_t Imm = MI.getOperand(1).getImm() & 0xFF;
     BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(Dst).addImm(Imm);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case I4004::MOVi16: {
+    // FIM into both sub-pairs: low pair = imm[7:0], high pair = imm[15:8].
+    Register Dst = MI.getOperand(0).getReg();
+    int64_t Imm = MI.getOperand(1).getImm() & 0xFFFF;
+    Register LoP = TRI->getSubReg(Dst, I4004::sub_pair_lo);
+    Register HiP = TRI->getSubReg(Dst, I4004::sub_pair_hi);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(LoP).addImm(Imm & 0xFF);
+    BuildMI(MBB, MI, DL, TII->get(I4004::FIM)).addReg(HiP).addImm((Imm >> 8) & 0xFF);
     MI.eraseFromParent();
     return true;
   }
@@ -265,6 +379,16 @@ bool I4004ExpandPseudos::expandMI(MachineBasicBlock &MBB, MachineInstr &MI) {
     MI.eraseFromParent();
     return true;
   }
+
+  case I4004::BRCCi8:
+    emitBrCC(MBB, MI, /*Wide=*/false);
+    MI.eraseFromParent();
+    return true;
+
+  case I4004::BRCCi16:
+    emitBrCC(MBB, MI, /*Wide=*/true);
+    MI.eraseFromParent();
+    return true;
   }
 }
 
