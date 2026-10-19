@@ -357,23 +357,8 @@ impl Num {
         //
         // Long division: for position from high to low, count subtractions of
         // divisor shifted left by that position.
-        let mut quo_int = [0u8; WIDE]; // little-endian integer quotient Q
         let dividend_hi = n_digits + gen.max(0) as usize; // one past top is fine
-        let mut pos = dividend_hi; // shift of divisor (how far left)
-        loop {
-            let mut count = 0u8;
-            while count < 10 && ge_shifted(&divd, &divs, divs_hi, pos) {
-                sub_shifted(&mut divd, &divs, divs_hi, pos);
-                count += 1;
-            }
-            if pos < WIDE {
-                quo_int[pos] = count;
-            }
-            if pos == 0 {
-                break;
-            }
-            pos -= 1;
-        }
+        let mut quo_int = restoring_divide(&mut divd, &divs, divs_hi, dividend_hi);
 
         // Q value = quo_int (little-endian integer). The quotient value is
         //   Q * 10^qp,  qp = o.scale - self.scale - gen.
@@ -486,6 +471,34 @@ impl Num {
         }
         n
     }
+}
+
+/// Restoring long division: for each position from `dividend_hi` down to 0,
+/// count how many times the (shifted) divisor fits into the remaining dividend,
+/// subtracting as it goes, and record the count as the quotient digit. Returns
+/// the little-endian integer quotient. Kept `#[inline(never)]` so this nested
+/// loop stays a standalone function (it is the bulk of `divide`'s compiled
+/// size; inlined it pushed `divide` past a ROM bank).
+#[inline(never)]
+fn restoring_divide(divd: &mut [u8; WIDE], divs: &[u8; WIDE], divs_hi: usize,
+                    dividend_hi: usize) -> [u8; WIDE] {
+    let mut quo_int = [0u8; WIDE];
+    let mut pos = dividend_hi;
+    loop {
+        let mut count = 0u8;
+        while count < 10 && ge_shifted(divd, divs, divs_hi, pos) {
+            sub_shifted(divd, divs, divs_hi, pos);
+            count += 1;
+        }
+        if pos < WIDE {
+            quo_int[pos] = count;
+        }
+        if pos == 0 {
+            break;
+        }
+        pos -= 1;
+    }
+    quo_int
 }
 
 /// Compare `rem >= (div << s)` (little-endian decimal, `div_hi` = divisor top).
