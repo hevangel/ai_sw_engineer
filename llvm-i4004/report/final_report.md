@@ -27,18 +27,43 @@ The whole firmware compiles, assembles, resolves every relocation, and **passes
 the leaf-depth assertion** through the soft-call pipeline. FLAT size = **48,801
 bytes** (`.text` = 47,347 B across 62 functions). It needs banking, and the
 banked `--softcall` synthesis works (builds per-bank images with the common
-return dispatch + per-page stubs). BUT the 4004's 12-bit PC forces
-**common_bytes + bank_bytes ≤ 4096**, and:
-- the runtime + crt0 + HAL + the soft-call common page need **≈ 1,718 B** of
-  common, so the bank window is at most ≈ 2,304 B (common 0x700 + bank 0x900);
-- **2 compiled functions exceed that window**: `bcd::Num::divide` (2,401 B) and
-  `Calculator::do_mul_div_equals` (2,380 B). A function cannot straddle a bank.
+return dispatch + per-page stubs). The 4004's 12-bit PC forces
+**common_bytes + bank_bytes ≤ 4096**: the runtime + crt0 + HAL + soft-call page
+need ≈ 1,390 B of common code, so with `common 0x800 + bank 0x800` the bank
+window is 2,048 B. Four compiled functions originally exceeded a window that
+size; they were split `#[inline(never)]` (host `cargo test` stays 42/42 exact):
+`bcd::Num::divide` 2,401→1,939 (MSD scan folded into `assemble_quotient`),
+`Calculator::do_mul_div_equals` 2,380→under (extracted `compute_mul_div`),
+`driver_printer sector_masks` 2,202→under (extracted `numeric_masks`),
+`Calculator::dispatch` 2,184→under (extracted `dispatch_key`). Now 0 of 64
+functions exceed 2,048 B (largest 1,958).
 
-So a runnable banked image is gated on **splitting those 2 functions below
-~2,300 B** (firmware-shape work, the report's "Tier B"), keeping host `cargo
-test` 42/42. This is the single remaining blocker to item 5; item 6 (chips
-bank-latch runner + 42-example run) follows once an image links. Two further
-pieces are also open and documented: the cross-bank FORWARD latch switch (set
+### Item 5 — DONE: the whole firmware relinks into a banked ROM image
+`build_image.sh --board xl` with `BANKS=25 COMMON_BYTES=0x800 BANK_BYTES=0x800`
+links the whole firmware + runtime + HAL + soft-call dispatch:
+- **image size 53,248 bytes = common 0x800 (2,048) + 25 × 0x800 (2,048)**;
+- **25 banks** (the minimum; `.text` 47,567 B bin-packed into 2,048-byte windows);
+- **per-bank fill ≈ 2,040–2,048 / 2,048** (banks ~99 % full).
+The soft-call return dispatch lives once in the common region (mapped in every
+bank); every page of every bank carries the `jin p0` stub.
+
+### Item 6 — gated on the cross-bank FORWARD latch switch
+Running the 42 examples needs two more pieces, both localized:
+1. **Cross-bank forward latch (backend + packer + token).** A compiled call
+   whose callee sits in a different bank currently reaches the right PC in the
+   WRONG bank — nothing sets the ROM bank latch before the `jun`. The design:
+   grow the return token to a 4th **bank** nibble (pushed by `__push_pg` from the
+   `__cur_bank` RAM mirror), have `__soft_ret` write the latch (4001 chip-3 port,
+   `fim p0,0x30; src p0; ldm <bank>; wrr`) from that nibble on return, and have
+   the packer insert a latch-set (to the callee's bank) before each cross-bank
+   `jun` — the old `__bankcall_*` JMS trampolines are deleted.
+2. **chips_trace.rs bank reload.** The secondary runner must split the 53 KB
+   image into common + per-bank windows, start on bank 0, and on a latch write
+   (`roms[3].ports`) rebuild `roms[4..]` from the selected bank — the exact
+   pattern already proven in `llvm-i4004/rt/tests/bank_test.rs`.
+A recursion/large-frame value-spill bug in register allocation (not the
+soft-call mechanism) is also open.
+
 the latch to the callee's bank before the `jun`, restore from the token's bank
 nibble in `__soft_ret`), and a recursion/large-frame value-spill bug in
 register allocation (not the soft-call mechanism).
