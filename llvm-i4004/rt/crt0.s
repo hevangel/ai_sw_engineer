@@ -32,6 +32,16 @@ _start:
 	ldm	0
 	dcl
 
+	; -- 1b. active-bank mirror = 0 (xl bank switching). The ROM bank latch
+	; (4001 chip 3 port) resets to bank 0; the trampolines keep a RAM mirror of
+	; the active bank in char 0x0F of chip0/reg0 (memory_map.md). Clear it so a
+	; cross-bank return restores bank 0 correctly. Harmless on the stock board
+	; (no trampoline ever reads it). __bankcall_* use SRC 0x0F.
+	fim	p0, 0x0f
+	src	p0
+	ldm	0
+	wrm
+
 	; -- 2. SSP = __sstack_base --
 	fim	p7, __sstack_base
 

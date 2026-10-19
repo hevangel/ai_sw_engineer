@@ -348,11 +348,25 @@ class Linker:
         common_items = [(o, s) for (o, s) in inputs if self._is_common_fn(s.name)]
         banked_items = [(o, s) for (o, s) in inputs if not self._is_common_fn(s.name)]
 
-        # Common region: .reset first (at 0), then the rest, contiguous.
+        # Common region: .reset first (at 0), then the rest. The common region
+        # holds the HAND-WRITTEN runtime/HAL/trampoline asm, whose JCN/ISZ are
+        # page-local and are NOT touched by I4004BranchRelax (a CodeGen pass).
+        # So each common CODE section must stay whole inside one 256-byte page
+        # (like --pad-pages). The banked firmware is CodeGen-relaxed and needs no
+        # padding.
         addr = 0
         for obj, sec in common_items:
             align = max(sec.addralign, 1)
             addr = (addr + align - 1) & ~(align - 1)
+            is_code = not (sec.name == ".rodata" or sec.name.startswith(".rodata"))
+            if is_code and sec.size > 0:
+                if sec.size > PAGE:
+                    raise LinkError(
+                        f"{obj.path}:{sec.name} is {sec.size} bytes > one 256-byte "
+                        f"page; a common (runtime/trampoline) section cannot span a "
+                        f"page (its JCN/ISZ are page-local). Split it.")
+                if (addr // PAGE) != ((addr + sec.size - 1) // PAGE):
+                    addr = (addr + PAGE - 1) & ~(PAGE - 1)  # bump to next page
             sec.base = addr
             self.sec_bank[id(sec)] = -1
             self.placed.append(Placed(obj, sec, addr, -1, "rom"))
