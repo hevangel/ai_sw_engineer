@@ -1,5 +1,74 @@
 # llvm-i4004 final report
 
+## STATUS (2026-10-21) — WRAP-UP: the 42-example target run is signed off as architecturally out of reach; every verified milestone is delivered
+
+Final branch state: `wip/dcl-frames` (superset of `system/busicom_141pf-on-4004`),
+merged to `main` 2026-10-21. Sign-off log:
+`session_history/2026-10-21-option-a-trace-and-option-b-scope-signoff.md`.
+
+### What works (all execution-verified)
+
+| Component | Evidence |
+|---|---|
+| Busicom 141-PF firmware (host) | **42/42** historical manual examples byte-for-byte vs the original-ROM port trace (`tests/port_trace.rs`); port-level 42/42; 12/12 unit; fmt/clippy clean |
+| llvm-i4004 toolchain | complete custom LLVM target: MC layer (encode/disassemble/relocate), CodeGen lowering **43/43** firmware functions, lit suites **28/28** |
+| libi4004rt runtime | **1,351/1,351** chips execution tests (i8/i16 arithmetic, shifts, bitwise, memory) |
+| Soft-call convention | software return stack (8-bit SSP) beats the 3-level hardware stack; flat and cross-bank forms (bank nibble in the return token, ROM-bank latch, `__tobank` stubs) execution-verified on chips — depth-8 chains, i16 returns, latch toggling forward and back |
+| Banking | whole firmware links into a banked ROM (25 banks at item 5; **BANKS=48, 100,352 B** after branch relaxation); DCL-banked per-function RAM frames (CM-RAM banks 1–3) green; the banked-frame firmware executes end-to-end |
+| Packer (`i4004_pack.py`) | per-page `jin p0` stubs, `__soft_ret`, `__srtab`, far-thunks, and compact page-crossing branch relaxation (4-byte JCN / 6-byte ISZ inverted forms; replaced NOP padding, −559 B in `mul_div_key` alone) |
+
+### What does not work — the honest limit
+
+**The full 42-example run on the simulated target never printed.** The 48-bank
+image executes end-to-end but produces 0/42 printed rows. Three root causes
+were peeled off in turn:
+
+1. the per-page `jin p0` stub clobbering multi-page function code — **fixed**
+   (`bc2f208`);
+2. pathological NOP padding on page-crossing branches — **fixed** by the
+   relaxation above (`2cf2be9`);
+3. **confirmed final blocker**: `external/chips`' 4002 model latches SRC address
+   registers on every chip, ignoring the CM-RAM (DCL) bank line
+   (`failure_notes/2026-10-19-chips-4002-src-latch-ignores-dcl.md`). The
+   DCL-banked frames (banks 1–3) clobber the bank-0 SSP stack chip's address
+   latch, so `__soft_ret` pops corrupted tokens: the `run→scan_pass` cross-bank
+   call returns to `main`, and banks 33–42 execute 0 instructions / 0 HAL
+   calls. The authoritative ai_hw_engineer RTL gates CM-RAM correctly, but its
+   board caps at 16 × 4001 ROM = 4 KB and architecturally cannot load the
+   48-bank image, so it cannot arbitrate either.
+
+**Underlying architectural limit**: the compiled firmware is ~48 KB — about
+**11× the 4004's 4,096-byte ROM ceiling**
+(`failure_notes/2026-10-19-busicom-firmware-too-big-for-4004.md`). The banking
+machinery (far-calls, soft return stack, DCL frames, banked stubs, ROM bank
+latch) was built and proven piece by piece, but the resulting 48-bank ROM +
+4-bank RAM paging system exceeds what the MCS-4 architecture and the available
+simulators can carry. Option B (user sign-off, 2026-10-21) fixes the scope
+boundary here.
+
+**Open items, recorded not resolved**:
+
+- chips 4002 SRC-latch deviation: a faithful fix needs the CM-RAM check at
+  I/O time — either rewrite the RAM path in `chips_trace.rs` (option a) or use
+  the RTL 4002 as the exec oracle (option b); see the failure note.
+- SSP-relative per-call frames (fixes the shared spill-slot clobber under
+  recursion): diagnosed, proven on a `sumdown` test, **reverted** — the
+  firmware call graph is acyclic, so it is a latent risk only.
+- the unverified i16-bitwise-as-two-qi3-calls experiment from
+  `llvm/i4004-codegen-wip`: superseded by the verified hi3-helper
+  implementation; preserved in `main` history via an `-s ours` merge, content
+  intentionally not applied.
+
+### Sign-off
+
+Delivered and verified: host firmware 42/42 exact; complete 4004 LLVM
+toolchain; libi4004rt 1,351/1,351; banking and soft-call mechanisms proven in
+isolation on chips; 4 failure-note post-mortems and 25 session histories. The
+42-example on-target run is blocked by target architecture and simulator
+fidelity, not by an unresolved compiler defect.
+
+---
+
 ## STATUS (2026-10-19): soft-call convention done & green; whole-firmware relink BLOCKED by 2 oversized functions
 
 The software-return-stack call convention is implemented end to end and
