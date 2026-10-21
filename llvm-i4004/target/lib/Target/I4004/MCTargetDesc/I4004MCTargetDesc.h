@@ -35,6 +35,11 @@ std::unique_ptr<MCObjectTargetWriter> createI4004ELFObjectWriter(uint8_t OSABI);
 
 } // namespace llvm
 
+// Relocation specifiers for code-label operand modifiers (abi.md sec.4.4.1).
+// In its own header with no TableGen includes so files that already pull the
+// register-enum .inc (I4004InstrInfo.h) can use it without a double definition.
+#include "I4004Specifiers.h"
+
 // Defines symbolic names for I4004 registers.
 #define GET_REGINFO_ENUM
 #include "I4004GenRegisterInfo.inc"

@@ -60,6 +60,17 @@ fi
 echo "==> applying I4004 overlay"
 python3 "$BACKEND/scripts/apply_overlay.py" "$LLVM_SRC"
 
+# 2b. Force the I4004 target objects to recompile.
+# apply_overlay.py rewrites the target sources via shutil.rmtree + copytree,
+# which does NOT reliably advance file mtimes in a way ninja trusts, so an
+# incremental build SILENTLY SKIPS recompiling changed backend files (e.g.
+# I4004ExpandPseudos.cpp) -- you get an llc that relinks but still runs the OLD
+# pass. Delete the target's objects so ninja must rebuild them from the fresh
+# overlay sources. Harmless on a clean/first build (nothing to delete).
+if [[ -d "$LLVM_OBJ" ]]; then
+  find "$LLVM_OBJ" -path '*Target/I4004*' -name '*.o' -delete 2>/dev/null || true
+fi
+
 # 3. Configure + build.
 #
 # The toolchain image's bare `clang`/`clang++` (/usr/local/bin, ahead of

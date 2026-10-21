@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/IR/Function.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -29,8 +30,10 @@ I4004RegisterInfo::I4004RegisterInfo() : I4004GenRegisterInfo(I4004::P7) {}
 
 const MCPhysReg *
 I4004RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  // abi.md sec.4.3: P4, P5, P6 are callee-saved.
-  static const MCPhysReg CSR[] = {I4004::P4, I4004::P5, I4004::P6, 0};
+  // abi.md sec.4.3: P6 is the only callee-saved pair. P4:P5 (double-pair D2)
+  // is a caller-saved i16 argument/return pair (a `{ i16, ptr }` return places
+  // its second word in D2), so it is clobbered by a call, not preserved.
+  static const MCPhysReg CSR[] = {I4004::P6, 0};
   return CSR;
 }
 
@@ -60,27 +63,40 @@ bool I4004RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineFunction &MF = *MI.getParent()->getParent();
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex);
 
-  // SPILL/RELOAD carry the slot as a frame index in a dedicated operand; turn
-  // it into an absolute 4002-RAM char offset (spill region base + byte offset,
-  // 2 chars per byte cell). The spill region is RAM chip0 reg3 (chars 0..15),
-  // giving 8 byte-cells (abi.md sec.2.1 reserves chip0/reg0 for the imaginary
-  // file; we use reg3 for compiler spills). Base char = 0x30 | char (chip0
-  // reg3 => SRC high nibble bits [5:4]=3). Each slot is a byte = 2 chars.
+  // SPILL/RELOAD/LEA_FI carry the slot as a frame index. Per-function frames
+  // (abi.md 4.4, brief decision 1): convert the FI to the WITHIN-FRAME char
+  // offset. I4004ExpandPseudos emits the access against the external symbol
+  // __frame_<fn> (RAM char base assigned per-function by the packer overlay,
+  // bank 0). The char offset is 2*(objectOffset - minObjectOffset): the REAL
+  // frame layout, so each object -- including a multi-byte alloca -- occupies
+  // its true extent and distinct objects never alias. (Using FrameIndex*2 was
+  // wrong: it ignored object SIZE, so a 68-byte Calculator alloca and the next
+  // slot differed by 2 chars, and the memset that zeroes it overran the soft
+  // stack.) The frame's TOTAL size is published separately as
+  // __framesize_<fn> (AsmPrinter) so the packer reserves the full frame.
   unsigned Op = MI.getOpcode();
   if (Op == I4004::SPILL8 || Op == I4004::SPILL16 || Op == I4004::RELOAD8 ||
-      Op == I4004::RELOAD16) {
-    int Slot = Offset < 0 ? -Offset : Offset; // normalize
-    int CharBase = 0x30 + (Slot * 2);          // reg3, 2 chars/byte
-    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
-    return false;
-  }
-  if (Op == I4004::LEA_FI) {
-    // Stack-argument / local slot area: RAM chip0 reg2 (SRC high nibble [5:4]=2
-    // => base 0x20), 2 chars per byte cell. The pointer's low byte is the SRC
-    // address; the high byte (bank/extended) is 0.
-    int Slot = Offset < 0 ? -Offset : Offset;
-    int CharBase = 0x20 + (Slot * 2);
-    MI.getOperand(FIOperandNum).ChangeToImmediate(CharBase & 0xFF);
+      Op == I4004::RELOAD16 || Op == I4004::LEA_FI) {
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    // minimum object offset across the frame (StackGrowsUp => offsets >= 0, but
+    // normalize defensively so the frame is 0-based).
+    int MinOff = 0;
+    bool First = true;
+    for (int I = MFI.getObjectIndexBegin(), E = MFI.getObjectIndexEnd();
+         I < E; ++I) {
+      if (MFI.isDeadObjectIndex(I))
+        continue;
+      int O = MFI.getObjectOffset(I);
+      if (First || O < MinOff) { MinOff = O; First = false; }
+    }
+    int CharOff = 2 * (Offset - MinOff);
+    if (getenv("I4004_FRAME_DEBUG"))
+      errs() << "FRAME " << MF.getName() << " op=" << Op
+             << " FI=" << FrameIndex << " off=" << Offset
+             << " size=" << MFI.getObjectSize(FrameIndex)
+             << " -> char " << CharOff << " (framesize_chars="
+             << (MFI.getStackSize() * 2) << ")\n";
+    MI.getOperand(FIOperandNum).ChangeToImmediate(CharOff & 0xFF);
     return false;
   }
 

@@ -23,6 +23,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/EndianStream.h"
 #include <cstdint>
 
@@ -99,7 +100,9 @@ I4004MCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
   return 0;
 }
 
-// FIM second word: 8-bit immediate (byte offset 1). Expr -> R_I4004_IMM8.
+// FIM second word: 8-bit immediate (byte offset 1). A plain expr -> IMM8; a
+// %lo8(sym) / %page(sym) specifier expr -> fixup_lo8 / fixup_page4 (code-label
+// materialisation for the software-call return token, abi.md sec.4.4.1).
 unsigned I4004MCCodeEmitter::getImm8OpValue(const MCInst &MI, unsigned OpNo,
                                             SmallVectorImpl<MCFixup> &Fixups,
                                             const MCSubtargetInfo &STI) const {
@@ -107,8 +110,21 @@ unsigned I4004MCCodeEmitter::getImm8OpValue(const MCInst &MI, unsigned OpNo,
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm()) & 0xff;
   assert(MO.isExpr() && "expected expr operand");
-  Fixups.push_back(MCFixup::create(
-      1, MO.getExpr(), MCFixupKind(I4004::fixup_imm8), /*PCRel=*/false));
+  const MCExpr *Expr = MO.getExpr();
+  MCFixupKind Kind = MCFixupKind(I4004::fixup_imm8);
+  if (const auto *SE = dyn_cast<MCSpecifierExpr>(Expr)) {
+    switch (SE->getSpecifier()) {
+    case I4004::S_LO8:
+      Kind = MCFixupKind(I4004::fixup_lo8);
+      break;
+    case I4004::S_PAGE:
+      Kind = MCFixupKind(I4004::fixup_page4);
+      break;
+    default:
+      break;
+    }
+  }
+  Fixups.push_back(MCFixup::create(1, Expr, Kind, /*PCRel=*/false));
   return 0;
 }
 

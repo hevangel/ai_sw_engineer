@@ -39,12 +39,18 @@ MEMORY {
    * printer/lamp port chips, matching the stock layout. */
   ram  (rw) : ORIGIN = 0x0020, LENGTH = 0x0040   /* bank0 chips 2-3 main, 128 nibbles */
 
-  /* Software return stack: bank 1 (CM-RAM1), all four 4002 chips, main
-   * characters. AS-0 handles 0x0100..0x013F = [bank1][chip0..3][reg0..3]
-   * [char0..15] = 256 nibbles. Grows upward from the base (abi.md §4.4).
-   * Physically a different CM-RAM bank from the .data/.bss arena so a deep
-   * call graph cannot corrupt live variables. */
-  stack (rw) : ORIGIN = 0x0100, LENGTH = 0x0100  /* bank1 (4 chips) main, 256 nibbles */
+  /* Software return stack: CM-RAM BANK 0, SRC 0x80..0xFF (128 nibbles).
+   * MUST be in bank 0 and within an 8-bit SRC address: SSP is P7 = R14:R15, a
+   * single 8-bit pair, so `fim p7, __sstack_base` can only load an 8-bit base
+   * and the push/pop helpers address the stack with a plain SRC under the
+   * current DCL bank (bank 0, set by crt0). An earlier layout put the stack at
+   * handle 0x100 (CM-RAM bank 1); FIM truncated that to 0x00, so the stack grew
+   * from SRC 0x00 over the firmware's working registers and the printer/lamp
+   * port chips -> the calculator produced no tape. Bank-0 0x80..0xFF is clear
+   * of the working set / I/O (0x00..0x1F), the (empty) data arena (0x20..0x5F)
+   * and the per-function frame overlay (packer-placed from 0x20 up, a few dozen
+   * chars). Depth-16 x (<=8 nibbles/far call) fits 128 nibbles. */
+  stack (rw) : ORIGIN = 0x0080, LENGTH = 0x0080  /* bank0 SRC 0x80..0xFF, 128 nibbles */
 
   /* Banks 2-3 (handles 0x0200..0x03FF, 512 more nibbles) are present on the
    * board and documented in memory_map.md as spare heap/arena headroom; they

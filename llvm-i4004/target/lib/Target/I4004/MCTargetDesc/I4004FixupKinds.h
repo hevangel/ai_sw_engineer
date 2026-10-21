@@ -28,6 +28,14 @@ enum Fixups {
   fixup_imm8,
   // 8-bit page-local FIN index in byte 1.
   fixup_fin8,
+  // Low 8 bits of a (code) symbol -> FIM second word (byte 1). Used by the
+  // software-call sequence to materialise a return label's page-local offset
+  // (abi.md sec.4.4.1 / sec.4.4.2). From %lo8(sym).
+  fixup_lo8,
+  // Page nibble (bits 11..8) of a (code) symbol -> FIM second word (byte 1),
+  // in the LOW nibble of that byte. Used by the software-call sequence to
+  // materialise a return label's page. From %page(sym).
+  fixup_page4,
 
   // Marker
   LastTargetFixupKind,

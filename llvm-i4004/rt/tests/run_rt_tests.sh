@@ -143,6 +143,127 @@ if [[ -f "$RT/logic.s" ]]; then
   done; done
 fi
 
+# --- 16-bit (hi3) helpers: args in D1/D2, i16 result in D1 -------------------
+# nib k of value v (0=low .. 3=high); stored order is char0=byte0.lo,
+# char1=byte0.hi, char2=byte1.lo, char3=byte1.hi.
+nib(){ echo $(( ($1 >> (4*$2)) & 0xf )); }
+
+# run_wide <helper_src_list> <sym> <a16> <b16> <exp16>
+run_wide(){
+  local srcs="$1" sym="$2" a="$3" b="$4" exp="$5"
+  local stub="$WORK/stub.s" img="$WORK/img.bin"
+  python3 "$GEN" "$sym" --a "$a" --b "$b" --wide > "$stub"
+  local objs=()
+  $B/llvm-mc -triple i4004 --filetype=obj "$stub" -o "$WORK/stub.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble wide stub ($sym a=$a b=$b)"; }
+  objs+=("$WORK/stub.o")
+  local i=0
+  for s in $srcs; do
+    $B/llvm-mc -triple i4004 --filetype=obj "$RT/$s" -o "$WORK/hw$i.o" 2>"$WORK/mc.log" \
+        || { cat "$WORK/mc.log" >&2; fail "assemble $s"; }
+    objs+=("$WORK/hw$i.o"); i=$((i+1))
+  done
+  python3 "$PACK" "${objs[@]}" -o "$img" --pad-pages --pad 1280 >/dev/null 2>"$WORK/pk.log" \
+      || { cat "$WORK/pk.log" >&2; fail "link wide ($sym a=$a b=$b)"; }
+  local got; got=$("$HARNESS" "$img" "$CYCLES" 4)
+  local want="$(nib $exp 0) $(nib $exp 1) $(nib $exp 2) $(nib $exp 3)"
+  if [[ "$got" == "$want" ]]; then
+    pass=$((pass+1))
+  else
+    failc=$((failc+1))
+    echo "MISMATCH $sym a=$a b=$b: got [$got] want [$want]" >&2
+  fi
+}
+
+status "=== logic16: __andhi3 / __orhi3 / __xorhi3 (i16) ==="
+if [[ -f "$RT/logic16.s" ]]; then
+  for a in 0 0x00FF 0xFF00 0x5555 0xAAAA 0xFFFF 0x1234 0x8001 0x0F0F; do
+    for b in 0 0x00FF 0xFF00 0x5555 0xAAAA 0xFFFF 0xABCD 0x8000 0xF0F0; do
+      av=$(( a & 0xffff )); bv=$(( b & 0xffff ))
+      an=$(( av & bv )); orr=$(( av | bv )); xr=$(( av ^ bv ))
+      run_wide "logic16.s" __andhi3 "$av" "$bv" "$an"
+      run_wide "logic16.s" __orhi3  "$av" "$bv" "$orr"
+      run_wide "logic16.s" __xorhi3 "$av" "$bv" "$xr"
+    done
+  done
+fi
+
+status "=== shift16: __ashlhi3 / __lshrhi3 / __ashrhi3 (i16) ==="
+if [[ -f "$RT/shift16.s" ]]; then
+  for a in 0 1 0x00FF 0x0100 0x1234 0x8001 0xAAAA 0xFFFF; do
+    for n in 0 1 2 3 4 7 8 12 15 16 20; do
+      av=$(( a & 0xffff ))
+      shl=$(( (av << n) & 0xffff ))
+      lsr=$(( av >> n )); (( n >= 16 )) && lsr=0
+      if (( av & 0x8000 )); then
+        if (( n >= 16 )); then asr=0xffff; else asr=$(( ( (av | 0xffff0000) >> n ) & 0xffff )); fi
+      else
+        asr=$(( av >> n )); (( n >= 16 )) && asr=0
+      fi
+      run_wide "shift16.s" __ashlhi3 "$av" "$n" "$shl"
+      run_wide "shift16.s" __lshrhi3 "$av" "$n" "$lsr"
+      run_wide "shift16.s" __ashrhi3 "$av" "$n" "$asr"
+    done
+  done
+fi
+
+status "=== arith16: __mulhi3 / __udivhi3 / __umodhi3 (i16) ==="
+if [[ -f "$RT/arith16.s" ]]; then
+  # arith16 uses the soft stack (P7); the wide stub inits SSP to 0x40. The
+  # divider links the stack helper (stack.s) too.
+  if [[ "$MODE" == full ]]; then
+    MAS="0 1 2 10 100 255 256 1000 4096 12345 40000 65535"
+    MBS="1 2 3 7 10 100 256 1000 9999 65535"
+  else
+    MAS="0 1 7 100 255 1000 12345 40000 65535"
+    MBS="1 2 3 10 100 256 1000 65535"
+  fi
+  for a in $MAS; do for b in $MBS; do
+    av=$(( a & 0xffff )); bv=$(( b & 0xffff ))
+    mul=$(( (av * bv) & 0xffff ))
+    run_wide "arith16.s" __mulhi3 "$av" "$bv" "$mul"
+    [[ "$bv" == 0 ]] && continue
+    q=$(( av / bv )); r=$(( av % bv ))
+    run_wide "arith16.s" __udivhi3 "$av" "$bv" "$q"
+    run_wide "arith16.s" __umodhi3 "$av" "$bv" "$r"
+  done; done
+fi
+
+status "=== mem: __memset_ram / __memcpy_ram across a 4002 register boundary ==="
+MEMGEN="$RT/tests/gen_mem_test.py"
+# run_mem <mode> <addr> <extra:val|src> <count> <nprobe> <probe_base> <expected nprobe nibbles...>
+run_mem(){
+  local mode="$1" addr="$2" extra="$3" count="$4" nprobe="$5" pbase="$6"; shift 6
+  local exp=("$@")
+  local stub="$WORK/memstub.s" img="$WORK/memimg.bin"
+  if [[ "$mode" == memset ]]; then
+    python3 "$MEMGEN" memset --addr "$addr" --val "$extra" --count "$count" --nprobe "$nprobe" --probe-base "$pbase" > "$stub"
+  else
+    python3 "$MEMGEN" memcpy --addr "$addr" --src "$extra" --count "$count" --nprobe "$nprobe" --probe-base "$pbase" > "$stub"
+  fi
+  $B/llvm-mc -triple i4004 --filetype=obj "$stub" -o "$WORK/memstub.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble mem stub ($mode)"; }
+  $B/llvm-mc -triple i4004 --filetype=obj "$RT/mem.s" -o "$WORK/mem.o" 2>"$WORK/mc.log" \
+      || { cat "$WORK/mc.log" >&2; fail "assemble mem.s"; }
+  python3 "$PACK" "$WORK/memstub.o" "$WORK/mem.o" -o "$img" --pad-pages --pad 1280 >/dev/null 2>"$WORK/pk.log" \
+      || { cat "$WORK/pk.log" >&2; fail "link mem ($mode addr=$addr)"; }
+  local got; got=$("$HARNESS" "$img" "$CYCLES" "$nprobe")
+  local want="${exp[*]}"
+  if [[ "$got" == "$want" ]]; then pass=$((pass+1));
+  else failc=$((failc+1)); echo "MISMATCH mem $mode addr=$addr count=$count probe=$pbase: got [$got] want [$want]" >&2; fi
+}
+
+# memset 20 nibbles of 0x5 at 0x08 (spans reg0 chars 8-15 + reg1 chars 0-11);
+# probe 0x08..0x0f (reg0 side of the fill) -> all 5.
+run_mem memset 0x08 0x5 20 8 0x08  5 5 5 5 5 5 5 5
+# same fill, probe 0x10..0x17 (reg1, PAST the 0x10 register boundary) -> all 5.
+run_mem memset 0x08 0x3 20 8 0x10  3 3 3 3 3 3 3 3
+# memcpy: seed src ramp at 0x20, copy 20 nibbles to 0x08; probe dst 0x08..0x0f
+# -> ramp 0..7 (reg0 side).
+run_mem memcpy 0x08 0x20 20 8 0x08  0 1 2 3 4 5 6 7
+# same copy, probe 0x10..0x17 (dst nibbles 8..15, PAST the boundary) -> 8..15.
+run_mem memcpy 0x08 0x20 20 8 0x10  8 9 10 11 12 13 14 15
+
 echo "" >&2
 status "RESULT: $pass passed, $failc failed"
 [[ "$failc" == 0 ]] || exit 1

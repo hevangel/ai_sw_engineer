@@ -1,5 +1,32 @@
 # Busicom 141-PF firmware — report
 
+Status: **M5 wrap-up (2026-10-21)** — see the last section. M3/M4 milestone
+records below.
+
+## M5 wrap-up (2026-10-21) — host firmware final; target run signed off as out of architectural reach
+
+- **Host behaviour stays 42/42 exact** (recovered-ROM replay, port-level
+  replay, and the full-tape `port_trace` all pass; `cargo fmt`/`clippy -D
+  warnings` clean, re-verified at wrap-up). All 42 historical manual examples
+  replay byte-for-byte against the original-ROM port trace.
+- The whole firmware compiles through the `llvm-i4004` backend (43/43
+  functions), links banked (BANKS=48, 100,352 B), and executes end-to-end on
+  the `chips` simulator — but prints **0/42**. Final root cause: the
+  `external/chips` 4002 model latches SRC addresses ignoring the CM-RAM (DCL)
+  bank line, so the DCL-banked spill frames clobber the software-return-stack
+  chip in bank 0 (see `llvm-i4004/report/final_report.md` STATUS 2026-10-21 and
+  `failure_notes/2026-10-19-chips-4002-src-latch-ignores-dcl.md`).
+- Underlying limit: the compiled image is ~48 KB, ~11× the 4004's 4,096-byte
+  ROM ceiling (`failure_notes/2026-10-19-busicom-firmware-too-big-for-4004.md`);
+  the stock 2×4002 board's 64 B of RAM also cannot hold the packed 92 B
+  persistent state (M4 fit analysis). Per the 2026-10-21 scope sign-off
+  (Option B), the on-target 42-example run is closed as blocked by target
+  architecture and simulator fidelity; the verified deliverables above stand.
+
+---
+
+## Milestone M3 record
+
 Status at milestone M3 (2026-10-18).
 
 | Check | Result |

@@ -70,6 +70,8 @@ public:
         {"fixup_page8", 0, 8, 0},   // byte 1 (fixup offset positions it)
         {"fixup_imm8", 0, 8, 0},    // byte 1
         {"fixup_fin8", 0, 8, 0},    // byte 1
+        {"fixup_lo8", 0, 8, 0},     // byte 1 (low 8 bits of a code symbol)
+        {"fixup_page4", 0, 8, 0},   // byte 1 low nibble (page of a code symbol)
     };
     static_assert(std::size(Infos) == I4004::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");
@@ -112,7 +114,15 @@ void I4004AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case I4004::fixup_page8:
   case I4004::fixup_imm8:
   case I4004::fixup_fin8:
+  case I4004::fixup_lo8:
+    // Low 8 bits of the (code) symbol into byte 1.
     Data[1] = Value & 0xff;
+    break;
+  case I4004::fixup_page4:
+    // Page nibble (bits 11..8) into the HIGH nibble of byte 1, so FIM Pn,byte
+    // puts the page in Pn's even (high) register -- which __push_ret reads as
+    // the page (abi.md 4.4.1: page in R4 = P2.hi).
+    Data[1] = ((Value >> 8) & 0x0f) << 4;
     break;
   default:
     llvm_unreachable("unknown I4004 fixup kind");

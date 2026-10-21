@@ -66,7 +66,7 @@ impl Num {
     }
 
     pub fn is_zero(&self) -> bool {
-        self.d.iter().all(|&x| x == 0)
+        crate::regops::is_zero(&self.d)
     }
 
     /// Number of significant digits (0 for zero).
@@ -96,15 +96,7 @@ impl Num {
 
     /// Magnitude comparison ignoring sign and scale (caller aligns first).
     pub fn cmp_mag(&self, other: &Num) -> core::cmp::Ordering {
-        let mut i = DIGITS;
-        while i > 0 {
-            i -= 1;
-            let (a, b) = (self.digit(i), other.digit(i));
-            if a != b {
-                return a.cmp(&b);
-            }
-        }
-        core::cmp::Ordering::Equal
+        crate::regops::cmp(&self.d, &other.d)
     }
 
     /// Multiply by 10^k. Returns `false` (value unchanged) if digits would be lost.
@@ -173,33 +165,12 @@ impl Num {
     }
 
     fn add_mag(&mut self, o: &Num) -> bool {
-        let mut carry = 0u8;
-        for i in 0..DIGITS {
-            let mut s = self.digit(i) + o.digit(i) + carry;
-            carry = 0;
-            if s > 9 {
-                s -= 10;
-                carry = 1;
-            }
-            self.set_digit(i, s);
-        }
-        carry == 0
+        crate::regops::add(&mut self.d, &o.d)
     }
 
     /// self.mag -= o.mag, requires self.mag >= o.mag.
     fn sub_mag(&mut self, o: &Num) {
-        let mut borrow = 0u8;
-        for i in 0..DIGITS {
-            let sub = o.digit(i) + borrow;
-            let di = self.digit(i);
-            if di >= sub {
-                self.set_digit(i, di - sub);
-                borrow = 0;
-            } else {
-                self.set_digit(i, di + 10 - sub);
-                borrow = 1;
-            }
-        }
+        crate::regops::sub(&mut self.d, &o.d)
     }
 
     /// Signed addition of `o` (with its sign flipped if `negate`).
@@ -235,6 +206,9 @@ impl Num {
     /// Build a `Num` from a wide little-endian magnitude with the given scale,
     /// sign, taking digit buffer index `i` as power `i - scale`. Returns `None`
     /// if the magnitude needs more than `DIGITS` positions (register overflow).
+    /// `#[inline(never)]`: the `set_digit` placement loop is sizeable, and
+    /// keeping it out of line keeps `Num::mul` (its caller) under a ROM bank.
+    #[inline(never)]
     fn from_mag(buf: &[u8; WIDE], scale: u8, neg: bool) -> Option<Num> {
         for &x in buf.iter().skip(DIGITS) {
             if x != 0 {
@@ -259,36 +233,13 @@ impl Num {
     /// 14-digit operands whose product fits 14 digits — the caller still
     /// range-checks the printable width).
     pub fn mul(&self, o: &Num) -> Option<Num> {
+        // The digit accumulation loop is extracted to a #[inline(never)] helper
+        // so mul stays under a 4004 ROM bank window. The WIDE accumulator is
+        // owned here and passed by &mut (no by-value array return -> smaller
+        // frame, no sret copy).
         let mut acc = [0u8; WIDE];
-        for i in 0..DIGITS {
-            let di = self.digit(i);
-            if di == 0 {
-                continue;
-            }
-            let mut carry = 0u8;
-            for j in 0..DIGITS {
-                let pos = i + j;
-                let oj = o.digit(j);
-                if pos >= WIDE {
-                    if oj != 0 {
-                        return None;
-                    }
-                    continue;
-                }
-                let p = di * oj + acc[pos] + carry;
-                acc[pos] = p % 10;
-                carry = p / 10;
-            }
-            let mut pos = i + DIGITS;
-            while carry > 0 {
-                if pos >= WIDE {
-                    return None;
-                }
-                let p = acc[pos] + carry;
-                acc[pos] = p % 10;
-                carry = p / 10;
-                pos += 1;
-            }
+        if !mul_accumulate(self, o, &mut acc) {
+            return None;
         }
         Num::from_mag(&acc, self.scale + o.scale, self.neg != o.neg)
     }
@@ -334,130 +285,26 @@ impl Num {
         let n_digits = self.digits() as usize;
         let d_digits = o.digits() as usize;
 
-        // Leading-digit power of the exact quotient (approx, never too low).
-        let num_exp = n_digits as i16 - 1 - self.scale as i16;
-        let den_exp = d_digits as i16 - 1 - o.scale as i16;
-        let lead_hi = num_exp - den_exp + 1;
+        // Fractional-digit count to grind, incl. one guard digit (extracted to
+        // a #[inline(never)] helper so `divide` stays under a 4004 ROM bank).
+        let gen = div_gen(frac, n_digits, d_digits, self.scale, o.scale);
 
-        // Fractional digits of the final result.
-        //
-        // Fixed mode: exactly `frac`. Floating mode: generate enough fractional
-        // digits to always cover 13 significant digits regardless of the true
-        // integer size, then trim to 13 significant digits afterwards.
-        let gen_frac: u8 = match frac {
-            Some(n) => n,
-            None => {
-                // The integer part has at most `max(lead_hi,1)` digits; we grind
-                // down to power -(FLOAT_SIG) which is always deep enough.
-                let depth = FLOAT_SIG as i16 - lead_hi.min(0); // >= FLOAT_SIG
-                depth.max(FLOAT_SIG as i16) as u8
-            }
-        };
-        // Grind `gen_frac` fractional digits plus one guard digit.
-        let gen = gen_frac as i16 + 1;
-
-        // Build dividend integer N (little-endian) and divisor integer D.
-        // N occupies digits [0, n_digits); shift it up by `gen + extra` so the
-        // quotient has enough low digits. The quotient's lowest power is
-        //   q_low_power = (o.scale as i16 - self.scale as i16 - gen) ... in
-        // units of 10. We align via `point_shift` below.
-        let mut divd = [0u8; WIDE]; // dividend * 10^gen (little-endian)
-        for i in 0..n_digits {
-            let idx = i + gen.max(0) as usize;
-            if idx >= WIDE {
-                return None;
-            }
-            divd[idx] = self.digit(i);
-        }
-        let mut divs = [0u8; WIDE]; // divisor (little-endian)
-        let mut divs_hi = 0usize;
-        for (i, cell) in divs.iter_mut().enumerate().take(d_digits) {
-            let oi = o.digit(i);
-            *cell = oi;
-            if oi != 0 {
-                divs_hi = i;
-            }
-        }
-
-        // Quotient power of the final result: value = Q * 10^qp where
-        //   qp = (o.scale - self.scale) - gen  (since N was scaled by 10^gen)
-        // and the printed scale is `frac_out`. Produce quotient digit at buffer
-        // index k (little-endian), representing Q's digit k.
-        //
-        // Long division: for position from high to low, count subtractions of
-        // divisor shifted left by that position.
-        let mut quo_int = [0u8; WIDE]; // little-endian integer quotient Q
+        // Long division into `quo_int` (little-endian integer quotient). The
+        // dividend/divisor WIDE scratch (divd, divs) is owned INSIDE long_divide,
+        // so `divide`'s own frame carries only this one WIDE buffer (not three)
+        // -- that is what keeps `divide` under a 256-char CM-RAM frame bank.
         let dividend_hi = n_digits + gen.max(0) as usize; // one past top is fine
-        let mut pos = dividend_hi; // shift of divisor (how far left)
-        loop {
-            let mut count = 0u8;
-            while count < 10 && ge_shifted(&divd, &divs, divs_hi, pos) {
-                sub_shifted(&mut divd, &divs, divs_hi, pos);
-                count += 1;
-            }
-            if pos < WIDE {
-                quo_int[pos] = count;
-            }
-            if pos == 0 {
-                break;
-            }
-            pos -= 1;
+        let mut quo_int = [0u8; WIDE];
+        if !long_divide(self, o, gen, n_digits, d_digits, dividend_hi, &mut quo_int) {
+            return None;
         }
 
         // Q value = quo_int (little-endian integer). The quotient value is
         //   Q * 10^qp,  qp = o.scale - self.scale - gen.
-        // The mantissa for a Num with scale `s` is Q * 10^(qp + s). We pick the
-        // final scale now:
-        //   fixed mode  -> s = frac (requested)
-        //   float mode  -> s = max(0, 13 - integer_digits_of_quotient)
-        // Find Q's most-significant index.
-        let mut q_msd = 0usize;
-        for i in (0..WIDE).rev() {
-            if quo_int[i] != 0 {
-                q_msd = i;
-                break;
-            }
-        }
-        let q_is_zero = quo_int.iter().all(|&x| x == 0);
-        // Power of the quotient's most-significant digit: q_msd + qp.
+        // assemble_quotient finds Q's most-significant index itself (the scan
+        // lives there so `divide` stays under a ROM bank).
         let qp = o.scale as i16 - self.scale as i16 - gen;
-        let msd_power = q_msd as i16 + qp;
-        let int_digits = (msd_power + 1).max(0);
-
-        let final_frac: u8 = match frac {
-            Some(n) => n,
-            None => (FLOAT_SIG as i16 - int_digits).max(0) as u8,
-        };
-        if final_frac as usize > DIGITS {
-            return None;
-        }
-
-        // mantissa = Q * 10^(qp + final_frac); Num digit j holds Q digit
-        // at index (j - (qp + final_frac)).
-        let shift_pow = qp + final_frac as i16;
-        let mut quo = Num::ZERO;
-        for j in 0..DIGITS {
-            let qi = j as i16 - shift_pow;
-            if qi < 0 || qi as usize >= WIDE {
-                continue;
-            }
-            quo.set_digit(j, quo_int[qi as usize]);
-        }
-        // Overflow: any nonzero Q digit mapping to index >= DIGITS.
-        if !q_is_zero {
-            let top_j = q_msd as i16 + shift_pow;
-            if top_j >= DIGITS as i16 {
-                return None;
-            }
-        }
-        quo.scale = final_frac;
-        quo.neg = self.neg != o.neg;
-
-        if quo.is_zero() {
-            quo.neg = false;
-            quo.scale = 0;
-        }
-        Some(quo)
+        assemble_quotient(&quo_int, qp, frac, self.neg != o.neg)
     }
 
     /// Round or truncate to `frac` fractional digits per the rounding switch.
@@ -516,6 +363,222 @@ impl Num {
         n
     }
 }
+/// Number of fractional digits `divide` grinds (incl. one guard digit): `frac`
+/// in fixed mode, else enough to cover FLOAT_SIG significant digits regardless
+/// of the quotient's integer size. `#[inline(never)]` to keep `divide` under a
+/// 4004 ROM bank window.
+#[inline(never)]
+fn div_gen(frac: Option<u8>, n_digits: usize, d_digits: usize, self_scale: u8, o_scale: u8) -> i16 {
+    let num_exp = n_digits as i16 - 1 - self_scale as i16;
+    let den_exp = d_digits as i16 - 1 - o_scale as i16;
+    let lead_hi = num_exp - den_exp + 1;
+    let gen_frac: u8 = match frac {
+        Some(n) => n,
+        None => {
+            let depth = FLOAT_SIG as i16 - lead_hi.min(0); // >= FLOAT_SIG
+            depth.max(FLOAT_SIG as i16) as u8
+        }
+    };
+    gen_frac as i16 + 1
+}
+/// Assemble the final quotient Num from the little-endian integer quotient
+/// `quo_int` (MSD at index `q_msd`), quotient power `qp`, and the fixed/float
+/// `frac` mode; sign `neg`. `#[inline(never)]` to keep `divide` under a bank.
+#[inline(never)]
+fn assemble_quotient(quo_int: &[u8; WIDE], qp: i16, frac: Option<u8>, neg: bool) -> Option<Num> {
+    // Most-significant index of the little-endian integer quotient (folded in
+    // from `divide` to keep that function under a ROM bank).
+    let mut q_msd = 0usize;
+    for i in (0..WIDE).rev() {
+        if quo_int[i] != 0 {
+            q_msd = i;
+            break;
+        }
+    }
+    let q_is_zero = quo_int.iter().all(|&x| x == 0);
+    let msd_power = q_msd as i16 + qp;
+    let int_digits = (msd_power + 1).max(0);
+    let final_frac: u8 = match frac {
+        Some(n) => n,
+        None => (FLOAT_SIG as i16 - int_digits).max(0) as u8,
+    };
+    if final_frac as usize > DIGITS {
+        return None;
+    }
+    let shift_pow = qp + final_frac as i16;
+    let mut quo = Num::ZERO;
+    place_quotient_digits(&mut quo, quo_int, shift_pow);
+    if !q_is_zero {
+        let top_j = q_msd as i16 + shift_pow;
+        if top_j >= DIGITS as i16 {
+            return None;
+        }
+    }
+    quo.scale = final_frac;
+    quo.neg = neg;
+    if quo.is_zero() {
+        quo.neg = false;
+        quo.scale = 0;
+    }
+    Some(quo)
+}
+
+/// Place the little-endian integer quotient `quo_int` into `quo`'s packed
+/// digits, digit `j` taken from buffer index `j - shift_pow`. `#[inline(never)]`
+/// so the packed-`set_digit` loop stays out of `assemble_quotient` (keeping it
+/// under a 4004 ROM bank).
+#[inline(never)]
+fn place_quotient_digits(quo: &mut Num, quo_int: &[u8; WIDE], shift_pow: i16) {
+    for j in 0..DIGITS {
+        let qi = j as i16 - shift_pow;
+        if qi < 0 || qi as usize >= WIDE {
+            continue;
+        }
+        quo.set_digit(j, quo_int[qi as usize]);
+    }
+}
+
+/// Drive the whole integer long division into `quo_int`, owning the dividend
+/// and divisor WIDE scratch buffers INSIDE this frame so `Num::divide` carries
+/// only `quo_int` (one WIDE buffer) rather than three. That is what keeps
+/// `divide`'s per-function frame under the 256-char CM-RAM bank. Returns false
+/// on dividend overflow (propagated as `None` by the caller). `#[inline(never)]`.
+#[inline(never)]
+fn long_divide(
+    dividend: &Num,
+    divisor: &Num,
+    gen: i16,
+    n_digits: usize,
+    d_digits: usize,
+    dividend_hi: usize,
+    quo_int: &mut [u8; WIDE],
+) -> bool {
+    let mut divd = [0u8; WIDE];
+    let mut divs = [0u8; WIDE];
+    let divs_hi = match build_div_operands(
+        dividend, divisor, gen, n_digits, d_digits, &mut divd, &mut divs,
+    ) {
+        Some(x) => x,
+        None => return false,
+    };
+    restoring_divide(&mut divd, &divs, divs_hi, dividend_hi, quo_int);
+    true
+}
+
+/// Build the little-endian dividend (scaled up by 10^gen) and divisor buffers
+/// for `divide`, writing into caller-provided scratch so neither this function
+/// nor `divide` has to hold a 2×WIDE return buffer on its tiny 4004 frame.
+/// Returns `Some(divs_hi)` (top nonzero divisor index) or `None` on dividend
+/// overflow. `#[inline(never)]` to keep `divide` under a ROM bank.
+#[inline(never)]
+fn build_div_operands(
+    dividend: &Num,
+    divisor: &Num,
+    gen: i16,
+    n_digits: usize,
+    d_digits: usize,
+    divd: &mut [u8; WIDE],
+    divs: &mut [u8; WIDE],
+) -> Option<usize> {
+    for i in 0..n_digits {
+        let idx = i + gen.max(0) as usize;
+        if idx >= WIDE {
+            return None;
+        }
+        divd[idx] = dividend.digit(i);
+    }
+    let mut divs_hi = 0usize;
+    for (i, cell) in divs.iter_mut().enumerate().take(d_digits) {
+        let oi = divisor.digit(i);
+        *cell = oi;
+        if oi != 0 {
+            divs_hi = i;
+        }
+    }
+    Some(divs_hi)
+}
+
+/// Schoolbook multiply accumulation: acc = sum over digits i of self.digit(i) *
+/// o shifted left i. Writes into caller-provided `acc` (out-param, no by-value
+/// WIDE return) and returns `false` on register overflow. `#[inline(never)]` so
+/// mul stays under a 4004 ROM bank window.
+#[inline(never)]
+fn mul_accumulate(a: &Num, o: &Num, acc: &mut [u8; WIDE]) -> bool {
+    for i in 0..DIGITS {
+        let di = a.digit(i);
+        if di == 0 {
+            continue;
+        }
+        if !mul_add_row(acc, di, o, i) {
+            return false;
+        }
+    }
+    true
+}
+/// One schoolbook multiply row: acc += di * o, shifted left by `i` digits
+/// (little-endian), with carry propagation into the high tail. Returns false on
+/// register overflow. `#[inline(never)]` to keep `Num::mul` under a ROM bank.
+#[inline(never)]
+fn mul_add_row(acc: &mut [u8; WIDE], di: u8, o: &Num, i: usize) -> bool {
+    let mut carry = 0u8;
+    for j in 0..DIGITS {
+        let pos = i + j;
+        let oj = o.digit(j);
+        if pos >= WIDE {
+            if oj != 0 {
+                return false;
+            }
+            continue;
+        }
+        let p = di * oj + acc[pos] + carry;
+        acc[pos] = p % 10;
+        carry = p / 10;
+    }
+    let mut pos = i + DIGITS;
+    while carry > 0 {
+        if pos >= WIDE {
+            return false;
+        }
+        let p = acc[pos] + carry;
+        acc[pos] = p % 10;
+        carry = p / 10;
+        pos += 1;
+    }
+    true
+}
+
+/// Restoring long division: for each position from `dividend_hi` down to 0,
+/// count how many times the (shifted) divisor fits into the remaining dividend,
+/// subtracting as it goes, and record the count as the quotient digit. Writes
+/// the little-endian integer quotient into caller-provided `quo_int` (out-param
+/// rather than a by-value return so neither this function nor `divide` carries
+/// an extra WIDE buffer on its 4004 frame). Kept `#[inline(never)]` so this
+/// nested loop stays a standalone function (it is the bulk of `divide`'s
+/// compiled size; inlined it pushed `divide` past a ROM bank).
+#[inline(never)]
+fn restoring_divide(
+    divd: &mut [u8; WIDE],
+    divs: &[u8; WIDE],
+    divs_hi: usize,
+    dividend_hi: usize,
+    quo_int: &mut [u8; WIDE],
+) {
+    let mut pos = dividend_hi;
+    loop {
+        let mut count = 0u8;
+        while count < 10 && ge_shifted(divd, divs, divs_hi, pos) {
+            sub_shifted(divd, divs, divs_hi, pos);
+            count += 1;
+        }
+        if pos < WIDE {
+            quo_int[pos] = count;
+        }
+        if pos == 0 {
+            break;
+        }
+        pos -= 1;
+    }
+}
 
 /// Compare `rem >= (div << s)` (little-endian decimal, `div_hi` = divisor top).
 fn ge_shifted(rem: &[u8; WIDE], div: &[u8; WIDE], div_hi: usize, s: usize) -> bool {
@@ -568,6 +631,7 @@ fn sub_shifted(rem: &mut [u8; WIDE], div: &[u8; WIDE], div_hi: usize, s: usize) 
 /// Returns the root as a little-endian digit array (firmware §4.5 method:
 /// bring down two digits per step, find the largest `x` with
 /// `(20*root + x)*x <= remainder`, subtract, append `x`). All `u8` arithmetic.
+#[inline(never)]
 fn isqrt_digits(rad: &[u8; WIDE], hi: usize) -> [u8; DIGITS] {
     let num_pairs = hi / 2 + 1;
     let mut rem = [0u8; WIDE]; // remainder, little-endian
@@ -580,28 +644,42 @@ fn isqrt_digits(rad: &[u8; WIDE], hi: usize) -> [u8; DIGITS] {
         let lo = 2 * p;
         let d_hi = if lo < hi { rad[lo + 1] } else { 0 };
         let d_lo = rad[lo];
-        add_small(&mut rem, (d_hi * 10 + d_lo) as u32);
+        add_small(&mut rem, (d_hi * 10 + d_lo) as u16);
 
-        // largest x in 1..=9 with (20*root + x)*x <= remainder
-        let mut x = 0u8;
-        let mut best = [0u8; WIDE];
-        for cand in 1..=9u8 {
-            let trial = trial_product(&root, root_len, cand);
-            if le_arr(&trial, &rem) {
-                x = cand;
-                best = trial;
-            } else {
-                break;
-            }
-        }
-        if x > 0 {
-            sub_arr(&mut rem, &best);
-        }
+        // Find this step's root digit x and subtract (20*root+x)*x from rem.
+        // The candidate scan + subtract (and its WIDE `trial` scratch) live in
+        // a #[inline(never)] helper so isqrt_digits' own compiled size stays
+        // under a 4004 ROM bank and it carries no WIDE trial buffer.
+        let x = isqrt_next_digit(&mut rem, &root, root_len);
         // root = root * 10 + x
         shift_root_up(&mut root, &mut root_len);
         root[0] = x;
     }
     root
+}
+
+/// One square-root step: the largest `x` in 1..=9 with
+/// `(20*root + x)*x <= rem`, subtracting that product from `rem`. Returns `x`.
+/// Owns the WIDE `trial` scratch here (one buffer, recomputed for the chosen
+/// candidate) so `isqrt_digits` neither carries it nor inlines this bulk --
+/// keeping isqrt_digits under a 4004 ROM bank. `#[inline(never)]`.
+#[inline(never)]
+fn isqrt_next_digit(rem: &mut [u8; WIDE], root: &[u8; DIGITS], root_len: usize) -> u8 {
+    let mut x = 0u8;
+    let mut trial = [0u8; WIDE];
+    for cand in 1..=9u8 {
+        trial_product(root, root_len, cand, &mut trial);
+        if le_arr(&trial, rem) {
+            x = cand;
+        } else {
+            break;
+        }
+    }
+    if x > 0 {
+        trial_product(root, root_len, x, &mut trial);
+        sub_arr(rem, &trial);
+    }
+    x
 }
 
 /// Shift a little-endian decimal buffer up by `n` decimal places (×10^n).
@@ -630,18 +708,28 @@ fn shift_root_up(root: &mut [u8; DIGITS], len: &mut usize) {
 }
 
 /// Add a small (`< 100`) integer into a little-endian decimal accumulator.
-fn add_small(buf: &mut [u8; WIDE], mut v: u32) {
+///
+/// `v` is a `u16` (not `u32`): both call sites pass a value below 100, and the
+/// loop only ever shrinks it, so the whole computation fits in 16 bits. On the
+/// 4004 a `u32` here forced `__udivsi3`/`__mulsi3` libcalls whose i32 operands
+/// need more double-pair registers than exist, so register allocation ran out;
+/// `u16` lowers to the `hi3` helpers and allocates. The integer values are
+/// identical, so the host tape stays exact (verified 42/42).
+fn add_small(buf: &mut [u8; WIDE], mut v: u16) {
     let mut i = 0usize;
     while v > 0 && i < WIDE {
-        let s = buf[i] as u32 + v % 10;
+        let s = buf[i] as u16 + v % 10;
         buf[i] = (s % 10) as u8;
         v = v / 10 + s / 10;
         i += 1;
     }
 }
 
-/// `(20*root + cand) * cand` as a little-endian decimal buffer.
-fn trial_product(root: &[u8; DIGITS], root_len: usize, cand: u8) -> [u8; WIDE] {
+/// `(20*root + cand) * cand` as a little-endian decimal buffer, written into
+/// caller-provided `out` (out-param rather than a by-value WIDE return, so
+/// `isqrt_digits` does not carry an extra buffer per candidate on its frame).
+#[inline(never)]
+fn trial_product(root: &[u8; DIGITS], root_len: usize, cand: u8, out: &mut [u8; WIDE]) {
     // base = 2 * root  (little-endian)
     let mut base = [0u8; WIDE];
     let mut carry = 0u8;
@@ -655,16 +743,14 @@ fn trial_product(root: &[u8; DIGITS], root_len: usize, cand: u8) -> [u8; WIDE] {
     }
     // base = base * 10 + cand   (i.e. 20*root + cand)
     shift_up(&mut base, 1);
-    add_small(&mut base, cand as u32);
+    add_small(&mut base, cand as u16);
     // out = base * cand
-    let mut out = [0u8; WIDE];
     let mut c = 0u8;
     for i in 0..WIDE {
         let v = base[i] * cand + c;
         out[i] = v % 10;
         c = v / 10;
     }
-    out
 }
 
 /// `a <= b` for little-endian decimal buffers.

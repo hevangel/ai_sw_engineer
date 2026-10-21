@@ -150,6 +150,7 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
     }
 
     /// Shift a full 20-bit hammer word MSB-first into the chain.
+    #[inline(never)]
     fn shift_hammer_word(&mut self, word: u32) {
         for i in (0..20).rev() {
             self.shift_printer_bit((word >> i) & 1 == 1);
@@ -174,6 +175,7 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
 
     /// Which drum sector each hammer column needs for this row, as a per-sector
     /// 20-bit mask: `masks[s]` has a 1 for every column that fires at sector s.
+    #[inline(never)]
     fn sector_masks(row: &Row) -> [u32; SECTORS] {
         let mut masks = [0u32; SECTORS];
         if row.overflow {
@@ -184,16 +186,8 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
             }
             return masks;
         }
-        // Numeric columns: map each glyph to its drum sector.
-        for (c, &g) in row.cols.iter().enumerate() {
-            let sector = match g {
-                b'0'..=b'9' => (g - b'0') as usize,
-                b'.' => 10,
-                b'-' => 12,
-                _ => continue, // blank column: no hammer
-            };
-            masks[sector] |= 1 << (NUMERIC_LSB as usize + c);
-        }
+        // Numeric columns (extracted to keep sector_masks under a ROM bank).
+        Self::numeric_masks(row, &mut masks);
         // Symbol column A (includes the rounded `^` mark via SymA::Rounded).
         if let Some(sector) = sym_a_sector(row.sym_a) {
             masks[sector] |= 1 << SYMBOL_A_BIT;
@@ -204,9 +198,25 @@ impl<'a, H: Hal> PrinterDriver<'a, H> {
         }
         masks
     }
+
+    /// Map each numeric-column glyph to its drum sector bit. Split out of
+    /// `sector_masks` as `#[inline(never)]` so each stays under a 4004 ROM bank.
+    #[inline(never)]
+    fn numeric_masks(row: &Row, masks: &mut [u32; SECTORS]) {
+        for (c, &g) in row.cols.iter().enumerate() {
+            let sector = match g {
+                b'0'..=b'9' => (g - b'0') as usize,
+                b'.' => 10,
+                b'-' => 12,
+                _ => continue, // blank column: no hammer
+            };
+            masks[sector] |= 1 << (NUMERIC_LSB as usize + c);
+        }
+    }
 }
 
 impl<H: Hal> Printer for PrinterDriver<'_, H> {
+    #[inline(never)]
     fn print(&mut self, row: &Row) {
         // Red ink is latched for the whole line before the drum sweeps.
         if row.red {

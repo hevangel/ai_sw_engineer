@@ -297,8 +297,38 @@ bool I4004AsmParser::parseOperand(OperandVector &Operands) {
   if (Res.isFailure())
     return true;
 
-  // Immediate / expression / symbol.
+  // Immediate / expression / symbol -- possibly a %lo8(...) / %page(...)
+  // code-label specifier (abi.md sec.4.4.1). The AsmLexer tokenizes '%' as
+  // AsmToken::Percent; match it then the specifier name and a parenthesised
+  // subexpression.
   S = getParser().getTok().getLoc();
+  if (getLexer().is(AsmToken::Percent)) {
+    getParser().Lex(); // eat '%'
+    if (getLexer().isNot(AsmToken::Identifier))
+      return true;
+    StringRef Spec = getParser().getTok().getString();
+    uint16_t Kind;
+    if (Spec == "lo8")
+      Kind = I4004::S_LO8;
+    else if (Spec == "page")
+      Kind = I4004::S_PAGE;
+    else
+      return Error(getParser().getTok().getLoc(),
+                   "unknown operand specifier (expected %lo8 or %page)");
+    getParser().Lex(); // eat the specifier name
+    if (getLexer().isNot(AsmToken::LParen))
+      return Error(getParser().getTok().getLoc(), "expected '(' after specifier");
+    getParser().Lex(); // eat '('
+    const MCExpr *Sub;
+    if (getParser().parseExpression(Sub, E))
+      return true;
+    if (getLexer().isNot(AsmToken::RParen))
+      return Error(getParser().getTok().getLoc(), "expected ')' to close specifier");
+    getParser().Lex(); // eat ')'
+    const MCExpr *SE = MCSpecifierExpr::create(Sub, Kind, getContext(), S);
+    Operands.push_back(I4004Operand::createImm(SE, S, E));
+    return false;
+  }
   const MCExpr *Expr;
   if (getParser().parseExpression(Expr, E))
     return true;

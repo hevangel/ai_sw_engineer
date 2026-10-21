@@ -20,6 +20,7 @@ pub mod driver_printer;
 pub mod hal;
 pub mod keys;
 pub mod print;
+pub mod regops;
 
 pub use bcd::Num;
 pub use keys::{Key, Lamps, Rounding, Switches};
@@ -127,6 +128,7 @@ impl Calculator {
     /// (positive) entry in WR so the lamp stays off; a negative total/result
     /// leaves that value in WR so the lamp lights. See `driver_lamps` for bit 3
     /// (`WR.S0.bit1`).
+    #[inline(never)]
     pub fn press<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         self.dispatch(key, sw, out);
         // The minus-sign lamp tracks the sign of WR at idle (listing: bit 2 =
@@ -135,6 +137,7 @@ impl Calculator {
         self.lamps.negative = self.wr.neg;
     }
 
+    #[inline(never)]
     fn dispatch<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         // At overflow, only CE and C respond (disassembly: engine starts only
         // for those two keys when SR.S2 overflow is set).
@@ -145,6 +148,13 @@ impl Calculator {
             self.digit(digit);
             return;
         }
+        // The non-digit key match is extracted to keep dispatch under a ROM
+        // bank (the 4004 12-bit PC caps a function at one bank window).
+        self.dispatch_key(key, sw, out);
+    }
+
+    #[inline(never)]
+    fn dispatch_key<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
         match key {
             Key::D00 => {
                 self.digit(0);
@@ -166,6 +176,15 @@ impl Calculator {
                 self.mode = Mode::New;
             }
             Key::C => self.clear(out),
+            // Operation keys are handled in a separate #[inline(never)] helper
+            // so neither half exceeds a 4004 ROM bank window.
+            _ => self.dispatch_op_key(key, sw, out),
+        }
+    }
+
+    #[inline(never)]
+    fn dispatch_op_key<P: Printer>(&mut self, key: Key, sw: Switches, out: &mut P) {
+        match key {
             Key::Plus => self.add_sub(false, sw, out),
             Key::Minus => self.add_sub(true, sw, out),
             Key::Mul => self.mul_div_key(MulOp::Mul, sw, out),
@@ -181,17 +200,8 @@ impl Calculator {
             Key::Rm => self.recall_memory(sw, out),
             Key::Cm => self.clear_memory(sw, out),
             Key::Sqrt => self.sqrt(sw, out),
-            // Digit keys are handled above via `key.digit()`.
-            Key::D0
-            | Key::D1
-            | Key::D2
-            | Key::D3
-            | Key::D4
-            | Key::D5
-            | Key::D6
-            | Key::D7
-            | Key::D8
-            | Key::D9 => {}
+            // entry/digit keys never reach here (handled by dispatch_key).
+            _ => {}
         }
     }
 
@@ -207,6 +217,7 @@ impl Calculator {
         }
     }
 
+    #[inline(never)]
     fn digit(&mut self, digit: u8) {
         self.begin_entry();
         let typed = if self.wr.digits() > self.wr.scale {
@@ -232,6 +243,7 @@ impl Calculator {
 
     // --- clear ----------------------------------------------------------
 
+    #[inline(never)]
     fn clear<P: Printer>(&mut self, out: &mut P) {
         // C clears WR, DR, SR, TR and the overflow flag; memory is preserved.
         self.wr = Num::ZERO;
@@ -252,6 +264,7 @@ impl Calculator {
         out.print(&Row::num_a(&Num::ZERO, SymA::Clear));
     }
 
+    #[inline(never)]
     fn overflow<P: Printer>(&mut self, out: &mut P) {
         self.lamps.overflow = true;
         out.print(&Row::overflow());
@@ -259,6 +272,7 @@ impl Calculator {
 
     // --- addition / subtraction ----------------------------------------
 
+    #[inline(never)]
     fn add_sub<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         // Operand: the new entry, else repeat the last working value.
         if self.entering {
@@ -301,6 +315,27 @@ impl Calculator {
     /// second op key with no new entry is an **operation correction**: the ROM
     /// reprints only the op glyph with a BLANK value (2-8 `× ÷ ×`), the operand
     /// already latched.
+    #[inline(never)]
+    fn mul_div_chain<P: Printer>(&mut self, op: MulOp, entered: bool, sw: Switches, out: &mut P) {
+        // Chain: a new op after a pending multiply/divide. Echo the operand in
+        // WR with the new op glyph, then compute the pending product/quotient,
+        // whose result feeds the next op. Extracted from mul_div_key so each
+        // stays under a 4004 ROM bank window.
+        let shown = operand_shown(&self.wr, entered, sw.dp);
+        out.print(&Row::num_a(&shown, sym_for(op)));
+        if let Some(r) = self.compute() {
+            self.wr = r;
+            self.dr = r;
+            self.cr = r;
+            self.mop = op;
+            self.mode = Mode::MulDiv;
+            self.op_from_entry = false; // operand is a computed result
+        } else {
+            self.overflow(out);
+        }
+    }
+
+    #[inline(never)]
     fn mul_div_key<P: Printer>(&mut self, op: MulOp, sw: Switches, out: &mut P) {
         let entered = self.entering;
         if entered {
@@ -323,24 +358,8 @@ impl Calculator {
                 self.op_from_entry = false; // operand recalled, not typed
             }
             Mode::New if matches!(self.mop, MulOp::Mul | MulOp::Div) => {
-                // Chain: a new op after a pending multiply/divide. The ROM first
-                // echoes the operand now in WR with the new op glyph (spec A6 —
-                // e.g. 2-4 `4.56 ×`, 3-4 `6 ÷`, 5-1 `12.4 ÷`, 8-1 `1368 ×`),
-                // then computes the pending product/quotient, whose result feeds
-                // the next op. A freshly typed operand echoes at its entered
-                // scale; a recalled one is aligned to DP.
-                let shown = operand_shown(&self.wr, entered, sw.dp);
-                out.print(&Row::num_a(&shown, sym_for(op)));
-                if let Some(r) = self.compute() {
-                    self.wr = r;
-                    self.dr = r;
-                    self.cr = r;
-                    self.mop = op;
-                    self.mode = Mode::MulDiv;
-                    self.op_from_entry = false; // operand is a computed result
-                } else {
-                    self.overflow(out);
-                }
+                // Chain (extracted to keep mul_div_key under a ROM bank).
+                self.mul_div_chain(op, entered, sw, out);
             }
             Mode::MulDiv if !entered => {
                 // Operation correction: an op key pressed straight after another
@@ -367,6 +386,7 @@ impl Calculator {
     }
 
     /// Evaluate `DR (op) WR` (or the constant variant) into a floating result.
+    #[inline(never)]
     fn compute(&mut self) -> Option<Num> {
         match self.mop {
             MulOp::Mul => self.dr.mul(&self.wr),
@@ -405,6 +425,7 @@ impl Calculator {
 
     // --- equals ---------------------------------------------------------
 
+    #[inline(never)]
     fn equals<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.mode == Mode::AddSub {
             // Recall and clear the main total.
@@ -432,6 +453,7 @@ impl Calculator {
     /// entered scale when the pending operation itself began from a typed entry
     /// (e.g. `8 * M=+` → `8`), otherwise rescaled to the current DP (e.g. a
     /// repeat chain `2 M+ * =` → `2.000000`).
+    #[inline(never)]
     fn print_operand<P: Printer>(&self, fresh: bool, sw: Switches, out: &mut P) {
         let shown = if fresh || self.op_from_entry {
             self.wr
@@ -446,15 +468,10 @@ impl Calculator {
     /// Execute the pending mul/div for `=`/`%`/`M=±`, print the result row with
     /// `symbol`, and update constant-operation state. `scale_pct` scales the
     /// result for percent (divide → ×100, multiply → ÷100 already folded).
-    fn do_mul_div_equals<P: Printer>(
-        &mut self,
-        sw: Switches,
-        out: &mut P,
-        sym_b: SymB,
-        pct: Option<MulOp>,
-    ) -> Option<Num> {
+    #[inline(never)]
+    fn compute_mul_div(&mut self, sw: Switches, pct: Option<MulOp>) -> Option<Num> {
         // Determine the concrete operation and whether a constant is reused.
-        let result = match self.mop {
+        match self.mop {
             MulOp::Mul => {
                 let r = self.dr.mul(&self.wr);
                 // After `=`, the multiplicand constant stays in CR (const mul).
@@ -497,7 +514,21 @@ impl Calculator {
                     Self::div_result(&self.dr, &self.wr, sw)
                 }
             }
-        };
+        }
+    }
+
+    #[inline(never)]
+    fn do_mul_div_equals<P: Printer>(
+        &mut self,
+        sw: Switches,
+        out: &mut P,
+        sym_b: SymB,
+        pct: Option<MulOp>,
+    ) -> Option<Num> {
+        // Operation selection (which product/quotient, and the const-operand
+        // bookkeeping) is extracted into its own #[inline(never)] helper so
+        // do_mul_div_equals stays under a 4004 ROM bank.
+        let result = self.compute_mul_div(sw, pct);
         let mut value = match result {
             Some(v) => v,
             None => {
@@ -537,6 +568,7 @@ impl Calculator {
 
     // --- percent --------------------------------------------------------
 
+    #[inline(never)]
     fn percent<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -555,6 +587,7 @@ impl Calculator {
 
     // --- exchange -------------------------------------------------------
 
+    #[inline(never)]
     fn exchange<P: Printer>(&mut self, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -570,6 +603,7 @@ impl Calculator {
 
     // --- subtotal / reference ------------------------------------------
 
+    #[inline(never)]
     fn subtotal_key<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         if self.entering {
             // Reference number / date: printed as typed, changes nothing.
@@ -602,6 +636,7 @@ impl Calculator {
 
     // --- memory ---------------------------------------------------------
 
+    #[inline(never)]
     fn memory_add<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         if self.entering {
             self.take_entry();
@@ -631,6 +666,7 @@ impl Calculator {
     /// with `=`, then the product/quotient with `M+`/`M-`), then accumulate the
     /// product/quotient into memory (the printed row is the product, not the
     /// running memory sum — the oracle prints the product; `CM` shows the sum).
+    #[inline(never)]
     fn memory_eq<P: Printer>(&mut self, minus: bool, sw: Switches, out: &mut P) {
         let fresh = self.entering;
         if self.entering {
@@ -668,6 +704,7 @@ impl Calculator {
 
     /// Execute the pending mul/div for `M=±`, returning the raw floating result
     /// without printing. Updates constant-operation state like `=`.
+    #[inline(never)]
     fn compute_equals<P: Printer>(&mut self, out: &mut P) -> Option<Num> {
         let result = match self.mop {
             MulOp::Mul => {
@@ -708,6 +745,7 @@ impl Calculator {
         }
     }
 
+    #[inline(never)]
     fn recall_memory<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         self.wr = self.mr;
         self.entering = false;
@@ -719,6 +757,7 @@ impl Calculator {
         out.print(&Row::number(&zero_as_bare(shown), SymA::Recall, SymB::Mem));
     }
 
+    #[inline(never)]
     fn clear_memory<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         let value = self.mr;
         let (shown, _rounded) = value.round_at(sw.dp, sw.rounding == Rounding::Round);
@@ -734,6 +773,7 @@ impl Calculator {
 
     // --- square root ----------------------------------------------------
 
+    #[inline(never)]
     fn sqrt<P: Printer>(&mut self, sw: Switches, out: &mut P) {
         let fresh = self.entering;
         if self.entering {
@@ -825,6 +865,7 @@ fn subtotal_row(shown: &Num, _rounded: bool) -> Row {
 /// A result row carrying `sym_b` (total `*`, or `M+`/`M-` for `M=±`), plus the
 /// rounded-up `^` mark in column A when `rounded` (spec A8: e.g. `56.09 ^ *`,
 /// `12.72 ^ M+`).
+#[inline(never)]
 fn result_row(shown: &Num, rounded: bool, sym_b: SymB) -> Row {
     let sym_a = if rounded { SymA::Rounded } else { SymA::None };
     Row::number(shown, sym_a, sym_b)

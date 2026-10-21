@@ -145,6 +145,7 @@ impl<'a, H: Hal> KeyboardDriver<'a, H> {
     /// One scan pass: walk the active-low bit Q0..Q7, decode a pressed key in
     /// each key row, enqueue newly pressed keys into `buffer`. Returns the
     /// switch positions read on Q8/Q9 in the same pass.
+    #[inline(never)]
     pub fn scan_pass(&mut self, buffer: &mut KeyBuffer) -> Switches {
         self.start_scan();
         let mut dp = 0u8;

@@ -24,6 +24,13 @@ public:
   StringRef getPassName() const override { return "I4004 Assembly Printer"; }
 
   void emitInstruction(const MachineInstr *MI) override;
+
+  // Emit a per-function absolute symbol __framesize_<fn> = total stack size in
+  // 4002 characters (bytes*2). The packer's frame-overlay allocator reads it to
+  // size each __frame_<fn>, so a large alloca accessed only by a base pointer
+  // (LEA_FI + memset/memcpy) is counted at its FULL extent, not just its base
+  // reloc -- otherwise the next frame overlaps it and the firmware corrupts RAM.
+  void emitFunctionBodyEnd() override;
 };
 
 } // end namespace llvm

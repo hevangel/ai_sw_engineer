@@ -19,6 +19,9 @@ class I4004MCAsmInfo : public MCAsmInfoELF {
 
 public:
   explicit I4004MCAsmInfo(const Triple &TT, const MCTargetOptions &Options);
+
+  void printSpecifierExpr(raw_ostream &OS,
+                          const MCSpecifierExpr &Expr) const override;
 };
 
 } // namespace llvm

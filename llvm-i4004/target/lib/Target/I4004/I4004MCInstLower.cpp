@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "I4004MCInstLower.h"
+#include "I4004InstrInfo.h"
+#include "MCTargetDesc/I4004Specifiers.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
@@ -33,9 +35,17 @@ MCOperand I4004MCInstLower::lowerOperand(const MachineOperand &MO) const {
     return MCOperand::createReg(MO.getReg());
   case MachineOperand::MO_Immediate:
     return MCOperand::createImm(MO.getImm());
-  case MachineOperand::MO_MachineBasicBlock:
-    return MCOperand::createExpr(
-        MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), Ctx));
+  case MachineOperand::MO_MachineBasicBlock: {
+    const MCExpr *Expr =
+        MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), Ctx);
+    // A soft-call FIM references the return block with a %lo8/%page specifier.
+    unsigned TF = MO.getTargetFlags();
+    if (TF == I4004II::MO_LO8)
+      Expr = MCSpecifierExpr::create(Expr, I4004::S_LO8, Ctx);
+    else if (TF == I4004II::MO_PAGE)
+      Expr = MCSpecifierExpr::create(Expr, I4004::S_PAGE, Ctx);
+    return MCOperand::createExpr(Expr);
+  }
   case MachineOperand::MO_GlobalAddress:
     return lowerSymbolOperand(MO, Printer.getSymbol(MO.getGlobal()));
   case MachineOperand::MO_ExternalSymbol:

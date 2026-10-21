@@ -16,6 +16,7 @@ add_public_tablegen_target(I4004CommonTableGen)
 
 add_llvm_target(I4004CodeGen
   I4004AsmPrinter.cpp
+  I4004BranchRelax.cpp
   I4004ExpandPseudos.cpp
   I4004FrameLowering.cpp
   I4004ISelDAGToDAG.cpp
@@ -23,6 +24,7 @@ add_llvm_target(I4004CodeGen
   I4004InstrInfo.cpp
   I4004MachineFunctionInfo.cpp
   I4004MCInstLower.cpp
+  I4004Peephole.cpp
   I4004RegisterInfo.cpp
   I4004SelectionDAGInfo.cpp
   I4004Subtarget.cpp

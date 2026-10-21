@@ -32,6 +32,31 @@ _start:
 	ldm	0
 	dcl
 
+	; -- 1b. active-bank mirror = 0 (xl bank switching, 8-bit latch). The ROM
+	; bank latch is now TWO 4001 output-port nibbles: low on chip 3 (SRC 0x30),
+	; high on chip 4 (SRC 0x40), giving an 8-bit (256-bank) selector that the
+	; >16-bank firmware needs. The trampolines/__soft_ret keep a 2-char RAM
+	; mirror of the active bank: low nibble @ 0x0F, high nibble @ 0x0E of
+	; chip0/reg0. Clear both mirror chars AND both latch ports so the reset
+	; state is bank 0 and the halt return token (pushed below via __push_pg,
+	; which reads the mirror) carries bank 0. Harmless on the stock board.
+	fim	p0, 0x0f
+	src	p0
+	ldm	0
+	wrm			; __cur_bank.lo = 0
+	fim	p0, 0x0e
+	src	p0
+	ldm	0
+	wrm			; __cur_bank.hi = 0
+	fim	p0, 0x30
+	src	p0
+	ldm	0
+	wrr			; ROM bank latch low nibble (chip 3) = 0
+	fim	p0, 0x40
+	src	p0
+	ldm	0
+	wrr			; ROM bank latch high nibble (chip 4) = 0
+
 	; -- 2. SSP = __sstack_base --
 	fim	p7, __sstack_base
 
@@ -106,7 +131,15 @@ _start:
 	jcn	nz, .Ldata_loop
 .Ldata_skip:
 
-	; -- 5. call main --
-	jms	main
+	; -- 5. call main via the SOFTWARE-call convention --
+	; main is a compiled function: it returns via `jun __soft_ret`, which pops
+	; the P7 soft stack, so it must be ENTERED the soft way (push a return token
+	; for .Lhalt, then JUN main) -- NOT `jms main`. Use the same P0-only leaf
+	; push helpers the backend emits (abi.md 4.4.1).
+	fim	p0, %lo8(.Lhalt)
+	jms	__push_off
+	fim	p0, %page(.Lhalt)
+	jms	__push_pg
+	jun	main
 .Lhalt:
 	jun	.Lhalt			; main returned: spin forever

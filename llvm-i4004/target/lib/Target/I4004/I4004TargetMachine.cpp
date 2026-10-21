@@ -41,6 +41,8 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeI4004Target() {
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeI4004DAGToDAGISelLegacyPass(PR);
   initializeI4004ExpandPseudosPass(PR);
+  initializeI4004PeepholePass(PR);
+  initializeI4004BranchRelaxPass(PR);
 }
 
 I4004TargetMachine::I4004TargetMachine(const Target &T, const Triple &TT,
@@ -93,4 +95,8 @@ bool I4004PassConfig::addInstSelector() {
 void I4004PassConfig::addPreEmitPass() {
   // Expand the ACC-centric pseudos into real MCS-4 instruction sequences.
   addPass(createI4004ExpandPseudosPass());
+  // Make conditional branches page-independent so functions may span pages.
+  addPass(createI4004BranchRelaxPass());
+  // Then elide redundant FIM/SRC pointer setups the expansion leaves behind.
+  addPass(createI4004PeepholePass());
 }

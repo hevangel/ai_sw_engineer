@@ -41,5 +41,7 @@ def RetCC_I4004 : CallingConv<[
   CCIfType<[i16], CCAssignToReg<[D1, D2]>>
 ]>;
 
-// Callee-saved pairs (abi.md sec.4.3): P4, P5, P6.
-def CSR_I4004 : CalleeSavedRegs<(add P4, P5, P6)>;
+// Callee-saved pairs (abi.md sec.4.3): P6 only. P4:P5 (double-pair D2) is a
+// caller-saved i16 argument/return pair -- a `{ i16, ptr }` return lands its
+// second word there -- so it cannot also be callee-saved.
+def CSR_I4004 : CalleeSavedRegs<(add P6)>;

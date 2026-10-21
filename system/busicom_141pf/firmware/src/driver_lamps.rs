@@ -38,6 +38,7 @@ pub fn lamp_nibble(lamps: Lamps) -> u8 {
 }
 
 /// Write the current lamp state to RAM1.
+#[inline(never)]
 pub fn write_lamps<H: Hal>(hal: &mut H, lamps: Lamps) {
     hal.ram_port_write(RAM_LAMPS, lamp_nibble(lamps));
 }

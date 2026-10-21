@@ -21,12 +21,52 @@
 // compensation is identical to the oracle capture and the two agree. See
 // platform/README.md "JCN TEST-pin polarity".
 use chips::{mcs4::{Board, shifter4003::Shifter}, shifter::Direction};
-use arbitrary_int::u4;
+use arbitrary_int::{u2, u4};
+
+// Banked (xl) ROM support. A banked image from i4004_pack --banks is laid out as
+//   common(COMMON_BYTES) || bank0_tail(BANK_BYTES) || bank1_tail(BANK_BYTES) ...
+// where COMMON_BYTES of common ROM is mapped in EVERY bank (chips 0..COMMON/256)
+// and BANK_BYTES is the per-bank window (chips COMMON/256..16). The firmware
+// sets a bank LATCH on 4001 chip 3's output port (SRC 0x30, WRR) via the
+// __tobank_* stubs and __soft_ret; this adapter watches roms[3].ports and swaps
+// the banked chips' content on a change (the chips model itself has no bank
+// concept, and external/ is read-only). A flat image (<= 4096 B) uses no banks.
+const COMMON_BYTES_DEFAULT: usize = 0x800;
+const BANK_BYTES_DEFAULT: usize = 0x800;
+
+// Build the 4096-byte ROM view the Board sees for `bank`: common region then
+// the selected bank's tail.
+fn bank_view(common: &[u8], banked: &[u8], bank: usize, bank_bytes: usize) -> Vec<u8> {
+    let mut v = vec![0u8; 0x1000];
+    let c = common.len().min(0x1000);
+    v[..c].copy_from_slice(&common[..c]);
+    let off = bank * bank_bytes;
+    if off < banked.len() {
+        let n = (banked.len() - off).min(bank_bytes).min(0x1000 - common.len());
+        v[common.len()..common.len() + n].copy_from_slice(&banked[off..off + n]);
+    }
+    v
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let image = std::fs::read(&args[1]).unwrap();
     let schedule = std::fs::read_to_string(&args[2]).unwrap();
+    // Banked image? (produced by i4004_pack --banks; size > 4096.)
+    let common_bytes = std::env::var("COMMON_BYTES").ok()
+        .and_then(|s| usize::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(COMMON_BYTES_DEFAULT);
+    let bank_bytes = std::env::var("BANK_BYTES").ok()
+        .and_then(|s| usize::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(BANK_BYTES_DEFAULT);
+    let banked_image = image.len() > 0x1000;
+    let common: Vec<u8> = if banked_image { image[..common_bytes].to_vec() } else { Vec::new() };
+    let banked: Vec<u8> = if banked_image { image[common_bytes..].to_vec() } else { Vec::new() };
+    let first_banked_chip = common_bytes / 0x100;
+    // initial board image: bank 0 view for a banked image, else the flat image.
+    let make_initial = |img: &[u8]| -> Vec<u8> {
+        if banked_image { bank_view(&common, &banked, 0, bank_bytes) } else { img.to_vec() }
+    };
     // RAM 4002 count: stock board = 2 (bank 0 chips 0,1). The xl board passes
     // a larger count as argv[3] (or $CHIPS_RAM_COUNT) to model the added 4002s
     // across the four CM-RAM banks (chips grouped in banks of 4). rams[0]/[1]
@@ -36,7 +76,29 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .or_else(|| std::env::var("CHIPS_RAM_COUNT").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(2);
-    let mut b = Board::new(image.clone(), ram_count);
+    // Build the board's RAM. `Board::new` can only construct <= 4 4002s: it
+    // calls `u2::new(page)` per chip, which panics for page > 3. The DCL-banked
+    // firmware places per-function frames in CM-RAM banks 1-3, so the xl board
+    // needs all 16 4002s (4 banks x 4 chips) -- otherwise a frame access to
+    // bank 1-3 hits a chip that does not exist and the calculator produces no
+    // output. For ram_count > 4 we therefore build the chips BY HAND with
+    // page_mask = chip-within-bank = i % 4 (exactly as tests/exec/run_ramdcl_exec
+    // and run_frame_exec do), replacing Board's RAM. rams[0]/[1] keep the
+    // printer/lamp port roles (bank 0 chips 0/1), so the tape decode is
+    // unchanged.
+    let make_board = |img: &[u8]| -> Board {
+        let mut b = Board::new(make_initial(img), ram_count.min(4));
+        if ram_count > 4 {
+            b.rams.clear();
+            for i in 0..ram_count {
+                b.rams.push(chips::mcs4::ram4002::RAM::new(u2::new(i % 4)));
+            }
+        }
+        b
+    };
+    let mut b = make_board(&image);
+    let mut cur_bank = 0usize;
+    let mut prev_latch = 0u8;  // 8-bit latch (port4<<4|port3); bank 0 at reset
     let mut shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
     let mut spin = 0usize;
     let mut previous = 0;
@@ -47,7 +109,8 @@ fn main() {
     let sb = ["#","*","Ⅰ","Ⅱ","Ⅲ","M+","M-","T","K","E","Ex","C","M"];
     for line in schedule.lines() {
         if line.starts_with("#EXAMPLE") {
-            b = Board::new(image.clone(), ram_count);
+            b = make_board(&image);
+            cur_bank = 0; prev_latch = 0;
             shifts = [Shifter::new(), Shifter::new(), Shifter::new()];
             spin = 0; previous = 0; red = false; row.fill(" ");
         }
@@ -62,6 +125,37 @@ fn main() {
             let current = if tick < 64 { key } else { 0 };
             for _ in 0..1481 {
                 b.run_cycle();
+                // xl bank latch (8-bit): low nibble on 4001 chip-3's output
+                // port, high nibble on chip-4's. __soft_ret writes the HIGH
+                // nibble (chip 4) FIRST, then the LOW nibble (chip 3), so the
+                // chip-3 write is the COMMIT: trigger the banked-ROM reload only
+                // on a chip-3 change and read the (already-settled) high nibble
+                // from chip 4. Triggering on either nibble would reload at the
+                // transient (newhi<<4)|oldlo mid-update and map a wrong bank
+                // while control is still in the dispatch. bank=(port4<<4)|port3;
+                // 8 bits lifts the 16-bank ceiling to the 45+ banks the firmware
+                // needs.
+                if banked_image {
+                    let lo = b.roms[3].ports.value();
+                    if lo != prev_latch {
+                        prev_latch = lo;
+                        let bankn = (((b.roms[4].ports.value() as usize) & 0xF) << 4)
+                            | ((lo as usize) & 0xF);
+                        if bankn != cur_bank {
+                            cur_bank = bankn;
+                            let view = bank_view(&common, &banked, cur_bank, bank_bytes);
+                            for i in first_banked_chip..16usize {
+                                if i < b.roms.len() {
+                                    let s = i * 0x100;
+                                    let chunk: [u8; 0x100] =
+                                        view[s..s + 0x100].try_into().unwrap();
+                                    b.roms[i] = chips::mcs4::rom4001::ROM::new(
+                                        chunk, u4::new(i as u8));
+                                }
+                            }
+                        }
+                    }
+                }
                 let p = b.roms[0].ports.value();
                 shifts[0].read_write_serial(Direction::Left, p & 2 == 0, p & 1 == 0);
                 let out = shifts[1].read_write_serial(Direction::Left, p & 2 == 2, p & 4 == 0);

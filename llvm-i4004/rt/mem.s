@@ -47,8 +47,12 @@ __memset_ram:
 	src	p0			; address = P0
 	ld	r5
 	wrm				; RAM[P0] <- val.lo
-	; P0.lo++ (advance character within the register)
-	inc	r1
+	; P0++ as a FULL 8-bit SRC address so the fill crosses 4002 register and
+	; chip boundaries (a >8-byte / >16-nibble region spans registers; the char
+	; nibble alone would wrap at 16). inc low nibble; on wrap, carry into high.
+	isz	r1, .Lset_adv_done	; R1++ ; if nonzero, no carry
+	inc	r0			; R1 wrapped 15->0: carry into the reg/chip nibble
+.Lset_adv_done:
 	; count-- : decrement R6:R7 (16-bit). Use: if R7!=0 R7--, else R7=15,R6--.
 	ld	r7
 	jcn	z, .Lset_borrow
@@ -91,8 +95,15 @@ __memcpy_ram:
 	rdm				; ACC = RAM[src]
 	src	p1			; address = dst (ACC preserved)
 	wrm				; RAM[dst] = ACC
-	inc	r5			; src.lo++
-	inc	r3			; dst.lo++
+	; advance src (P2=R4:R5) and dst (P1=R2:R3) as FULL 8-bit SRC addresses so
+	; a >16-nibble copy crosses 4002 register/chip boundaries. inc low nibble;
+	; on wrap, carry into the high nibble.
+	isz	r5, .Lcpy_src_done
+	inc	r4
+.Lcpy_src_done:
+	isz	r3, .Lcpy_dst_done
+	inc	r2
+.Lcpy_dst_done:
 	; count-- (16-bit R6:R7)
 	ld	r7
 	jcn	z, .Lcpy_borrow

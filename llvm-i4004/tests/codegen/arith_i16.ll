@@ -7,7 +7,7 @@
 ; CHECK-LABEL: add16:
 ; CHECK:      clc
 ; CHECK-COUNT-4: add r{{[0-9]+}}
-; CHECK:      bbl 0
+; CHECK:      jun __soft_ret
 define i16 @add16(i16 %x, i16 %y) {
   %r = add i16 %x, %y
   ret i16 %r
@@ -16,7 +16,7 @@ define i16 @add16(i16 %x, i16 %y) {
 ; CHECK-LABEL: sub16:
 ; CHECK:      clc
 ; CHECK-COUNT-4: sub r{{[0-9]+}}
-; CHECK:      bbl 0
+; CHECK:      jun __soft_ret
 define i16 @sub16(i16 %x, i16 %y) {
   %r = sub i16 %x, %y
   ret i16 %r
