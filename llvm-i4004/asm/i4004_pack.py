@@ -1219,37 +1219,122 @@ class Linker:
                 return sec.base + sym.value + rel.addend
             return None
         changed = False
-        # Process relocs in increasing offset so earlier inserts shift later ones.
-        page_relocs = sorted((r for r in rels
-                              if r.rtype in (R_I4004_PAGE8, R_I4004_FIN8)),
-                             key=lambda r: r.offset)
-        for rel in page_relocs:
-            operand_addr = base + rel.offset
-            operand_page = operand_addr // PAGE
-            opcode_page = (operand_addr - 1) // PAGE
-            tgt = local_target(rel)
-            tgt_page = (tgt // PAGE) if tgt is not None else operand_page
-            # ok iff opcode, operand and (local) target share one page
-            if operand_page == opcode_page and operand_page == tgt_page:
-                continue
-            # pad the 2-byte instruction (opcode at rel.offset-1) to the next
-            # page start: insert (PAGE - opcode_offset_in_page) NOPs before it.
-            op_off = rel.offset - 1
-            pad = PAGE - ((base + op_off) % PAGE)
-            if pad == 0 or pad >= PAGE:
-                continue
-            ins_at = op_off
-            sec.data = sec.data[:ins_at] + b"\x00" * pad + sec.data[ins_at:]
-            sec.size += pad
-            for r in rels:
-                if r.offset >= ins_at:
-                    r.offset += pad
-            # local symbols defined after ins_at in this section shift too
-            for s in obj.symbols:
-                if s.shndx == sec.index and s.value >= ins_at:
-                    s.value += pad
-            changed = True
+        # One reloc at a time: a relaxation/pad shifts later offsets, so after
+        # any edit we RESTART the scan (offsets, sizes and local symbols moved).
+        # Loop to a fixed point: relaxation grows code and can push another
+        # branch's +4 skip across a page, needing its own relaxation.
+        def page_reloc_list():
+            return sorted((r for r in (obj.relocs.get(sec.index) or [])
+                           if r.rtype in (R_I4004_PAGE8, R_I4004_FIN8)),
+                          key=lambda r: r.offset)
+        while True:
+            acted = False
+            for rel in page_reloc_list():
+                operand_addr = base + rel.offset
+                operand_page = operand_addr // PAGE
+                opcode_page = (operand_addr - 1) // PAGE
+                tgt = local_target(rel)
+                tgt_page = (tgt // PAGE) if tgt is not None else operand_page
+                if operand_page == opcode_page and operand_page == tgt_page:
+                    continue  # op, operand and target already share a page
+                op_off = rel.offset - 1
+                opc = sec.data[op_off] if 0 <= op_off < len(sec.data) else 0
+                hi = opc & 0xF0
+                # A JCN (0x1X) or ISZ (0x7X) whose page-local TARGET is off its
+                # own page: RELAX to a page-independent form (same scheme the
+                # backend's I4004BranchRelax uses at compile time) instead of
+                # padding the whole op to the next page (up to ~255 NOPs). The
+                # near JCN/ISZ then only skips a JUN that carries the full 12-bit
+                # target, so it is page-local by construction.
+                far_target = (tgt is not None and tgt_page != opcode_page)
+                # The relaxed block's near JCN/ISZ skip (.+4/.+6) must stay on
+                # ONE page; if the op sits within the block length of a page end,
+                # pad it to the next page start FIRST (cheap -- the op is tiny),
+                # then relax on the next fix-point pass.
+                blk = 4 if (far_target and hi == 0x10) else (6 if (far_target and hi == 0x70) else 0)
+                op_pagerel = (base + op_off) % PAGE
+                block_fits = blk and (op_pagerel + blk - 1 < PAGE)
+                if far_target and hi == 0x10 and block_fits:  # JCN cc, T  (far)
+                    # JCN !cc, .+4 ; JUN T   (op=op_off, 4 bytes; was 2 -> +2)
+                    inv = (opc ^ 0x08) & 0xFF            # toggle JCN invert bit
+                    skip = (op_off + 4) & 0xFF           # page-local .+4 operand
+                    newb = bytes([inv, skip, 0x40, 0x00])  # JCN !cc,.+4 ; JUN ?
+                    self._splice_relax(obj, sec, op_off, 2, newb,
+                                       jun_reloc_offsets=[(op_off + 3, rel.sym,
+                                                           rel.addend)],
+                                       drop_reloc=rel)
+                    acted = True; changed = True; break
+                if far_target and hi == 0x70 and block_fits:  # ISZ Rn, T  (far)
+                    # ISZ Rn, .+4 ; JUN Cont(.+6) ; JUN T    (6 bytes; +4)
+                    skip = (op_off + 4) & 0xFF
+                    cont = (op_off + 6) & 0xFF
+                    newb = bytes([opc, skip, 0x40, 0x00, 0x40, 0x00])
+                    self._splice_relax(obj, sec, op_off, 2, newb,
+                                       jun_reloc_offsets=[(op_off + 3, None, cont),
+                                                          (op_off + 5, rel.sym,
+                                                           rel.addend)],
+                                       drop_reloc=rel, cont_abs=base + cont)
+                    acted = True; changed = True; break
+                # Otherwise (a 2-byte op straddling a page boundary, or a FIN8
+                # whose on-page constant rolled off): pad the op to the next page
+                # start. The op here is small / on-page-target, so the pad is
+                # bounded, not the 249-byte pathology relaxation removed.
+                pad = PAGE - ((base + op_off) % PAGE)
+                if pad == 0 or pad >= PAGE:
+                    continue
+                ins_at = op_off
+                sec.data = sec.data[:ins_at] + b"\x00" * pad + sec.data[ins_at:]
+                sec.size += pad
+                for r in (obj.relocs.get(sec.index) or []):
+                    if r.offset >= ins_at:
+                        r.offset += pad
+                for s in obj.symbols:
+                    if s.shndx == sec.index and s.value >= ins_at:
+                        s.value += pad
+                acted = True; changed = True; break
+            if not acted:
+                break
         return changed
+
+    def _splice_relax(self, obj, sec, at, old_len, new_bytes,
+                      jun_reloc_offsets, drop_reloc, cont_abs=None):
+        """Replace `old_len` bytes at section offset `at` with `new_bytes`
+        (the relaxed JCN/ISZ + JUN sequence). Shifts every reloc/local-symbol at
+        or after `at` by the net growth, drops the original page-local reloc,
+        and adds an ADDR12 reloc for each synthesized JUN. `jun_reloc_offsets`
+        is a list of (operand_section_offset, sym_index_or_None, addend): a
+        None sym means a section-local target at absolute `cont_abs` (a fresh
+        local symbol is created for it)."""
+        grow = len(new_bytes) - old_len
+        sec.data = sec.data[:at] + bytes(new_bytes) + sec.data[at + old_len:]
+        sec.size += grow
+        rels = obj.relocs.setdefault(sec.index, [])
+        # drop the original page-local reloc (its op is gone/rewritten)
+        if drop_reloc in rels:
+            rels.remove(drop_reloc)
+        # shift existing relocs/symbols at/after `at` by the growth
+        for r in rels:
+            if r.offset >= at:
+                r.offset += grow
+        for s in obj.symbols:
+            if s.shndx == sec.index and s.value >= at:
+                s.value += grow
+        # add the JUN ADDR12 relocs (operand offsets are in the NEW layout, i.e.
+        # already relative to the spliced bytes at `at`, so they are < at+len
+        # and were NOT shifted above).
+        for (operand_off, sym, addend) in jun_reloc_offsets:
+            if sym is None:
+                # section-local Cont target: make a local symbol at cont_abs
+                cont_off = cont_abs - sec.base
+                sym_idx = len(obj.symbols)
+                obj.symbols.append(Symbol(
+                    name=f".Lrlxcont_{sec.index}_{cont_off:x}",
+                    value=cont_off, size=0, info=0x00, shndx=sec.index))
+                rels.append(Reloc(offset=operand_off - 1, sym=sym_idx,
+                                  rtype=R_I4004_ADDR12, addend=0))
+            else:
+                rels.append(Reloc(offset=operand_off - 1, sym=sym,
+                                  rtype=R_I4004_ADDR12, addend=addend))
 
     def _place_rom_banked(self):
         """xl bank-switched placement. Common ROM sections (.reset/.rodata +
