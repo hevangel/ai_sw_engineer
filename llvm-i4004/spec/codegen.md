@@ -43,7 +43,7 @@ The backend therefore splits the work in two:
      down to these.
    - ISel emits pseudo-instructions on pairs: `MOVi8`, `ADDi8`, `SUBi8`,
      `LOGICIi8`, `SHIFTIi8`, `NIBSELi8`, `BRCCi8`/`BRCCi8ri`, `RAMRS`/`RAMWS`,
-     `LDRAMi8`/`STRAMi8`, `ZEXT8TO16`, `SPILL`/`RELOAD`, `CALL`, `RETpseudo`, …
+     `LDRAMi8`/`STRAMi8`, `ZEXT8TO16`, `SPILL8/16`/`RELOAD8/16`, `CALL`, `RETpseudo`, …
    - Each pseudo declares `ACC`/`CY` as implicit defs. The greedy allocator
      sees a two-address machine with six usable pairs (P1–P6).
 2. **`I4004ExpandPseudos.cpp` lowers each pseudo to real nibble code after
@@ -76,6 +76,13 @@ There is no data stack and no direct load/store. A data pointer names a 4002
 character: `SRC` selects it, `RDM`/`WRM` (and `RD0-3`/`WR0-3` for status
 characters) move one nibble. Address spaces separate RAM data, RAM status
 characters and ROM constants (`FIN`); see `abi.md` §1.3.
+
+**RAM intrinsics (issue #18, C4).** A call to `__ram_rd(a)`, `__ram_wr(a, v)`,
+`__ram_rs<k>(a)` or `__ram_ws<k>(a, v)` is not a call. `LowerCall` turns it
+into the pseudos `RAMRD`/`RAMWR`/`RAMRS`/`RAMWS` (and `RAMWRi`/`RAMWSi` for a constant value), which expand to `SRC` plus
+one `RDM`/`WRM`/`RDk`/`WRk`. The status index `k` is part of the name, so it is
+a constant. A title gets nibble-level RAM access with no pointer arithmetic
+and no call overhead (the Busicom firmware's `src/ram.rs`).
 
 **Static frames.** Each function that spills gets a static frame in RAM, not
 a stack frame:

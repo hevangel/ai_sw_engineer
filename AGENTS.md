@@ -112,6 +112,15 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 ### Documentation
 - Markdown everywhere. Maintain `system/README.md` (system index) and `llvm-*/README.md`.
 - Every software README states the original's year, authors, sources and the current status. Historical dates are sourced; uncertainty is stated, not guessed.
+- **Design docs stay current.** Status docs (README status, `report/`, `size_history.md`, plan tables) record results. Design docs record how the thing works, and they go stale silently unless someone keeps them current. The design docs are:
+  - **Backend:** `spec/codegen.md`, `spec/abi.md`.
+  - **Title:** `spec/spec.md` (behavior and the assumption ledger), `spec/io.md` (I/O contract and drivers), `plans/testplan.md`, and the README layout table and run commands.
+  - **Platform:** `memory_map.md`, `io_map.md`.
+
+  A change that alters what one of them says updates it in the same change: a new data layout or RAM map, a driver moved to assembly, a new test level, a new script, a calling-convention change.
+- Every `ASSUMPTION` in code cites a ledger ID (`ASSUMPTION (spec M3-K2): …`), and that ID exists in `spec/spec.md` with the same meaning. A new assumption gets a new ID; an ID is never reused for something else.
+- A superseded design is marked frozen or historical with a date, not deleted. If a design doc disagrees with the code, the doc is the defect: fix it when you find it, even outside your task.
+- Before finishing a task, check the design docs for the area you changed. A status update alone (README line, report) does not count as updating the docs.
 
 ### Scripts
 - Bash, `set -euo pipefail`, clear status lines, nonzero on failure. Shell scripts are LF (`.gitattributes`).
@@ -126,6 +135,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - [ ] Backend changes: `spec/codegen.md` and `spec/abi.md` match the code (design changes documented in the same PR)
 - [ ] Size scoreboard: a title whose target image is not yet signed off adds a row to `report/size_history.md` (date, commit, `.text`, image, largest function, call/libcall counts, host and target status) for every landing that touches it or its backend, measured the same way as the previous rows
 - [ ] README / report updated
+- [ ] Design docs for every touched area match the code (title `spec/`, `testplan.md`, README layout; platform `memory_map.md`/`io_map.md`); every `ASSUMPTION` ID in the diff exists in `spec/spec.md`
 
 ## Learning From Escaped Defects
 

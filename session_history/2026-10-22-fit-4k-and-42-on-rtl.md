@@ -45,6 +45,6 @@ session; the user asked not to commit yet.
 ## Not done
 
 - Nothing committed; `bin/` image not added (waits for sign-off).
-- Plan tasks C2–C4 (nibble args, TTI, intrinsics) were not needed and not
+- Plan tasks C2 and C3 (nibble args, TTI) were not needed and not
   done.
 - 1 B of ROM headroom.

@@ -175,7 +175,7 @@ impl Row {
     /// digits when `scale > 0`.
     ///
     /// On the target the row is built by `__pr_row` (asm/drivers.s, through
-    /// [`Printer::number`]); this is its twin. ASSUMPTION: a printed number has
+    /// [`Printer::number`]); this is its twin. ASSUMPTION (spec M5-W1): a printed number has
     /// width <= 14 and scale <= 13 (it is rounded to the DP or to FL's 13
     /// digits first), so it fits the 15 columns; `__pr_row` takes both mod 16.
     pub fn number(n: Num, sym_a: SymA, sym_b: SymB) -> Row {

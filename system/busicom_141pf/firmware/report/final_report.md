@@ -30,7 +30,7 @@ What is in the 4,095 B (from `build/target/firmware.map`):
 
 The 2026-10-21 build was ~57 KB of `.text` in 48 ROM banks. Issue #18's plan
 replaced it in three layers: A (backend), B (data model) and C1 (calls).
-C2–C4 were not needed. The levers below are in order of how much they saved.
+C4 was done for RAM access (the `__ram_*` intrinsics lower inline); C2 and C3 were not needed. The levers below are in order of how much they saved.
 
 The trade-off first: about half the ROM (1,997 B) is hand-written 4004
 assembly, not compiled Rust. The Rust that remains is the calculator logic:

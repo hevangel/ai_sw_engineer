@@ -130,7 +130,8 @@ __kb_scan:
 ; __pr_print(): print the row in the print register (PR = 0xE0, print.rs:
 ; main chars 0-14 = each numeric column's drum sector, S0/S1 = the sectors of
 ; symbol columns A/B, S2 bit 0 = red) on one drum revolution, then advance the
-; paper. Drum timing: TEST changes every half-spin, a sector is two half-spins,
+; paper. Drum timing (ASSUMPTION, spec M3-P2): TEST changes every half-spin,
+; a sector is two half-spins,
 ; and the index (ROM2 bit 0) rises one half-spin before sector 0. Only TEST
 ; edges are counted, never its level: external/chips and the RTL present the
 ; same pin with opposite JCN polarity (failure_notes/2026-10-22-busicom_141pf-
@@ -294,7 +295,7 @@ __pr_print:
 	jms	.Lpr_edge	; two TEST edges: the next sector
 	jms	.Lpr_edge
 	jun	3b
-6:	jms	.Lpr_edge	; let sector 12's hammers finish first
+6:	jms	.Lpr_edge	; let sector 12's hammers finish first (spec M3-P3)
 	fim	p0, 0		; advance the paper: RAM0 bit 3 rising edge
 	src	p0
 	ld	r10
