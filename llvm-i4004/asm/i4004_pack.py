@@ -38,6 +38,7 @@ Page-local policy (abi.md sec.5.1, isa.md sec.9):
 from __future__ import annotations
 
 import argparse
+import bisect
 import os
 import struct
 import sys
@@ -355,12 +356,49 @@ class Linker:
                     self.global_syms[sym.name] = (obj, sym)
 
     # -- section placement --------------------------------------------------
+    def _gc_sections(self):
+        """--gc-sections: drop every ROM/RAM section not reachable from a
+        `.reset` section through relocations (the runtime library is one big
+        pile of helpers; only the ones the firmware references may cost ROM).
+        A dropped section is marked `dead` and never placed."""
+        STT_SECTION = 3
+        live, work = set(), []
+
+        def mark(sec):
+            if id(sec) not in live:
+                live.add(id(sec))
+                work.append(sec)
+
+        owner = {}
+        for obj in self.objs:
+            for sec in obj.sections:
+                owner[id(sec)] = obj
+                if sec.name.startswith(".reset"):
+                    mark(sec)
+        while work:
+            sec = work.pop()
+            obj = owner[id(sec)]
+            for rel in obj.relocs.get(sec.index) or []:
+                sym = obj.symbols[rel.sym]
+                if sym.shndx == 0:
+                    g = self.global_syms.get(sym.name)
+                    if g is not None:
+                        g_obj, g_sym = g
+                        mark(g_obj.sections[g_sym.shndx])
+                elif sym.shndx < len(obj.sections):
+                    mark(obj.sections[sym.shndx])
+        for obj in self.objs:
+            for sec in obj.sections:
+                if classify(sec.name) in ("rom", "ram_load", "ram_noload") \
+                        and id(sec) not in live:
+                    sec.dead = True
+
     def _ordered_rom_inputs(self):
         """Return ROM input sections, .reset first, then .text, then .rodata."""
         buckets = {".reset": [], ".text": [], ".rodata": []}
         for obj in self.objs:
             for sec in obj.sections:
-                if classify(sec.name) != "rom":
+                if classify(sec.name) != "rom" or getattr(sec, "dead", False):
                     continue
                 for pfx in (".reset", ".text", ".rodata"):
                     if sec.name == pfx or sec.name.startswith(pfx + "."):
@@ -368,25 +406,80 @@ class Linker:
                         break
         return buckets[".reset"] + buckets[".text"] + buckets[".rodata"]
 
+    def _page_packed(self, items):
+        """Order code sections so that as few as possible cross a 256-byte page:
+        a section on one page needs no branch relaxation or straddle padding.
+        Greedy: at each address take the largest section that still fits the
+        rest of the page; when none fits, take a section longer than a page
+        (it crosses pages anyway), else the largest remaining one. `.reset`
+        stays first and `.rodata` last; the order is deterministic (ties keep
+        input order). Re-run on every relaxation pass: safe, as relaxed
+        operands are relocations, not bytes computed from a section's base."""
+        if self.pad_pages or os.environ.get("I4004_PACK_INPUT_ORDER"):
+            return items
+        head = [it for it in items if it[1].name == ".reset"]
+        tail = [it for it in items if it[1].name.startswith(".rodata")]
+        pool = [it for it in items if it not in head and it not in tail]
+        out, addr = list(head), sum(s.size for _, s in head)
+        while pool:
+            room = PAGE - addr % PAGE
+            fits = [it for it in pool if it[1].size <= room]
+            if fits:
+                # Fill the rest of the page as exactly as possible (subset sum
+                # over the sections that fit), so few small ones straddle.
+                best = {0: []}
+                for i, it in enumerate(fits):
+                    for s, chosen in list(best.items()):
+                        t = s + it[1].size
+                        if t <= room and t not in best:
+                            best[t] = chosen + [i]
+                picks = [fits[i] for i in best[max(best)]]
+            else:
+                big = [it for it in pool if it[1].size > PAGE]
+                picks = [big[0] if big else max(pool, key=lambda it: it[1].size)]
+            for pick in picks:
+                pool.remove(pick)
+                out.append(pick)
+                addr += pick[1].size
+        return out + tail
+
     def _place_rom(self):
         if self.banks:
             return self._place_rom_banked()
-        addr = 0
-        for obj, sec in self._ordered_rom_inputs():
-            align = max(sec.addralign, 1)
-            addr = (addr + align - 1) & ~(align - 1)
-            is_code = not (sec.name == ".rodata" or sec.name.startswith(".rodata"))
-            if self.pad_pages and is_code and sec.size > 0:
-                # keep a code section whole inside one 256-byte page
-                if sec.size > PAGE:
-                    raise LinkError(
-                        f"{obj.path}:{sec.name} is {sec.size} bytes > one 256-byte "
-                        f"page; cannot keep it page-local (split the function)")
-                if (addr // PAGE) != ((addr + sec.size - 1) // PAGE):
-                    addr = (addr + PAGE - 1) & ~(PAGE - 1)  # bump to next page
-            sec.base = addr
-            self.placed.append(Placed(obj, sec, addr, -1, "rom"))
-            addr += sec.size
+        # Place, then relax/pad every page-local branch (JCN/ISZ/FIN) whose
+        # target or operand ended up on another 256-byte page; that grows a
+        # section, so re-place to a fixed point. The compiler emits plain
+        # page-local branches (issue #18: compile-time relaxation of EVERY
+        # branch cost 2 bytes each), so this is what makes a function that
+        # spans pages encodable.
+        start = len(self.placed)
+        while True:
+            del self.placed[start:]
+            items = self._page_packed(list(self._ordered_rom_inputs()))
+            addr = 0
+            for obj, sec in items:
+                align = max(sec.addralign, 1)
+                addr = (addr + align - 1) & ~(align - 1)
+                is_code = not (sec.name == ".rodata" or sec.name.startswith(".rodata"))
+                if self.pad_pages and is_code and sec.size > 0:
+                    # keep a code section whole inside one 256-byte page
+                    if sec.size > PAGE:
+                        raise LinkError(
+                            f"{obj.path}:{sec.name} is {sec.size} bytes > one 256-byte "
+                            f"page; cannot keep it page-local (split the function)")
+                    if (addr // PAGE) != ((addr + sec.size - 1) // PAGE):
+                        addr = (addr + PAGE - 1) & ~(PAGE - 1)  # bump to next page
+                sec.base = addr
+                self.placed.append(Placed(obj, sec, addr, -1, "rom"))
+                addr += sec.size
+            changed = False
+            for obj, sec in items:
+                is_code = not (sec.name == ".rodata" or sec.name.startswith(".rodata"))
+                if is_code and sec.size and self._page_align_section(obj, sec, sec.base):
+                    changed = True
+                    break
+            if not changed:
+                break
         self.rom_used = addr
         if addr > self.rom_len:
             raise LinkError(
@@ -926,6 +1019,79 @@ class Linker:
             img[st + 2 * k] = 0x40 | (k & 0x0F)
             img[st + 2 * k + 1] = STUB_OFF
 
+    def _assert_call_depth(self, limit=3):
+        """issue #18 C1: with JMS/BBL calls (no --softcall) every return address
+        lives on the 4004's 3-level hardware stack, so the static JMS nesting
+        below `main` (entered by JUN) must be <= `limit`. Builds the JMS call
+        graph over placed ROM sections, rejects recursion, and on overflow
+        names the deepest path -- the fix is to inline a leaf, not to re-enable
+        soft calls (issue #18 plan, C1)."""
+        if getattr(self, "want_softcall", False):
+            return
+        spans = sorted((p.sec.base, p.sec.base + p.sec.size, p.sec)
+                       for p in self.placed if p.kind == "rom" and p.sec.size)
+        starts = [s[0] for s in spans]
+
+        def sec_at(addr):
+            i = bisect.bisect_right(starts, addr) - 1
+            if i >= 0 and spans[i][0] <= addr < spans[i][1]:
+                return spans[i][2]
+            return None
+
+        callees = {}
+        selfcall = set()
+        for obj in self.objs:
+            for sec in obj.sections:
+                rels = obj.relocs.get(sec.index)
+                if not rels or sec.base < 0 or classify(sec.name) != "rom":
+                    continue
+                for rel in rels:
+                    if rel.rtype != R_I4004_ADDR12 or rel.offset >= len(sec.data):
+                        continue
+                    if sec.data[rel.offset] & 0xF0 != 0x50:  # JMS only
+                        continue
+                    to = sec_at(self._target_addr(obj, rel) or -1)
+                    if to is sec:
+                        # a local subroutine of a hand-written routine
+                        # (`jms .Lsub`): one level, and it makes no call
+                        selfcall.add(id(sec))
+                    elif to is not None:
+                        callees.setdefault(id(sec), {})[id(to)] = to
+        if "main" not in self.global_syms:
+            return
+        m_obj, m_sym = self.global_syms["main"]
+        main_sec = m_obj.sections[m_sym.shndx]
+        depth, best, onpath = {}, {}, set()
+
+        def visit(sec):
+            k = id(sec)
+            if k in depth:
+                return depth[k]
+            if k in onpath:
+                raise LinkError(f"recursive JMS cycle through {sec.name}: a "
+                                "recursive call cannot use the hardware stack")
+            onpath.add(k)
+            d, nxt = (1 if k in selfcall else 0), None
+            for c in callees.get(k, {}).values():
+                cd = visit(c) + 1
+                if cd > d:
+                    d, nxt = cd, c
+            onpath.discard(k)
+            depth[k], best[k] = d, nxt
+            return d
+
+        d = visit(main_sec)
+        self.call_depth = d
+        if d > limit:
+            path, s = [], main_sec
+            while s is not None:
+                path.append(s.name)
+                s = best.get(id(s))
+            raise LinkError(
+                f"JMS call depth {d} from main exceeds the {limit}-level 4004 "
+                f"hardware stack: " + " -> ".join(path) +
+                " (inline a leaf; abi.md 4.4)")
+
     def _assert_leaf_depth(self):
         """abi.md 4.4.2 item 3: every function reached by a JMS (a hardware-stack
         call) must itself make no JMS to a non-leaf -- i.e. the JMS-reachable
@@ -1233,13 +1399,19 @@ class Linker:
                 operand_addr = base + rel.offset
                 operand_page = operand_addr // PAGE
                 opcode_page = (operand_addr - 1) // PAGE
-                tgt = local_target(rel)
-                tgt_page = (tgt // PAGE) if tgt is not None else operand_page
-                if operand_page == opcode_page and operand_page == tgt_page:
-                    continue  # op, operand and target already share a page
                 op_off = rel.offset - 1
                 opc = sec.data[op_off] if 0 <= op_off < len(sec.data) else 0
                 hi = opc & 0xF0
+                # A JCN/ISZ jumps within the page of the NEXT instruction: one in
+                # the last two bytes of a page (0xFE/0xFF) lands on the next page
+                # (MCS-4 manual), so it is padded off them like a straddle.
+                land_page = ((operand_addr + 1) // PAGE if hi in (0x10, 0x70)
+                             else operand_page)
+                tgt = local_target(rel)
+                tgt_page = (tgt // PAGE) if tgt is not None else land_page
+                if (operand_page == opcode_page and land_page == operand_page
+                        and tgt_page == land_page):
+                    continue  # op, operand, landing page and target agree
                 # A JCN (0x1X) or ISZ (0x7X) whose page-local TARGET is off its
                 # own page: RELAX to a page-independent form (same scheme the
                 # backend's I4004BranchRelax uses at compile time) instead of
@@ -1251,29 +1423,32 @@ class Linker:
                 # ONE page; if the op sits within the block length of a page end,
                 # pad it to the next page start FIRST (cheap -- the op is tiny),
                 # then relax on the next fix-point pass.
+                # Both forms skip to .+4 with a page-local operand, so .+4 itself
+                # must be on the op's page: a JCN at page offset 0xFC would skip
+                # to 0x?00 of its OWN page (found by exec_num on __n_mul).
                 blk = 4 if (far_target and hi == 0x10) else (6 if (far_target and hi == 0x70) else 0)
                 op_pagerel = (base + op_off) % PAGE
-                block_fits = blk and (op_pagerel + blk - 1 < PAGE)
+                block_fits = blk and (op_pagerel + 4 < PAGE)
                 if far_target and hi == 0x10 and block_fits:  # JCN cc, T  (far)
                     # JCN !cc, .+4 ; JUN T   (op=op_off, 4 bytes; was 2 -> +2)
                     inv = (opc ^ 0x08) & 0xFF            # toggle JCN invert bit
-                    skip = (op_off + 4) & 0xFF           # page-local .+4 operand
-                    newb = bytes([inv, skip, 0x40, 0x00])  # JCN !cc,.+4 ; JUN ?
+                    newb = bytes([inv, 0, 0x40, 0x00])  # JCN !cc,.+4 ; JUN ?
                     self._splice_relax(obj, sec, op_off, 2, newb,
                                        jun_reloc_offsets=[(op_off + 3, rel.sym,
                                                            rel.addend)],
                                        drop_reloc=rel)
+                    self._add_skip_reloc(obj, sec, op_off + 1, op_off + 4)
                     acted = True; changed = True; break
                 if far_target and hi == 0x70 and block_fits:  # ISZ Rn, T  (far)
                     # ISZ Rn, .+4 ; JUN Cont(.+6) ; JUN T    (6 bytes; +4)
-                    skip = (op_off + 4) & 0xFF
-                    cont = (op_off + 6) & 0xFF
-                    newb = bytes([opc, skip, 0x40, 0x00, 0x40, 0x00])
+                    cont = (base + op_off + 6) & 0xFF
+                    newb = bytes([opc, 0, 0x40, 0x00, 0x40, 0x00])
                     self._splice_relax(obj, sec, op_off, 2, newb,
                                        jun_reloc_offsets=[(op_off + 3, None, cont),
                                                           (op_off + 5, rel.sym,
                                                            rel.addend)],
-                                       drop_reloc=rel, cont_abs=base + cont)
+                                       drop_reloc=rel, cont_abs=base + op_off + 6)
+                    self._add_skip_reloc(obj, sec, op_off + 1, op_off + 4)
                     acted = True; changed = True; break
                 # Otherwise (a 2-byte op straddling a page boundary, or a FIN8
                 # whose on-page constant rolled off): pad the op to the next page
@@ -1285,16 +1460,48 @@ class Linker:
                 ins_at = op_off
                 sec.data = sec.data[:ins_at] + b"\x00" * pad + sec.data[ins_at:]
                 sec.size += pad
-                for r in (obj.relocs.get(sec.index) or []):
-                    if r.offset >= ins_at:
-                        r.offset += pad
-                for s in obj.symbols:
-                    if s.shndx == sec.index and s.value >= ins_at:
-                        s.value += pad
+                self._shift_section(obj, sec, ins_at, pad)
                 acted = True; changed = True; break
             if not acted:
                 break
         return changed
+
+    def _add_skip_reloc(self, obj, sec, operand_off, target_off):
+        """A relaxed JCN/ISZ's skip operand (.+4) as a PAGE8 relocation to a
+        local symbol, not a byte computed from today's base: a later splice
+        before the block (an earlier branch relaxed because this one pushed
+        its target across a page) or a moved section would leave a computed
+        byte stale (found by exec_num on __n_round, issue #18)."""
+        idx = len(obj.symbols)
+        obj.symbols.append(Symbol(
+            name=f".Lrlxskip_{sec.index}_{target_off:x}_{idx}",
+            value=target_off, size=0, info=0x00, shndx=sec.index))
+        obj.relocs.setdefault(sec.index, []).append(
+            Reloc(offset=operand_off, sym=idx, rtype=R_I4004_PAGE8, addend=0))
+
+    def _shift_section(self, obj, sec, at, grow):
+        """`grow` bytes were inserted into `sec` at offset `at`: move every
+        relocation site, local symbol and section-relative reference at or
+        after `at`. The last matters most: the assembler refers to a local
+        label as `<section symbol> + addend`, so an addend that points past
+        the insertion must grow too (otherwise a branch after a page pad or a
+        relaxation lands `grow` bytes early -- found by the BCD primitive
+        execution test, issue #18)."""
+        STT_SECTION = 3
+        for r in (obj.relocs.get(sec.index) or []):
+            if r.offset >= at:
+                r.offset += grow
+        for s in obj.symbols:
+            if s.shndx == sec.index and (s.info & 0xf) != STT_SECTION \
+                    and s.value >= at:
+                s.value += grow
+        for rels in obj.relocs.values():
+            for r in rels:
+                sym = obj.symbols[r.sym]
+                if sym.shndx == sec.index and \
+                        ((sym.info & 0xf) == STT_SECTION or sym.name == "") \
+                        and r.addend >= at:
+                    r.addend += grow
 
     def _splice_relax(self, obj, sec, at, old_len, new_bytes,
                       jun_reloc_offsets, drop_reloc, cont_abs=None):
@@ -1312,13 +1519,10 @@ class Linker:
         # drop the original page-local reloc (its op is gone/rewritten)
         if drop_reloc in rels:
             rels.remove(drop_reloc)
-        # shift existing relocs/symbols at/after `at` by the growth
-        for r in rels:
-            if r.offset >= at:
-                r.offset += grow
-        for s in obj.symbols:
-            if s.shndx == sec.index and s.value >= at:
-                s.value += grow
+        # shift everything after the relaxed op; a label ON it stays (a branch
+        # to the op must land on the start of the relaxed sequence)
+        self._shift_section(obj, sec, at + old_len, grow)
+        rels = obj.relocs.setdefault(sec.index, [])
         # add the JUN ADDR12 relocs (operand offsets are in the NEW layout, i.e.
         # already relative to the spliced bytes at `at`, so they are < at+len
         # and were NOT shifted above).
@@ -1333,6 +1537,13 @@ class Linker:
                 rels.append(Reloc(offset=operand_off - 1, sym=sym_idx,
                                   rtype=R_I4004_ADDR12, addend=0))
             else:
+                # the far target is a pre-splice reference: move it like the
+                # references shifted above
+                s = obj.symbols[sym]
+                if s.shndx == sec.index and \
+                        ((s.info & 0xf) == 3 or s.name == "") and \
+                        addend >= at + old_len:
+                    addend += grow
                 rels.append(Reloc(offset=operand_off - 1, sym=sym,
                                   rtype=R_I4004_ADDR12, addend=addend))
 
@@ -1545,7 +1756,8 @@ class Linker:
         addr = self.ram_origin
         rom_load = self.rom_used
         for obj, sec in [(o, s) for o in self.objs for s in o.sections
-                         if classify(s.name) == "ram_load"]:
+                         if classify(s.name) == "ram_load"
+                         and not getattr(s, "dead", False)]:
             align = max(sec.addralign, 1)
             addr = (addr + align - 1) & ~(align - 1)
             sec.base = addr
@@ -1557,6 +1769,7 @@ class Linker:
         # .bss / COMMON: RAM only
         for obj, sec in [(o, s) for o in self.objs for s in o.sections
                          if classify(s.name) == "ram_noload"
+                         and not getattr(s, "dead", False)
                          and not (s.name == ".sstack" or s.name.startswith(".sstack"))]:
             align = max(sec.addralign, 1)
             addr = (addr + align - 1) & ~(align - 1)
@@ -1782,6 +1995,15 @@ class Linker:
         windows = getattr(self, "frame_banks", None)
         if not windows:
             windows = [(1, 0x00, 0x100), (2, 0x00, 0x100), (3, 0x00, 0x100)]
+        # Objects built without -i4004-banked-ram (the default since issue #18)
+        # never DCL-select a frame bank: their frame accesses are plain SRCs
+        # and only reach CM-RAM bank 0. Detect that (no __framebank_ reference
+        # anywhere) and place every frame in bank 0's free window.
+        uses_framebank = any(
+            (obj.symbols[rel.sym].name or "").startswith("__framebank_")
+            for obj in self.objs for rels in obj.relocs.values() for rel in rels)
+        if not uses_framebank:
+            windows = getattr(self, "flat_frame_windows", None) or [(0, 0x20, 0x80)]
         # normalise to (bank, dcl, lo, hi)
         norm_windows = []
         for w in windows:
@@ -2250,6 +2472,8 @@ class Linker:
     # -- driver -------------------------------------------------------------
     def link(self):
         self._collect_globals()
+        if getattr(self, "gc_sections", False):
+            self._gc_sections()
         self._place_rom()
         self._place_ram()
         self._linker_defined()
@@ -2298,6 +2522,7 @@ class Linker:
             self._apply()
             self._emit_softcall()
             self._assert_leaf_depth()
+            self._assert_call_depth()
 
     def rom_bin(self, pad_to=None):
         if self.banks:
@@ -2389,6 +2614,9 @@ def main(argv=None):
                     help="ROM budget bytes (1280 stock board, up to 4096)")
     ap.add_argument("--pad", type=lambda s: int(s, 0), default=None,
                     help="pad the .bin to this size (e.g. 1280 for the stock board)")
+    ap.add_argument("--gc-sections", action="store_true",
+                    help="drop sections not reachable from .reset "
+                         "(unreferenced runtime helpers)")
     ap.add_argument("--pad-pages", action="store_true",
                     help="keep each code section whole inside one 256-byte page")
     ap.add_argument("--allow-eop-rollforward", action="store_true",
@@ -2460,6 +2688,8 @@ def main(argv=None):
             rom_len = regions["rom"][1] if args.max == 1280 else args.max
         if "ram" in regions:
             ram_origin, ram_len = regions["ram"]
+        flat_frame_windows = [(0, o, o + l) for k, (o, l) in sorted(regions.items())
+                              if k.startswith("frames") and l and o + l <= 0x100]
         if "stack" in regions:
             stack_origin, stack_len = regions["stack"]
 
@@ -2481,6 +2711,9 @@ def main(argv=None):
         ln.want_softcall = args.softcall
         ln.far_calls = args.far_calls
         ln.frame_banks = _parse_frame_banks(args.frame_banks)
+        ln.gc_sections = args.gc_sections
+        if args.linker_script and flat_frame_windows:
+            ln.flat_frame_windows = flat_frame_windows
         if args.emit_trampolines:
             # pass 1: placement only, then write the trampoline source.
             if not args.banks:

@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include <optional>
 
@@ -43,6 +44,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeI4004Target() {
   initializeI4004ExpandPseudosPass(PR);
   initializeI4004PeepholePass(PR);
   initializeI4004BranchRelaxPass(PR);
+  initializeI4004ImmComparePass(PR);
 }
 
 I4004TargetMachine::I4004TargetMachine(const Target &T, const Triple &TT,
@@ -57,6 +59,9 @@ I4004TargetMachine::I4004TargetMachine(const Target &T, const Triple &TT,
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, std::string(CPU), std::string(FS), *this) {
   initAsmInfo();
+  // Outline repeated straight-line code by default (I4004InstrInfo.cpp).
+  setMachineOutliner(true);
+  setSupportsDefaultOutlining(true);
 }
 
 I4004TargetMachine::~I4004TargetMachine() = default;
@@ -79,6 +84,7 @@ public:
   }
 
   bool addInstSelector() override;
+  void addPreRegAlloc() override;
   void addPreEmitPass() override;
 };
 } // namespace
@@ -92,11 +98,25 @@ bool I4004PassConfig::addInstSelector() {
   return false;
 }
 
+void I4004PassConfig::addPreRegAlloc() {
+  // Constants in compares go through LDM instead of a register pair.
+  addPass(createI4004ImmComparePass());
+}
+
+// Compile-time far-branch relaxation (every JCN/ISZ -> JCN !cc,.L; JUN Dest,
+// +2 bytes each). Off by default since issue #18: the packer relaxes only the
+// branches whose target actually lands on another 256-byte page.
+static cl::opt<bool>
+    RelaxAllBranches("i4004-relax-all-branches",
+                     cl::desc("I4004: make every conditional branch "
+                              "page-independent at compile time"),
+                     cl::init(false));
+
 void I4004PassConfig::addPreEmitPass() {
   // Expand the ACC-centric pseudos into real MCS-4 instruction sequences.
   addPass(createI4004ExpandPseudosPass());
-  // Make conditional branches page-independent so functions may span pages.
-  addPass(createI4004BranchRelaxPass());
+  if (RelaxAllBranches)
+    addPass(createI4004BranchRelaxPass());
   // Then elide redundant FIM/SRC pointer setups the expansion leaves behind.
   addPass(createI4004PeepholePass());
 }

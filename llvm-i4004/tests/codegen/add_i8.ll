@@ -13,7 +13,7 @@
 ; CHECK-NEXT: ld r2
 ; CHECK-NEXT: add r4
 ; CHECK-NEXT: xch r2
-; CHECK-NEXT: jun __soft_ret
+; CHECK-NEXT: bbl 0
 define i8 @add8(i8 %a, i8 %b) {
   %r = add i8 %a, %b
   ret i8 %r

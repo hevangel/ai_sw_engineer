@@ -5,11 +5,11 @@
 | Original year | 1971 (Busicom 141-PF introduction; see [system README](../README.md)) |
 | Original authors | Intel, for Busicom (firmware reverse-engineered by the Busicom 141-PF Replication Project) |
 | Machine | Busicom 141-PF — Intel 4004, 5 × 4001, 2 × 4002, 3 × 4003 |
-| Status | **M4 (target build path)** — on top of M3 (host core + port-level drivers, **42/42 exact tape**): the target entry now implements the board `Hal` over the runtime's `__bus_*` externs, and `scripts/build_target_ir.sh` produces one whole-program i4004-compatible LLVM IR module (`avr-none` + build-std + fat LTO, retargeted to i4004). Fit analysis from that IR drove a behaviour-preserving **BCD packing** (two digits per byte): `Calculator` 116 → **68 bytes**, all host tests still **42/42**. Even packed it does not fit the stock 2×4002 board (64 bytes main RAM) — the stock board needs the original's register reuse or 4×4002 (see `report/final_report.md` M4). No 4004 image yet: `llc` selects 2/43 functions so far (`llvm-i4004/rust/codegen_worklist.md`) |
+| Status | **M5 done (2026-10-22, issue #18)**: the Rust firmware, compiled through `llvm-i4004` with hand-written BCD and driver routines in `asm/`, links to a flat **4,095 B** ROM (4,096 B budget, xl board, bank-0 RAM) and prints the original ROM's tape exactly, **42/42 on the ai_hw_engineer RTL and on external/chips**. Host tests 42/42. See `report/final_report.md` and `report/size_history.md`. |
 
 ## History
 
-The 141-PF's 1280-byte firmware was the first commercial microprocessor program: a 14-digit printing calculator with subtotal and grand-total accumulators, one memory, constants, percentage and (on this ROM) square root, driving a drum printer through 4003 shift registers in real time from a 4-bit CPU. This title rewrites it in Rust and will compile it back to 4004 machine code through `llvm-i4004`.
+The 141-PF's 1280-byte firmware was the first commercial microprocessor program: a 14-digit printing calculator with subtotal and grand-total accumulators, one memory, constants, percentage and (on this ROM) square root, driving a drum printer through 4003 shift registers in real time from a 4-bit CPU. This title rewrites it in Rust and compiles it back to 4004 machine code through `llvm-i4004` (4,095 B, 3.2× the original).
 
 ## Layout
 

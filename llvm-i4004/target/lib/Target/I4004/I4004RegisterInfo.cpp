@@ -37,6 +37,16 @@ I4004RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   return CSR;
 }
 
+const uint32_t *
+I4004RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
+                                        CallingConv::ID) const {
+  return CSR_I4004_RegMask;
+}
+
+const uint32_t *I4004RegisterInfo::getLeafCallPreservedMask() {
+  return CSR_I4004_Leaf_RegMask;
+}
+
 BitVector I4004RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
 

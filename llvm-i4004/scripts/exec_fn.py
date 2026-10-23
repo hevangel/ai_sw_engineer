@@ -62,7 +62,9 @@ def compile_body(ir, func):
             continue
         if t.startswith(".") or t.startswith(";") or t == "" or t.endswith(":"):
             continue
-        if t.startswith("bbl"):
+        # Leaf (bbl) or soft-call return (abi.md 4.4.1: compiled functions
+        # return via `jun __soft_ret`) ends the straight-line body.
+        if t.startswith("bbl") or re.match(r"jun\s+__soft_ret\b", t):
             break
         body.append(t)
     if not body:

@@ -41,15 +41,12 @@ define i8 @sel(i8 %a, i8 %b, i8 %t, i8 %f) {
   ret i8 %r
 }
 
-; call -> software-call sequence (abi.md 4.4.1): stage the 3-nibble return token
-; in P0 and push it via the __push_off/__push_pg leaf helpers (8-bit SSP), then
-; JUN the callee (NOT jms -- hardware stack bypassed).
+; call -> JMS on the 3-level hardware stack (abi.md 4.4, issue #18 C1; the
+; software-call sequence is behind -i4004-softcall, see softcall.ll). The
+; packer asserts the static JMS depth from main stays within 3.
 ; CHECK-LABEL: caller:
-; CHECK:      fim p0, %lo8(
-; CHECK:      jms __push_off
-; CHECK:      fim p0, %page(
-; CHECK:      jms __push_pg
-; CHECK:      jun callee
+; CHECK:      jms callee
+; CHECK:      bbl 0
 declare i8 @callee(i8, i8)
 define i8 @caller(i8 %a, i8 %b) {
   %r = call i8 @callee(i8 %a, i8 %b)

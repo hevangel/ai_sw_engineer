@@ -10,6 +10,7 @@ description = "Differential cross-check: execute every i4004 encoding on the ext
 [dependencies]
 chips = { path = "../../../external/chips" }
 arbitrary-int = { version = "1.2.6", features = ["num-traits"] }
+log = "0.4"
 
 [[bin]]
 name = "chips_xcheck"
@@ -21,3 +22,7 @@ path = "src/run_fn.rs"
 
 [profile.dev]
 panic = "unwind"
+
+[[bin]]
+name = "run_ram"
+path = "src/run_ram.rs"

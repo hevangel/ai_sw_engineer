@@ -1,6 +1,30 @@
 # llvm-i4004 final report
 
-## STATUS (2026-10-21) — WRAP-UP: the 42-example target run is signed off as architecturally out of reach; every verified milestone is delivered
+## STATUS (2026-10-22, issue #18): the Busicom firmware runs as a flat 4 KB ROM, 42/42 on the RTL and on chips
+
+The 2026-10-21 sign-off below is superseded. The backend now compiles the
+Busicom firmware's Rust (2,076 B of `.text`, with hand-written `asm/num.s`
+and `asm/drivers.s` beside it) into a flat 4,095 B image. That image prints the
+original ROM's tape 42/42 on the ai_hw_engineer RTL and on external/chips
+(`system/busicom_141pf/firmware/report/final_report.md`). No banking.
+
+Backend changes for issue #18:
+- Signed compares fixed. Frame slots no longer alias.
+- Native nibble ops instead of libcalls. Zero compares as `LD; JCN`.
+- `i8` setcc results and an `i8` extended return type (`getTypeForExtReturn`).
+- Constant multiplies as shift + add. Disjoint `or` as `add`.
+- The MachineOutliner, with `JMS`/`BBL` bodies and a `JUN` tail form.
+- In the packer: page-filling section order, relaxed skips as PAGE8
+  relocations, and five relaxation fixes.
+
+Tests:
+- `run_tests.sh`: lit 17 + 16, compares 11,180/11,180, nibble ops
+  7,440/7,440, and the size gate.
+- `exec_num.py`: 4,600/4,600.
+
+Post-mortems: `failure_notes/2026-10-22-*`.
+
+## STATUS (2026-10-21, superseded) — WRAP-UP: the 42-example target run is signed off as architecturally out of reach; every verified milestone is delivered
 
 Final branch state: `wip/dcl-frames` (superset of `system/busicom_141pf-on-4004`),
 merged to `main` 2026-10-21. Sign-off log:

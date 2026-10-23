@@ -78,7 +78,7 @@ def main():
 
     # Executor self-test first (cheap, no llvm-mc dependency).
     smoke = subprocess.run(
-        ["cargo", "run", "--quiet", "--", "--smoke"], cwd=TOOL, env=env
+        ["cargo", "run", "--quiet", "--bin", "chips_xcheck", "--", "--smoke"], cwd=TOOL, env=env
     )
     if smoke.returncode != 0:
         print("ERROR: executor self-test (--smoke) failed; the chips harness is "
@@ -87,7 +87,7 @@ def main():
         return 2
 
     # The real differential cross-check.
-    run = subprocess.run(["cargo", "run", "--quiet"], cwd=TOOL, env=env)
+    run = subprocess.run(["cargo", "run", "--quiet", "--bin", "chips_xcheck"], cwd=TOOL, env=env)
     return run.returncode
 
 

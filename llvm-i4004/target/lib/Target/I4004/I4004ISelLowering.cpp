@@ -21,6 +21,7 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/RuntimeLibcalls.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/KnownBits.h"
 
 using namespace llvm;
 
@@ -177,10 +178,166 @@ SDValue I4004TargetLowering::LowerOperation(SDValue Op,
   }
 }
 
-// AND/OR/XOR -> a call into libi4004rt. i8 uses __{and,or,xor}qi3 (two i8 args,
-// i8 result); i16 uses the hi3 variants. The runtime agent implements these.
-SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
+// Nibble mask of the value bits `Zero` proves zero: bit i set iff nibble i is
+// known all-zero.
+static unsigned zeroNibbles(const APInt &Zero, unsigned NumNibs) {
+  unsigned M = 0;
+  for (unsigned i = 0; i < NumNibs; ++i)
+    if (Zero.extractBitsAsZExtValue(4, 4 * i) == 0xF)
+      M |= 1u << i;
+  return M;
+}
+
+// Native lowering of the bitwise/shift idioms the 4004 does in a few nibble
+// instructions (the machine's unit is the 4-bit register, so a byte mask or a
+// shift by 4 is register renaming, not arithmetic):
+//   op x, C        (AND/OR/XOR)  -> LOGICI: per-nibble copy / constant / CMA /
+//                                   CY-ring bit edit
+//   shift x, C                   -> SHIFTI: nibble moves + RAL/RAR chains, when
+//                                   no bigger than the libcall site
+//   or/xor x, y with every nibble known zero on one side
+//                                -> NIBSEL: nibble moves only
+// Returns an empty SDValue when none applies (the caller emits the libcall).
+SDValue I4004TargetLowering::LowerNibbleOp(SDValue Op,
+                                           SelectionDAG &DAG) const {
   EVT VT = Op.getValueType();
+  const unsigned Bits = VT.getSizeInBits();
+  const unsigned NumNibs = Bits / 4;
+  const uint64_t ValMask = (Bits == 16) ? 0xFFFF : 0xFF;
+  SDLoc DL(Op);
+  SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
+  auto TC = [&](uint64_t V) { return DAG.getTargetConstant(V, DL, MVT::i16); };
+  const unsigned Opc = Op.getOpcode();
+
+  if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+    uint64_t Imm = C->getZExtValue();
+    if (Opc == ISD::AND || Opc == ISD::OR || Opc == ISD::XOR) {
+      unsigned LOp = Opc == ISD::AND  ? I4004Nib::AND
+                     : Opc == ISD::OR ? I4004Nib::OR
+                                      : I4004Nib::XOR;
+      unsigned KZ = zeroNibbles(DAG.computeKnownBits(LHS).Zero, NumNibs);
+      return DAG.getNode(I4004ISD::LOGICI, DL, VT, LHS, TC(LOp | (KZ << 4)),
+                         TC(Imm & ValMask));
+    }
+    // Shifts by a constant. Amt >= width is poison: any value will do.
+    if (Imm >= Bits)
+      return DAG.getUNDEF(VT);
+    if (Imm == 0)
+      return LHS;
+    unsigned Kind = Opc == ISD::SHL   ? I4004Nib::SHL
+                    : Opc == ISD::SRL ? I4004Nib::SRL
+                                      : I4004Nib::SRA;
+    if (I4004Nib::shiftInlineCost(NumNibs, Kind, Imm) <=
+        I4004Nib::ShiftInlineMax)
+      return DAG.getNode(I4004ISD::SHIFTI, DL, VT, LHS, TC(Kind), TC(Imm));
+    return SDValue();
+  }
+
+  if (Opc == ISD::OR || Opc == ISD::XOR) {
+    KnownBits KL = DAG.computeKnownBits(LHS);
+    KnownBits KR = DAG.computeKnownBits(RHS);
+    unsigned ZL = zeroNibbles(KL.Zero, NumNibs);
+    unsigned ZR = zeroNibbles(KR.Zero, NumNibs);
+    const unsigned All = (1u << NumNibs) - 1;
+    if ((ZL | ZR) == All) {
+      // Nibble i comes from rhs where lhs is known zero (else from lhs).
+      unsigned Sel = ZL & ~ZR;
+      unsigned Both = ZL & ZR;
+      // Look through a constant AND whose mask keeps every nibble taken from
+      // it: `(b & 0xF0) | v` reads b's high nibble straight from b, and the
+      // AND that only existed to clear the other nibble goes dead.
+      auto Bypass = [&](SDValue V, unsigned Taken) -> SDValue {
+        unsigned Opc = V.getOpcode();
+        uint64_t M;
+        if (Opc == ISD::AND && isa<ConstantSDNode>(V.getOperand(1)))
+          M = V.getConstantOperandVal(1);
+        else if (Opc == I4004ISD::LOGICI &&
+                 (V.getConstantOperandVal(1) & 3) == I4004Nib::AND)
+          M = V.getConstantOperandVal(2);
+        else
+          return V;
+        for (unsigned i = 0; i < NumNibs; ++i)
+          if ((Taken & (1u << i)) && ((M >> (4 * i)) & 0xF) != 0xF)
+            return V;
+        return V.getOperand(0);
+      };
+      LHS = Bypass(LHS, All & ~Sel & ~Both);
+      RHS = Bypass(RHS, Sel);
+      return DAG.getNode(I4004ISD::NIBSEL, DL, VT, LHS, RHS,
+                         TC(Sel | (Both << 4)));
+    }
+  }
+  return SDValue();
+}
+
+void I4004TargetLowering::computeKnownBitsForTargetNode(
+    const SDValue Op, KnownBits &Known, const APInt &DemandedElts,
+    const SelectionDAG &DAG, unsigned Depth) const {
+  const unsigned Bits = Op.getValueType().getSizeInBits();
+  Known.resetAll();
+  switch (Op.getOpcode()) {
+  default:
+    return;
+  case I4004ISD::RAM_RD:
+  case I4004ISD::RAM_RS:
+    // A 4002 character, zero-extended into the pair.
+    if (Op.getResNo() == 0)
+      Known.Zero.setBitsFrom(4);
+    return;
+  case I4004ISD::LOGICI: {
+    Known = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
+    KnownBits C = KnownBits::makeConstant(
+        APInt(Bits, Op.getConstantOperandVal(2)));
+    switch (Op.getConstantOperandVal(1) & 3) {
+    case I4004Nib::AND: Known &= C; break;
+    case I4004Nib::OR:  Known |= C; break;
+    default:            Known ^= C; break;
+    }
+    return;
+  }
+  case I4004ISD::SHIFTI: {
+    KnownBits Src = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
+    KnownBits Amt = KnownBits::makeConstant(
+        APInt(Bits, Op.getConstantOperandVal(2)));
+    switch (Op.getConstantOperandVal(1)) {
+    case I4004Nib::SHL: Known = KnownBits::shl(Src, Amt); break;
+    case I4004Nib::SRL: Known = KnownBits::lshr(Src, Amt); break;
+    default:            Known = KnownBits::ashr(Src, Amt); break;
+    }
+    return;
+  }
+  case I4004ISD::NIBSEL: {
+    KnownBits KL = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
+    KnownBits KR = DAG.computeKnownBits(Op.getOperand(1), Depth + 1);
+    uint64_t Sel = Op.getConstantOperandVal(2);
+    APInt FromR(Bits, 0), BothZero(Bits, 0);
+    for (unsigned i = 0; i < Bits / 4; ++i) {
+      if (Sel & (1u << i))
+        FromR.setBits(4 * i, 4 * i + 4);
+      if (Sel & (0x10u << i))
+        BothZero.setBits(4 * i, 4 * i + 4);
+    }
+    Known.Zero = (KL.Zero & ~FromR) | (KR.Zero & FromR) | BothZero;
+    Known.One = ((KL.One & ~FromR) | (KR.One & FromR)) & ~BothZero;
+    return;
+  }
+  }
+}
+
+// AND/OR/XOR/shifts the nibble lowering cannot do -> a call into libi4004rt.
+// i8 uses __{and,or,xor}qi3 (two i8 args, i8 result); i16 the hi3 variants.
+SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
+  if (SDValue N = LowerNibbleOp(Op, DAG))
+    return N;
+  EVT VT = Op.getValueType();
+  // `a | b` with no common bit set is `a + b`: a native nibble-add chain
+  // instead of the bit-serial libcall (e.g. a 0/1 flag ORed into a lamp
+  // nibble selected from constants).
+  if (Op.getOpcode() == ISD::OR &&
+      (Op->getFlags().hasDisjoint() ||
+       DAG.haveNoCommonBitsSet(Op.getOperand(0), Op.getOperand(1))))
+    return DAG.getNode(ISD::ADD, SDLoc(Op), VT, Op.getOperand(0),
+                       Op.getOperand(1));
   const bool Wide = (VT == MVT::i16);
   const char *Name = nullptr;
   switch (Op.getOpcode()) {
@@ -211,19 +368,39 @@ SDValue I4004TargetLowering::LowerBitwise(SDValue Op, SelectionDAG &DAG) const {
 }
 
 // Map an IR CondCode to our I4004CC, swapping LHS/RHS for the strict/swapped
-// relations so only EQ/NE/ULT/UGE remain. Signed relations are approximated by
-// unsigned for the backbone (the BCD firmware is unsigned).
+// relations so only EQ/NE/ULT/UGE/SLT/SGE remain. Signed relations get their
+// own codes: the firmware's quotient/sqrt code tests signed i16 (`< 0`,
+// `.max(0)`), so approximating them by unsigned miscompiles it.
 static int mapCC(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
   switch (CC) {
-  case ISD::SETEQ:                   return I4004CC::EQ;
-  case ISD::SETNE:                   return I4004CC::NE;
-  case ISD::SETULT: case ISD::SETLT: return I4004CC::ULT;
-  case ISD::SETUGE: case ISD::SETGE: return I4004CC::UGE;
-  case ISD::SETUGT: case ISD::SETGT: std::swap(LHS, RHS); return I4004CC::ULT;
-  case ISD::SETULE: case ISD::SETLE: std::swap(LHS, RHS); return I4004CC::UGE;
+  case ISD::SETEQ:  return I4004CC::EQ;
+  case ISD::SETNE:  return I4004CC::NE;
+  case ISD::SETULT: return I4004CC::ULT;
+  case ISD::SETUGE: return I4004CC::UGE;
+  case ISD::SETUGT: std::swap(LHS, RHS); return I4004CC::ULT;
+  case ISD::SETULE: std::swap(LHS, RHS); return I4004CC::UGE;
+  case ISD::SETLT:  return I4004CC::SLT;
+  case ISD::SETGE:  return I4004CC::SGE;
+  case ISD::SETGT:  std::swap(LHS, RHS); return I4004CC::SLT;
+  case ISD::SETLE:  std::swap(LHS, RHS); return I4004CC::SGE;
   default:
     report_fatal_error("I4004: unsupported condition code");
   }
+}
+
+// Fold "only the low nibbles can differ" into an EQ/NE/unsigned condition
+// code: the nibbles above the highest one not known zero on BOTH sides are
+// equal, so the compare chain skips them (issue #18; 4002 RAM reads are
+// zero-extended nibbles, so a digit test becomes a 1-nibble compare).
+static int withUsedNibbles(int Code, SDValue L, SDValue R, SelectionDAG &DAG) {
+  if (Code == I4004CC::SLT || Code == I4004CC::SGE)
+    return Code;
+  const unsigned Bits = L.getValueType().getSizeInBits();
+  APInt Z = DAG.computeKnownBits(L).Zero & DAG.computeKnownBits(R).Zero;
+  unsigned N = Bits / 4;
+  while (N > 1 && Z.extractBitsAsZExtValue(4, 4 * (N - 1)) == 0xF)
+    --N;
+  return N == Bits / 4 ? Code : (Code | (N << 4));
 }
 
 SDValue I4004TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
@@ -235,7 +412,7 @@ SDValue I4004TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
 
   // Map the IR condition to our BRCC code (helper handles canonicalization).
-  int Code = mapCC(CC, LHS, RHS);
+  int Code = withUsedNibbles(mapCC(CC, LHS, RHS), LHS, RHS, DAG);
 
   SDValue CCVal = DAG.getTargetConstant(Code, DL, MVT::i8);
   return DAG.getNode(I4004ISD::BRCC, DL, MVT::Other, Chain, LHS, RHS, CCVal,
@@ -251,7 +428,7 @@ SDValue I4004TargetLowering::LowerSELECT_CC(SDValue Op,
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
   SDLoc DL(Op);
 
-  int Code = mapCC(CC, LHS, RHS);
+  int Code = withUsedNibbles(mapCC(CC, LHS, RHS), LHS, RHS, DAG);
   SDValue CCVal = DAG.getTargetConstant(Code, DL, MVT::i8);
   // (selectcc lhs, rhs, tval, fval, cc) -> SELECT pseudo (custom inserter).
   return DAG.getNode(I4004ISD::SELECT_CC, DL, Op.getValueType(), LHS, RHS, TVal,
@@ -270,6 +447,13 @@ SDValue I4004TargetLowering::LowerGlobalAddress(SDValue Op,
 //===----------------------------------------------------------------------===//
 // Formal arguments / return / call.
 //===----------------------------------------------------------------------===//
+
+// Widening a promoted argument or result honours zeroext/signext, so the
+// receiving side may assert it (AssertZext/AssertSext above).
+static unsigned extendFor(const ISD::ArgFlagsTy &F) {
+  return F.isZExt() ? ISD::ZERO_EXTEND
+                    : F.isSExt() ? ISD::SIGN_EXTEND : ISD::ANY_EXTEND;
+}
 
 SDValue I4004TargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
@@ -290,8 +474,16 @@ SDValue I4004TargetLowering::LowerFormalArguments(
       Register VReg = RegInfo.createVirtualRegister(RC);
       RegInfo.addLiveIn(VA.getLocReg(), VReg);
       SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, VReg, VA.getLocVT());
-      if (VA.getLocVT() != VA.getValVT())
+      if (VA.getLocVT() != VA.getValVT()) {
+        // A zeroext/signext argument arrives already extended (abi.md 4.1):
+        // say so, so a `bool` is not masked again (issue #18).
+        const ISD::ArgFlagsTy &F = Ins[VA.getValNo()].Flags;
+        if (F.isZExt() || F.isSExt())
+          ArgValue = DAG.getNode(F.isZExt() ? ISD::AssertZext : ISD::AssertSext,
+                                 DL, VA.getLocVT(), ArgValue,
+                                 DAG.getValueType(VA.getValVT()));
         ArgValue = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), ArgValue);
+      }
       InVals.push_back(ArgValue);
     } else {
       // Stack argument: a RAM-backed slot (abi.md sec.4.1). Backbone loads it
@@ -328,7 +520,8 @@ SDValue I4004TargetLowering::LowerReturn(
     assert(VA.isRegLoc() && "return value must go in a register");
     SDValue Val = OutVals[i];
     if (VA.getLocVT() != VA.getValVT())
-      Val = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Val);
+      Val = DAG.getNode(extendFor(Outs[VA.getValNo()].Flags), DL, VA.getLocVT(),
+                        Val);
     Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Glue);
     Glue = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
@@ -357,6 +550,44 @@ I4004TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   MachineFunction &MF = DAG.getMachineFunction();
 
+  // 4002 RAM intrinsics (issue #18, C4): the runtime names __ram_rd/__ram_wr/
+  // __ram_rs<k>/__ram_ws<k> are not calls but single SRC + I/O instructions.
+  StringRef CalleeName;
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+    CalleeName = G->getGlobal()->getName();
+  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+    CalleeName = E->getSymbol();
+  if (CalleeName.starts_with("__ram_")) {
+    auto Imm = [&](unsigned K) { return DAG.getTargetConstant(K, DL, MVT::i8); };
+    auto Arg = [&](unsigned I) {
+      SDValue V = OutVals[I];
+      return V.getValueType() == MVT::i8 ? V
+                                         : DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, V);
+    };
+    SDVTList RdVTs = DAG.getVTList(MVT::i8, MVT::Other);
+    if (CalleeName == "__ram_rd") {
+      SDValue N = DAG.getNode(I4004ISD::RAM_RD, DL, RdVTs, Chain, Arg(0));
+      InVals.push_back(N);
+      return N.getValue(1);
+    }
+    if (CalleeName == "__ram_wr")
+      return DAG.getNode(I4004ISD::RAM_WR, DL, MVT::Other, Chain, Arg(0), Arg(1));
+    // __ram_rs0..3 / __ram_ws0..3
+    if (CalleeName.size() == 9 && CalleeName[8] >= '0' && CalleeName[8] <= '3') {
+      unsigned K = CalleeName[8] - '0';
+      if (CalleeName.starts_with("__ram_rs")) {
+        SDValue N =
+            DAG.getNode(I4004ISD::RAM_RS, DL, RdVTs, Chain, Arg(0), Imm(K));
+        InVals.push_back(N);
+        return N.getValue(1);
+      }
+      if (CalleeName.starts_with("__ram_ws"))
+        return DAG.getNode(I4004ISD::RAM_WS, DL, MVT::Other, Chain, Arg(0),
+                           Arg(1), Imm(K));
+    }
+    report_fatal_error("I4004: unknown RAM intrinsic " + CalleeName);
+  }
+
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, CLI.IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeCallOperands(Outs, CC_I4004);
@@ -370,7 +601,8 @@ I4004TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     CCValAssign &VA = ArgLocs[i];
     SDValue Arg = OutVals[i];
     if (VA.getLocVT() != VA.getValVT())
-      Arg = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Arg);
+      Arg = DAG.getNode(extendFor(Outs[VA.getValNo()].Flags), DL, VA.getLocVT(),
+                        Arg);
     if (VA.isRegLoc()) {
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
     } else {
@@ -406,6 +638,15 @@ I4004TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Ops.push_back(Callee);
   for (auto &R : RegsToPass)
     Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
+  // What the call clobbers: everything but P6 (abi.md 4.3), or, for a
+  // hand-written `__leaf_*` routine or the HAL's `__bus_*`, everything but
+  // P4-P6 -- those touch only P0-P3 (abi.md 4.3.1).
+  const bool LightCallee =
+      CalleeName.starts_with("__leaf_") || CalleeName.starts_with("__bus_");
+  const uint32_t *Mask =
+      LightCallee ? I4004RegisterInfo::getLeafCallPreservedMask()
+                  : Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CallConv);
+  Ops.push_back(DAG.getRegisterMask(Mask));
   if (Glue.getNode())
     Ops.push_back(Glue);
 
@@ -434,8 +675,14 @@ SDValue I4004TargetLowering::LowerCallResult(
         DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(), InGlue);
     Chain = Val.getValue(1);
     InGlue = Val.getValue(2);
-    if (VA.getLocVT() != VA.getValVT())
+    if (VA.getLocVT() != VA.getValVT()) {
+      // The callee extended a zeroext/signext result (abi.md 4.2).
+      const ISD::ArgFlagsTy &F = Ins[VA.getValNo()].Flags;
+      if (F.isZExt() || F.isSExt())
+        Val = DAG.getNode(F.isZExt() ? ISD::AssertZext : ISD::AssertSext, DL,
+                          VA.getLocVT(), Val, DAG.getValueType(VA.getValVT()));
       Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+    }
     InVals.push_back(Val);
   }
   return Chain;
@@ -502,4 +749,29 @@ I4004TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
 
   MI.eraseFromParent();
   return SinkMBB;
+}
+
+bool I4004TargetLowering::decomposeMulByConstant(LLVMContext &, EVT VT,
+                                                 SDValue C) const {
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return false;
+  auto *N = dyn_cast<ConstantSDNode>(C);
+  if (!N)
+    return false;
+  // A negative factor costs one more negation: decompose |c|.
+  APInt Imm = N->getAPIntValue();
+  if (Imm.isNegative())
+    Imm.negate();
+  if (Imm.isZero())
+    return false;
+  // Native shifts: up to 2 places on i8, 1 on i16 (longer ones are libcalls).
+  const unsigned MaxShift = VT == MVT::i8 ? 2 : 1;
+  const unsigned M = Imm.countr_zero();
+  const APInt K = Imm.lshr(M);
+  auto Small = [MaxShift](const APInt &V) {
+    return V.isPowerOf2() && V.logBase2() <= MaxShift;
+  };
+  // (An i16 factor must be odd: the DAG may fold 2^m into a longer shift.)
+  const unsigned MaxM = VT == MVT::i8 ? 2 : 0;
+  return M <= MaxM && (Small(K - 1) || Small(K + 1));
 }

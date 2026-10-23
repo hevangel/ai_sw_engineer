@@ -1,4 +1,9 @@
-; RUN: llc -mtriple=i4004 < %s | FileCheck %s
+; RUN: llc -mtriple=i4004 -i4004-banked-ram -i4004-softcall < %s | FileCheck %s
+; RUN: llc -mtriple=i4004 < %s | FileCheck %s --check-prefix=FLAT
+;
+; Default (bank-0 RAM, issue #18 A4): no DCL is ever emitted, frames are plain
+; SRC accesses. FLAT-NOT: dcl
+; FLAT-NOT: __framebank
 ;
 ; DCL / SRC discipline (abi.md sec.4.4; failure_notes/2026-10-19-chips-4002-src-
 ; latch-ignores-dcl.md). A per-function frame lives in a CM-RAM bank selected by

@@ -48,6 +48,38 @@ def SDT_I4004SelCC : SDTypeProfile<1, 5,
      SDTCisVT<5, i8>]>;
 def i4004_selectcc : SDNode<"I4004ISD::SELECT_CC", SDT_I4004SelCC>;
 
+// Native nibble ops (custom-lowered from AND/OR/XOR/SHL/SRL/SRA; immediate
+// encodings in I4004ISelLowering.h, namespace I4004Nib).
+//   logici src, op, mask   shifti src, kind, amt   nibsel lhs, rhs, sel
+def SDT_I4004NibImm : SDTypeProfile<1, 3,
+    [SDTCisSameAs<0, 1>, SDTCisVT<2, i16>, SDTCisVT<3, i16>]>;
+def SDT_I4004NibSel : SDTypeProfile<1, 3,
+    [SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisVT<3, i16>]>;
+def i4004_logici : SDNode<"I4004ISD::LOGICI", SDT_I4004NibImm>;
+def i4004_shifti : SDNode<"I4004ISD::SHIFTI", SDT_I4004NibImm>;
+def i4004_nibsel : SDNode<"I4004ISD::NIBSEL", SDT_I4004NibSel>;
+
+// 4002 RAM character access (issue #18, C4): calls to the runtime intrinsics
+// __ram_rd / __ram_wr / __ram_rs<k> / __ram_ws<k> are replaced in LowerCall by
+// these chained nodes, so a RAM access is `SRC; RDM|WRM|RDk|WRk` inline and
+// clobbers only ACC -- no call, no argument moves, no caller-saved spills.
+//   ramrd addr -> i8        ramwr addr, val        (main character)
+//   ramrs addr, k -> i8     ramws addr, val, k     (status character k)
+def SDT_I4004RamRd : SDTypeProfile<1, 1, [SDTCisVT<0, i8>, SDTCisVT<1, i8>]>;
+def SDT_I4004RamWr : SDTypeProfile<0, 2, [SDTCisVT<0, i8>, SDTCisVT<1, i8>]>;
+def SDT_I4004RamRs : SDTypeProfile<1, 2,
+    [SDTCisVT<0, i8>, SDTCisVT<1, i8>, SDTCisVT<2, i8>]>;
+def SDT_I4004RamWs : SDTypeProfile<0, 3,
+    [SDTCisVT<0, i8>, SDTCisVT<1, i8>, SDTCisVT<2, i8>]>;
+def i4004_ramrd : SDNode<"I4004ISD::RAM_RD", SDT_I4004RamRd,
+                         [SDNPHasChain, SDNPMayLoad]>;
+def i4004_ramwr : SDNode<"I4004ISD::RAM_WR", SDT_I4004RamWr,
+                         [SDNPHasChain, SDNPMayStore]>;
+def i4004_ramrs : SDNode<"I4004ISD::RAM_RS", SDT_I4004RamRs,
+                         [SDNPHasChain, SDNPMayLoad]>;
+def i4004_ramws : SDNode<"I4004ISD::RAM_WS", SDT_I4004RamWs,
+                         [SDNPHasChain, SDNPMayStore]>;
+
 // Call-frame setup/destroy chains (required even with a reserved call frame).
 def SDT_I4004CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_I4004CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
@@ -115,6 +147,52 @@ let Defs = [ACC, CY] in {
                      [(set PR8:$dst, (i8 (sub PR8:$lhs, PR8:$rhs)))]>;
 }
 
+// Native nibble ops, expanded post-RA by I4004ExpandPseudos (emitLogicI /
+// emitShiftI / emitNibSel). Each destination nibble reads only source nibbles
+// in an order that is safe when $dst and a source share a register.
+let Defs = [ACC, CY] in {
+  def LOGICIi8  : Pseudo<(outs PR8:$dst), (ins PR8:$src, i16imm:$op, i16imm:$imm),
+                    [(set PR8:$dst, (i4004_logici PR8:$src, timm:$op, timm:$imm))]>;
+  def LOGICIi16 : Pseudo<(outs DR16:$dst), (ins DR16:$src, i16imm:$op, i16imm:$imm),
+                    [(set DR16:$dst, (i4004_logici DR16:$src, timm:$op, timm:$imm))]>;
+  def SHIFTIi8  : Pseudo<(outs PR8:$dst), (ins PR8:$src, i16imm:$kind, i16imm:$amt),
+                    [(set PR8:$dst, (i4004_shifti PR8:$src, timm:$kind, timm:$amt))]>;
+  def SHIFTIi16 : Pseudo<(outs DR16:$dst), (ins DR16:$src, i16imm:$kind, i16imm:$amt),
+                    [(set DR16:$dst, (i4004_shifti DR16:$src, timm:$kind, timm:$amt))]>;
+  def NIBSELi8  : Pseudo<(outs PR8:$dst), (ins PR8:$lhs, PR8:$rhs, i16imm:$sel),
+                    [(set PR8:$dst, (i4004_nibsel PR8:$lhs, PR8:$rhs, timm:$sel))]>;
+  def NIBSELi16 : Pseudo<(outs DR16:$dst), (ins DR16:$lhs, DR16:$rhs, i16imm:$sel),
+                    [(set DR16:$dst, (i4004_nibsel DR16:$lhs, DR16:$rhs, timm:$sel))]>;
+}
+
+// Add an immediate (A3): `LDM c; ADD s` per nibble, so the constant needs no
+// register pair (`sub x, c` arrives as `add x, -c`).
+let Defs = [ACC, CY] in {
+  def ADDi8ri  : Pseudo<(outs PR8:$dst), (ins PR8:$src, i8imm:$imm),
+                        [(set PR8:$dst, (add PR8:$src, (i8 imm:$imm)))]>;
+  def ADDi16ri : Pseudo<(outs DR16:$dst), (ins DR16:$src, i16imm:$imm),
+                        [(set DR16:$dst, (add DR16:$src, (i16 imm:$imm)))]>;
+}
+
+// Inline 4002 character access (expanded post-RA: SRC; RDM|WRM|RDk|WRk).
+let mayLoad = 1, Defs = [ACC] in {
+  def RAMRD : Pseudo<(outs PR8:$dst), (ins PR8:$addr),
+                     [(set PR8:$dst, (i4004_ramrd PR8:$addr))]>;
+  def RAMRS : Pseudo<(outs PR8:$dst), (ins PR8:$addr, i8imm:$k),
+                     [(set PR8:$dst, (i4004_ramrs PR8:$addr, timm:$k))]>;
+}
+let mayStore = 1, Defs = [ACC] in {
+  def RAMWR : Pseudo<(outs), (ins PR8:$addr, PR8:$val),
+                     [(i4004_ramwr PR8:$addr, PR8:$val)]>;
+  def RAMWS : Pseudo<(outs), (ins PR8:$addr, PR8:$val, i8imm:$k),
+                     [(i4004_ramws PR8:$addr, PR8:$val, timm:$k)]>;
+  // Constant value: SRC; LDM v; WRM|WRk (the value needs no register).
+  def RAMWRi : Pseudo<(outs), (ins PR8:$addr, i8imm:$val),
+                      [(i4004_ramwr PR8:$addr, (i8 imm:$val))]>;
+  def RAMWSi : Pseudo<(outs), (ins PR8:$addr, i8imm:$val, i8imm:$k),
+                      [(i4004_ramws PR8:$addr, (i8 imm:$val), timm:$k)]>;
+}
+
 // 16-bit add/sub over a DR16 (four nibbles, carry chained low->high). Lowered
 // post-RA into the LD/ADD/XCH nibble sequence across both sub-pairs.
 let Defs = [ACC, CY] in {
@@ -139,7 +217,9 @@ def RETpseudo : Pseudo<(outs), (ins), [(i4004_ret)]>;
 // reads the second return slot ("Using an undefined physical register $d2").
 // Consequently D1 and D2 are the two caller-saved i16 arg/return pairs; only
 // P6 remains callee-saved (abi.md sec.4.3).
-let isCall = 1, Uses = [P7], Defs = [ACC, CY, P0, P1, P2, P3, P4, P5] in {
+// The pairs a call clobbers come from its register-mask operand (LowerCall:
+// CSR_I4004, or CSR_I4004_Leaf for a `__leaf_*` callee).
+let isCall = 1, Uses = [P7], Defs = [ACC, CY] in {
   def CALL : Pseudo<(outs), (ins addr12:$dst, variable_ops),
                     [(i4004_call (i16 tglobaladdr:$dst))]>;
 }
@@ -209,6 +289,26 @@ let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
                                     brtarget:$dst), []>;
 }
 
+// Compare-with-constant branches, formed pre-RA by I4004ImmCompare from a
+// BRCC whose operand is a MOVi8/MOVi16 constant: the constant goes through
+// LDM (`LDM c; SUB x` = c - x), so it occupies no register pair. $cc is EQ,
+// NE, ULE, UGT (on c - x), or NEG / NONNEG (sign bit of $lhs, $imm unused).
+let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
+    Defs = [ACC, CY] in {
+  def BRCCi8ri  : Pseudo<(outs), (ins PR8:$lhs, i16imm:$imm, i8imm:$cc,
+                                      brtarget:$dst), []>;
+  def BRCCi16ri : Pseudo<(outs), (ins DR16:$lhs, i16imm:$imm, i8imm:$cc,
+                                      brtarget:$dst), []>;
+}
+
+// A 4002 character read fused into its EQ/NE test (I4004ImmCompare):
+// `SRC a; RDM|RDk; [XCH R1; LDM c; CLC; SUB R1;] JCN Z|NZ`. $kc = k | c<<4,
+// k = 0..3 status character, 4 = main character; c = the constant.
+let isPseudo = 1, hasSideEffects = 0, isBranch = 1, isTerminator = 1,
+    mayLoad = 1, Defs = [ACC, CY, P0] in
+def BRRAM : Pseudo<(outs), (ins PR8:$addr, i16imm:$kc, i8imm:$cc,
+                                brtarget:$dst), []>;
+
 def : Pat<(i4004_brcc PR8:$lhs, PR8:$rhs, timm:$cc, bb:$dst),
           (BRCCi8 PR8:$lhs, PR8:$rhs, timm:$cc, brtarget:$dst)>;
 def : Pat<(i4004_brcc DR16:$lhs, DR16:$rhs, timm:$cc, bb:$dst),
@@ -250,7 +350,8 @@ let usesCustomInserter = 1 in {
 // [char:4] (abi.md sec.1.3). The expander emits SRC <lo-pair>; RDM/WRM for the
 // low nibble, advances the char, and RDM/WRM for the high nibble (two 4002
 // cells per byte, low first -- abi.md sec.1.2).
-let isPseudo = 1, mayLoad = 1, hasSideEffects = 0, Defs = [ACC, CY] in
+// P0 (reserved scratch) is used when $dst shares the pointer's address pair.
+let isPseudo = 1, mayLoad = 1, hasSideEffects = 0, Defs = [ACC, CY, P0] in
 def LDRAMi8 : Pseudo<(outs PR8:$dst), (ins DR16:$ptr),
                      [(set PR8:$dst, (i8 (load DR16:$ptr)))]>;
 

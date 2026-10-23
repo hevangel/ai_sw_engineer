@@ -186,7 +186,14 @@ polarity directly. Evidence:
    i.e. the condition is satisfied when `self.test` is **true (HIGH)** — the
    opposite of the manual.
 
-3. **Why the oracle still matches.** The capture adapter
+3. **Correction (2026-10-22):** the paragraph below is wrong. Both
+   `chips_trace.rs` and `tb_trace_main.cpp` drive the *same* level
+   (`spin % 2 == 0`), so a C4 `JCN` sees **opposite phases** on the two
+   simulators. The original ROM matches on both because it does not depend on
+   the TEST phase, and our firmware must not depend on it either
+   (`failure_notes/2026-10-22-busicom_141pf-drum-phase.md`).
+
+   **Why the oracle still matches (original text).** The capture adapter
    (`reference_oracle.rs`, and our `chips_trace.rs`) drives `chips` with
    `cpu.set_test_flag(spin % 2 == 0)` — the **logical inverse** of the pin level
    the board presents — so `chips`'s inverted decode lands on the same branch the

@@ -433,6 +433,14 @@ software-stack helpers `__push_byte`/`__pop_byte`/`__push3`/`__pop3`. Signed
 shipping unverified would break "prove it"). Full register contracts and sizes:
 `llvm-i4004/rt/README.md`. Library + crt0 + HAL = 697 bytes of the 1280 budget.
 
+Since 2026-10-22 (issue #18, A1) the bitwise/shift helpers are called only for
+**variable** operands. `and/or/xor` with a constant, shifts by a constant (when
+the inline form is <= 20 bytes, `I4004Nib::ShiftInlineMax`), and `or/xor` of
+operands whose set nibbles are disjoint (known bits) are expanded inline by
+`I4004ExpandPseudos` (LOGICI / SHIFTI / NIBSEL): nibble moves, LDM/FIM
+constants, CMA, and single-bit edits made while the bit is in CY. They clobber
+only ACC and CY, not the call-clobbered pairs.
+
 **Two ABI points the backend's codegen must honour (both load-bearing,
 discovered while verifying the runtime on `chips`):**
 

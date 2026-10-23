@@ -12,7 +12,6 @@
 //! and run, never copied — see `oracle/port_level_validation.md`).
 
 use software::driver_keyboard::{KeyBuffer, KeyboardDriver};
-use software::driver_lamps::write_lamps;
 use software::driver_printer::{
     PrinterDriver, DRUM_NUMERIC, NUMERIC_LSB, ROUNDED_SECTOR, SECTORS, SYMBOL_A_BIT, SYMBOL_B_BIT,
 };
@@ -240,11 +239,17 @@ impl Hal for Board {
         if chip != ROM_SHIFT {
             return;
         }
-        let data_in = value & ROM0_SERIAL_DATA == 0;
+        // The keyboard chain selects a row with a 0 (the RTL decodes the
+        // one-LOW `~q`), modelled here as an inverted input selecting with a 1;
+        // the printer chain takes the data line as is: a 1 fires a hammer
+        // (RTL `u_sh_printer_lo.data_in_i(rom0_port[1])`, chips_trace
+        // `p & 2 == 2`).
+        let kb_in = value & ROM0_SERIAL_DATA == 0;
+        let pr_in = value & ROM0_SERIAL_DATA != 0;
         let kb_pulse = value & ROM0_KB_CLOCK == 0;
         let pr_pulse = value & ROM0_PR_CLOCK == 0;
-        self.kb_shift.step(data_in, kb_pulse);
-        let lo_out = self.pr_lo.step(data_in, pr_pulse);
+        self.kb_shift.step(kb_in, kb_pulse);
+        let lo_out = self.pr_lo.step(pr_in, pr_pulse);
         self.pr_hi.step(lo_out, pr_pulse);
     }
 
@@ -307,15 +312,31 @@ pub fn press_through_ports(board: &mut Board, calc: &mut Calculator, key: Key, s
         let mut kb = KeyboardDriver::new(board);
         let mut buf = KeyBuffer::new();
         scanned_sw = kb.scan_pass(&mut buf);
+        // The key is still held: a second pass must not repeat it.
+        kb.scan_pass(&mut buf);
         got = buf.pop();
+        assert!(buf.pop().is_none(), "a held key was enqueued twice");
     }
     assert_eq!(got, Some(key), "keyboard scan did not recover the key");
     assert_eq!(scanned_sw, sw, "keyboard scan did not recover the switches");
     board.set_input(None, sw);
+    {
+        // The release pass re-arms the scanner for the next press.
+        let mut kb = KeyboardDriver::new(board);
+        let mut buf = KeyBuffer::new();
+        kb.scan_pass(&mut buf);
+        assert!(buf.pop().is_none(), "a released key was enqueued");
+    }
 
     {
         let mut printer = PrinterDriver::new(board);
-        calc.press(key, scanned_sw, &mut printer);
+        // The target loop: the scan latched the selectors into RAM.
+        calc.press_latched(key, &mut printer);
     }
-    write_lamps(board, calc.lamps());
+    assert_eq!(
+        calc.lamp_nibble(),
+        software::driver_lamps::lamp_nibble(calc.lamps()),
+        "lamp_nibble disagrees with lamps()"
+    );
+    board.ram_port_write(RAM_LAMPS, calc.lamp_nibble());
 }

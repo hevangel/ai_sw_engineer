@@ -11,7 +11,7 @@
 ; CHECK:      inc r5
 ; CHECK:      src p2
 ; CHECK-NEXT: rdm
-; CHECK:      jun __soft_ret
+; CHECK:      bbl 0
 define i8 @load8(ptr %p) {
   %v = load i8, ptr %p
   ret i8 %v
@@ -22,7 +22,7 @@ define i8 @load8(ptr %p) {
 ; CHECK:      wrm
 ; CHECK:      inc
 ; CHECK:      wrm
-; CHECK:      jun __soft_ret
+; CHECK:      bbl 0
 define void @store8(ptr %p, i8 %v) {
   store i8 %v, ptr %p
   ret void
