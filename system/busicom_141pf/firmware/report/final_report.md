@@ -26,18 +26,90 @@ What is in the 4,095 B (from `build/target/firmware.map`):
 | `asm/drivers.s`: keyboard scan, print row and drum, lamps | 367 |
 | Reset vector | 2 |
 
-How it got there (rows in `size_history.md`): the 2026-10-21 build was ~57 KB
-of `.text` in 48 banks. Issue #18's plan replaced it in three layers:
-- **A, backend:** signed compares, native nibble ops, zero compares as
-  `LD; JCN`, `i8` setcc results, constant multiplies as shift + add, disjoint
-  `or` as `add`, and the MachineOutliner with `JMS`/`JUN` bodies.
-- **B, data model:** one BCD digit per 4002 character, registers as `Num`
-  handles, and every digit loop and whole operation in hand-written
-  `asm/num.s`, each one checked on chips against its Rust twin.
-- **C1, calls:** `JMS`/`BBL` throughout, with the call graph flattened to the
-  hardware's three levels.
+### How it fits in 4 KB
 
-C2–C4 were not needed.
+The 2026-10-21 build was ~57 KB of `.text` in 48 ROM banks. Issue #18's plan
+replaced it in three layers: A (backend), B (data model) and C1 (calls).
+C2–C4 were not needed. The levers below are in order of how much they saved.
+
+The trade-off first: about half the ROM (1,997 B) is hand-written 4004
+assembly, not compiled Rust. The Rust that remains is the calculator logic:
+what each key does, when to print, constants, memory and lamps. The assembly
+is arithmetic and I/O.
+
+1. **Numbers stored the way the 4004 stores them (B1, A4).**
+   - **Before:** each number was a byte array inside one `Calculator` struct.
+     Every digit access compiled to byte loads, shifts and masks, which are
+     expensive on a 4-bit CPU.
+   - **Now:** each number lives in a 4002 RAM register, one BCD digit per
+     4-bit character. A `Num` is a 1-byte handle naming that register.
+   - **Flags** (entering, point, mode, lamps) live in 4002 status characters.
+   - **Effect:** Rust issues a few RAM reads and writes instead of moving
+     arrays. With leaner memory-access expansion in the backend, `.text` went
+     from 48 KB to 22 KB.
+
+2. **Digit loops and whole operations in assembly (B2, B3, B5).**
+   - **`asm/num.s` (1,630 B):** every loop over 16 digits is a small routine,
+     because such loops are costly when compiled. That covers copy, compare,
+     add, shift, the divide step and the square-root step. The whole
+     operations are built on them: `__n_add`, `__n_mul`, `__n_div`,
+     `__n_sqrt`, `__n_round` and `__n_compute`.
+   - **`asm/drivers.s` (367 B):** the keyboard scan, the print row and drum
+     loop, and the lamps.
+   - **Checking:** each routine has a Rust twin. `scripts/exec_num.py` runs
+     both on external/chips with random inputs (4,600 cases), and they must
+     agree.
+
+3. **Better code from the backend (A1–A2 and later).**
+   - **Bit operations:** constant `and`/`or`/`xor` and shifts used to be
+     bit-serial library calls. They are now a few native nibble instructions;
+     no bitwise library calls are left.
+   - **Booleans:** compare results and returned `bool`s are `i8` (one
+     register pair) instead of `i16` (two).
+   - **Small idioms:** a zero test is `LD; JCN`. `x * c` for
+     c = ±(2^k ± 1)·2^m becomes shifts and an add. `or` of non-overlapping
+     nibbles becomes `add`.
+   - **MachineOutliner:** repeated instruction sequences become shared
+     subroutines, reached with `JMS`, or jumped to with `JUN` when they end a
+     function.
+
+4. **Hardware calls instead of a software stack (C1).** The old build got
+   around the 4004's 3-level hardware call stack with a software return stack
+   and ROM bank switching, and every call paid for it. The call graph is now
+   at most three deep:
+   - `main` holds the run loop;
+   - key handlers are level 1;
+   - assembly entries, the printer and small Rust helpers are level 2;
+   - leaf routines are level 3.
+
+   Every call is then a plain 2-byte `JMS`/`BBL`. A few functions had to be
+   inlined to fit this shape. The packer checks the depth at link time.
+
+5. **Tight page packing.** A 4004 conditional jump cannot leave its 256-byte
+   page.
+   - **Before:** the packer placed sections in input order and padded or
+     rewrote every branch that crossed a page.
+   - **Now:** `i4004_pack.py` chooses, for each page, the set of sections that
+     fills it best. It rewrites a branch only when it really crosses a page.
+   - **Effect:** the final map has no gaps. Page relaxation costs 24 B in
+     total (20 B in the compiled Rust, 4 B in `num.s`).
+
+Size along the way (full rows in `size_history.md`):
+
+| Step | Size |
+|---|---|
+| 2026-10-21 starting point | ~57 KB `.text`, 48 banks |
+| Data model + memory access (B1, A4) | 22,369 B `.text` |
+| Digit loops in `asm/num.s` | 9,727 B image |
+| Whole operations in asm | 8,585 B |
+| Drivers in asm, 3-level call graph | 7,243 B |
+| Key dispatch, buffer layout, `reset()` | 5,845 B |
+| Outliner, `or` → `add` | 5,429 B |
+| More asm rewrites, page-filling packer, `i8` bool return | 4,079 B |
+| Two drum-timing fixes found on the RTL | **4,095 B** |
+
+The original's 1,280 B was written entirely by hand. Getting closer to it
+would mean moving more of the remaining Rust into assembly.
 
 Escaped defects found on the way (post-mortems in `failure_notes/`):
 - Two silent miscompiles: signed compares and aliased frame slots.
