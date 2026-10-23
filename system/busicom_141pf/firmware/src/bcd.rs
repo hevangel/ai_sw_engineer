@@ -615,7 +615,7 @@ impl Num {
     /// into WIN. Quotient digit `j` weighs `10^(n - 1 - j + sb - sa)` in
     /// `a / b`, so in FL the first nonzero one fixes `fr` and the step count.
     ///
-    /// ASSUMPTION (spec M2-D2): a quotient too small for FL's 13 places prints
+    /// ASSUMPTION (spec M2-D3): a quotient too small for FL's 13 places prints
     /// 0 (the M2 code reported overflow when its fixed buffer ran out).
     #[cfg(not(target_os = "none"))]
     #[inline(never)]

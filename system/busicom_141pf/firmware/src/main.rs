@@ -46,7 +46,10 @@ mod target {
     #[inline(always)]
     pub fn run<H: Hal>(hal: &mut H) -> ! {
         let mut calc = Calculator::new();
-        KeyBuffer::new(); // the scanner state: no key down
+        // The scanner state: no key down.
+        KeyBuffer::new();
+        // ASSUMPTION (spec M3-K3): scan only between keys, so a key typed
+        // while a calculation or a print runs is not buffered.
         loop {
             let rc = KeyboardDriver::new(hal).scan_key();
             if rc != 0xFF {

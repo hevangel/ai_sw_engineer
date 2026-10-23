@@ -26,6 +26,7 @@ The first consumer is `system/busicom_141pf/firmware`; its 1280-byte budget is t
 | [spec/isa.md](spec/isa.md) | 46 instructions, encodings, cycles (MCS-4 manual) |
 | [spec/abi.md](spec/abi.md) | data layout, register classes, calling convention |
 | [spec/asm_syntax.md](spec/asm_syntax.md) | assembler syntax |
+| [spec/codegen.md](spec/codegen.md) | design doc: Rust→IR route, pair allocation + nibble expansion, static frames, `JMS`/`BBL` calls and depth, MachineOutliner, MC layer, the `i4004_pack.py` linker |
 | [plans/](plans/implementation_plan.md) | implementation and [test plan](plans/testplan.md) |
 | `target/lib/Target/I4004/` | the backend sources (TableGen + C++): MC layer, disassembler, and the CodeGen backbone (TargetMachine/Subtarget/RegisterInfo/InstrInfo/FrameLowering/ISelLowering/ISelDAGToDAG/AsmPrinter/MCInstLower + `I4004ExpandPseudos`), applied as an overlay onto the pinned LLVM submodule |
 | `target/llvm-include/` | the `ELFRelocs/I4004.def` installed into the LLVM tree by the overlay |
@@ -36,7 +37,7 @@ The first consumer is `system/busicom_141pf/firmware`; its 1280-byte budget is t
 | `scripts/isel_bcd_probe.sh` | milestone acceptance harness: compiles the BCD digit-add (pinpoints the remaining load/store + compare selection layers) |
 | `tests/mc/` | MC encode / error / reloc / ELF tests (one CHECK per opcode) |
 | `tests/codegen/` | `llc` selection-pattern FileCheck tests (ret/add/sub/branch/elf/mc-roundtrip) |
-| `rust/`, `asm/` | Rust target JSON; assembler/linker (milestone 5) |
+| `rust/`, `asm/` | Rust target JSON and IR retarget; `asm/i4004_pack.py`, the linker (page-filling placement, branch relaxation, frame overlay, call-depth check) |
 | [report/](report/final_report.md) | final report |
 
 ## Build & test

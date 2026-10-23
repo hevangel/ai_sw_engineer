@@ -64,7 +64,8 @@ ai_sw_engineer/
 ```
 llvm-<chip>/
 ├── README.md        — chip, year, ISA summary, backend strategy, status
-├── spec/            — isa.md, abi.md (calling convention, data layout), asm_syntax.md
+├── spec/            — isa.md, abi.md (calling convention, data layout), asm_syntax.md,
+│                      codegen.md (design doc: lowering, frames, calls, linker)
 ├── plans/           — implementation_plan.md, testplan.md
 ├── target/          — LLVM Target sources (lib/Target/<Chip>/*.td, *.cpp) applied onto
 │                      external/llvm-project, or an overlay/patch set for llvm-mos
@@ -98,6 +99,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - Prefer existing backends: llvm-mos for the 6502 family. Only write a new backend where none exists (4004, 8008, real-mode 8086 — LLVM's x86 `-m16` emits 386+ opcodes and is not acceptable for an 8088).
 - Each backend records its data layout and calling convention in `spec/abi.md` before code is written; the Rust target JSON must match it exactly.
 - Every instruction selection pattern gets a lit/FileCheck test; every MC encoding gets an encode test checked against the manufacturer opcode table.
+- Once a backend compiles and links a real program, `spec/codegen.md` (design doc) and `spec/abi.md` describe the backend as it is, not as it was planned. A change to lowering or pseudo expansion, the calling convention or saved registers, frames, call strategy, the linker/packer, or a runtime routine's contract updates them in the same change. A superseded design is marked frozen or historical with a date, not deleted. If the two docs disagree with the code, the docs are the defect.
 
 ### Simulators
 - Primary oracle: the RTL and ISS in `../ai_hw_engineer` (`$AI_HW_ENGINEER`). Use its `system/<system>/` builds for whole-machine runs.
@@ -110,6 +112,15 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 ### Documentation
 - Markdown everywhere. Maintain `system/README.md` (system index) and `llvm-*/README.md`.
 - Every software README states the original's year, authors, sources and the current status. Historical dates are sourced; uncertainty is stated, not guessed.
+- **Design docs stay current.** Status docs (README status, `report/`, `size_history.md`, plan tables) record results. Design docs record how the thing works, and they go stale silently unless someone keeps them current. The design docs are:
+  - **Backend:** `spec/codegen.md`, `spec/abi.md`.
+  - **Title:** `spec/spec.md` (behavior and the assumption ledger), `spec/io.md` (I/O contract and drivers), `plans/testplan.md`, and the README layout table and run commands.
+  - **Platform:** `memory_map.md`, `io_map.md`.
+
+  A change that alters what one of them says updates it in the same change: a new data layout or RAM map, a driver moved to assembly, a new test level, a new script, a calling-convention change.
+- Every `ASSUMPTION` in code cites a ledger ID (`ASSUMPTION (spec M3-K2): …`), and that ID exists in `spec/spec.md` with the same meaning. A new assumption gets a new ID; an ID is never reused for something else.
+- A superseded design is marked frozen or historical with a date, not deleted. If a design doc disagrees with the code, the doc is the defect: fix it when you find it, even outside your task.
+- Before finishing a task, check the design docs for the area you changed. A status update alone (README line, report) does not count as updating the docs.
 
 ### Scripts
 - Bash, `set -euo pipefail`, clear status lines, nonzero on failure. Shell scripts are LF (`.gitattributes`).
@@ -121,8 +132,10 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - [ ] Target image builds; size reported against the ROM/RAM budget
 - [ ] Target image run on a simulator and compared against the oracle (or the gap is documented)
 - [ ] Backend changes: lit + MC tests pass
+- [ ] Backend changes: `spec/codegen.md` and `spec/abi.md` match the code (design changes documented in the same PR)
 - [ ] Size scoreboard: a title whose target image is not yet signed off adds a row to `report/size_history.md` (date, commit, `.text`, image, largest function, call/libcall counts, host and target status) for every landing that touches it or its backend, measured the same way as the previous rows
 - [ ] README / report updated
+- [ ] Design docs for every touched area match the code (title `spec/`, `testplan.md`, README layout; platform `memory_map.md`/`io_map.md`); every `ASSUMPTION` ID in the diff exists in `spec/spec.md`
 
 ## Learning From Escaped Defects
 
@@ -145,4 +158,5 @@ Areas: `system/<system>/<software>`, `system/<system>/platform`, `llvm/<chip>`, 
 
 - `main` is protected; never push to it directly.
 - Branches: `system/<name>`, `llvm/<chip>`, `docs/<topic>`, `fix/<desc>`, `infra/<desc>`.
+- Worktrees: every `git worktree add` goes under `worktrees/` in the repo root (e.g. `git worktree add worktrees/<name> <branch>`). Never create one as a sibling of the repo. `worktrees/` is gitignored.
 - PR description: What / Why / Verification / Agent.

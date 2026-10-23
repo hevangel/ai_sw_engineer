@@ -1,57 +1,85 @@
 # Busicom 141-PF firmware — I/O contract
 
-Two layers, so the arithmetic core can be proven on the host before any 4004 driver exists.
+Two layers, so the arithmetic core can be proven on the host before any 4004
+driver exists. On the target (issue #18), the drivers' hot paths are
+hand-written 4004 routines in `asm/drivers.s`. Each one has a Rust twin
+that the host tests run.
 
-## Core interface (`src/lib.rs`, used by host tests and later by the target drivers)
+## Core interface (`src/lib.rs`, used by host tests and the target loop)
 
 | Rust | Meaning | Oracle field |
 |---|---|---|
-| `Calculator::press(Key, Switches, &mut impl Printer)` | one debounced key with the current selector positions | `steps[].keys`, `switches` |
-| `Printer::print(&Row)` | one printed paper row | `expect.tape[]` |
+| `Calculator::press(Key, Switches, &mut impl Printer)` | one debounced key with the current selector positions (host) | `steps[].keys`, `switches` |
+| `Calculator::press_at(row, col, &mut impl Printer)` | the same, from a keyboard matrix position; the selectors are read from RAM (`SW_DP` 0xC2, `SW_ROUND` 0xC3), where the scan latched them (target loop) | same |
+| `Printer::print(&Row)`, `Printer::number/blank/overflow` | one printed paper row | `expect.tape[]` |
 | `Calculator::lamps() -> Lamps` | memory / overflow / negative | `expect.lamps` |
 
-`Row::value()` renders the 15 numeric columns as the oracle's `value` string (leading blanks stripped; `None` for the dotted overflow line); `Symbol::as_str()` gives the oracle's `symbol`.
+`Row::value()` renders the 15 numeric columns as the oracle's `value` string
+(leading blanks stripped; `None` for the dotted overflow line). `SymA`/`SymB`
+give the oracle's two symbol columns.
 
-## Machine interface (`src/hal.rs`, target drivers — milestone M3)
+The calculator's state is not a Rust struct. It lives in 4002 RAM bank 0
+(registers, flags, key FIFO, print register; see
+`../platform/memory_map.md`), reached through `src/ram.rs`.
+
+## Machine interface (`src/hal.rs`)
 
 | Hal method | 4004 instruction(s) | Device |
 |---|---|---|
-| `rom_port_write(chip, nibble)` | `SRC chip` + `WRR` | ROM0: 4003 clocks (bit0 kb, bit2 printer) + serial data (bit1, active low) |
-| `rom_port_read(chip)` | `SRC chip` + `RDR` | ROM1 keyboard columns, ROM2 drum index (bit0) / paper button (bit3) |
-| `ram_port_write(chip, nibble)` | `DCL`/`SRC chip` + `WMP` | RAM0 printer (bit0 red, bit1 hammer, bit3 advance), RAM1 lamps (bit0/1/2 = mem/ovf/neg) |
-| `test_pin()` | `JCN`/`JTN` on TEST | drum half-spin sync |
+| `rom_port_write(chip, nibble)` | `SRC chip` + `WRR` | ROM0: 4003 clocks (bit 0 keyboard, bit 2 printer) + serial data (bit 1) |
+| `rom_port_read(chip)` | `SRC chip` + `RDR` | ROM1 keyboard columns, ROM2 drum index (bit 0) / paper button (bit 3) |
+| `ram_port_write(chip, nibble)` | `SRC chip` + `WMP` | RAM0 printer (bit 0 red, bit 1 hammer, bit 3 advance), RAM1 lamps (bit 0/1/2 = mem/ovf/neg, bit 3 status, spec A9) |
+| `test_pin()` | `JCN` on TEST | drum half-spin sync |
 
-Chip-select and bit constants live in `src/hal.rs` (`ROM_SHIFT`, `ROM_KEYBOARD`,
-`ROM_PRINTER_IN`, `RAM_PRINTER`, `RAM_LAMPS`, and the `ROM0_*`/`ROM2_*`/`RAM0_*`/
-`RAM1_*` masks).
+**Serial data polarity differs per chain.** On the keyboard chain (4003 #0)
+the selected row is the one `0` bit. On the printer chain (4003 #1+#2), a `1`
+fires that column's hammer
+(`failure_notes/2026-10-22-busicom_141pf-target-only-driver-defects.md`).
 
-### Drivers (`src/driver_*.rs`)
+Chip-select and bit constants live in `src/hal.rs` (`ROM_SHIFT`,
+`ROM_KEYBOARD`, `ROM_PRINTER_IN`, `RAM_PRINTER`, `RAM_LAMPS`, and the
+`ROM0_*`/`ROM2_*`/`RAM0_*`/`RAM1_*` masks). On the target, each `Hal` method is
+one `__bus_*` runtime call (`src/main.rs`).
 
-- **`driver_keyboard`** — scans by walking a single selection bit through
-  4003 #0 (shift via ROM0 bit0 clock + bit1 data), reads the ROM1 column nibble
-  per row, decodes scancode `129 + 4*row + col` → `Key`; rows Q8/Q9 give the
-  decimal / rounding selectors (`Switches`). An 8-deep `KeyBuffer` FIFO holds
-  scanned keys (the real machine's 8-word input buffer) and drops a 9th like the
-  hardware.
-- **`driver_printer`** — a `Printer`, so the existing `Calculator` drives it
-  unchanged. Turns a `Row` into a per-drum-sector 20-bit hammer word (bits 3..=17
-  the 15 numeric columns, bit 0 symbol A, bit 1 symbol B), steps the 13 drum
-  sectors on `test_pin()`, shifts each sector's word into the 4003 #1+#2 chain
-  (ROM0 bit2 clock) and fires the hammers (RAM0 bit1 rising edge). Red latches
-  RAM0 bit0; paper advance pulses RAM0 bit3. Drum sector tables (`DRUM_NUMERIC`,
-  `DRUM_SYMBOL_A/B`) are public so the host board model shares them.
-- **`driver_lamps`** — packs `Lamps` into the RAM1 nibble (`WMP`).
+### Drivers
 
-The printer driver turns a `Row` into the 13-sector hammer sequence; the
-keyboard driver scans 4003 #0 rows into `Key`s and the selector rows into
-`Switches`.
+| Function | Target (`asm/drivers.s`) | Host twin (`src/driver_*.rs`) |
+|---|---|---|
+| Keyboard scan | `__kb_scan()` → `row << 4 \| col` of a new key, or 0xFF | `KeyboardDriver::scan_latch` |
+| Print a row | `__pr_row(src, syms)` fills the print register (0xE0) and prints it; `__pr_print()` prints it as is | `Row::number/blank/overflow` + `PrinterDriver::print` |
+| Lamps | `__bus_lamps()` writes the RAM1 nibble from the RAM flags | `Calculator::lamp_nibble` + `driver_lamps` |
 
-### Port-level test (`tests/port_level.rs`)
+- **Keyboard.** The scan walks a single `0` bit through 4003 #0 (ROM0 bit 0
+  clock, bit 1 data) and reads the ROM1 column nibble per row. Rows Q0–Q7 are
+  keys, scancode `129 + 4*row + col`. Rows Q8/Q9 are the decimal and rounding
+  selectors, latched into `SW_DP`/`SW_ROUND` on every pass.
+  - **One event per press:** a key counts once per press and release, using
+    the key-down flag `KB_DOWN` (status 0xF0 S0) (spec M3-K2).
+  - **Type-ahead:** the host keeps the original's 8-key FIFO in register 0xC0
+    (`KeyBuffer`). The target scans only between keys, so there is no
+    type-ahead (spec M3-K3).
+- **Printer.** The print register holds each column's drum sector (0–9 digits,
+  10 point, 12 minus, 15 blank), the sectors of symbol columns A and B, and
+  the red flag.
+  - **Per sector:** the driver shifts the 20-bit hammer word into the 4003
+    #1+#2 chain (ROM0 bit 2 clock): bits 3–17 are numeric columns 14–0, bit 0
+    symbol A, bit 1 symbol B. Then it fires the hammers (RAM0 bit 1 rising
+    edge), with red held on RAM0 bit 0.
+  - **Line end:** after sector 12 it waits one TEST edge, then pulses RAM0
+    bit 3 to advance the paper.
+  - **Timing:** sectors are found by counting TEST edges after the drum index,
+    never by reading the TEST level (spec M3-P2/M3-P3).
+- **Drum sector tables** (`DRUM_NUMERIC`, `DRUM_SYMBOL_A/B`) are public so the
+  host board model shares them.
 
-A host **board model** implements `Hal` (4003 shift registers, keyboard matrix,
-drum/TEST generator, hammer/red/advance/lamp decode) and the 42 examples replay
-through `keyboard scan → Calculator → printer drum → board decode → Row`. It is
-an independent reimplementation of the documented board behaviour, validated
-against the original ROM on `external/chips` (see
-`oracle/port_level_validation.md`, `oracle/rom_port_trace.txt`). Ratchet:
-`oracle/port_level_pass.txt` (42/42).
+### Port-level tests (`tests/port_level.rs`, `tests/port_trace.rs`)
+
+A host **board model** implements `Hal`: 4003 shift registers, keyboard
+matrix, drum/TEST generator, and hammer/red/advance/lamp decode. The 42
+examples replay through `keyboard scan → Calculator → printer drum → board
+decode → Row`. `port_trace.rs` compares the full tape and lamp stream exactly
+with the original ROM's `oracle/rom_port_trace.txt`.
+
+The model steps the drum one sector per `test_pin()` sample (spec M3-P1). So
+target drum timing is checked only by the image runs on external/chips and the
+RTL (`../platform/scripts/run_image.sh` + `compare.sh`).

@@ -42,7 +42,8 @@ Rules:
 | 4 | A3/A4/A5 constants, memory access, bounds checks | ✅ A4 (with B1); A3/A5 not done as separate tasks, because the code they targeted moved into `asm/num.s` |
 | 5–8 | B1–B5 firmware data model | ✅ 2026-10-22: one digit per 4002 character, digit loops and whole operations in `asm/num.s` (`exec_num.py` 4,600/4,600 on chips), drivers in `asm/drivers.s`, host 42/42 |
 | 9 | C1 `JMS`/`BBL` convention | ✅ flat link, call graph 3 deep (checked by the packer), plus the MachineOutliner (JMS/JUN bodies) |
-| 10–12 | C2 nibble args, C3 TTI, C4 intrinsics | not done: the image fit without them |
+| 10–11 | C2 nibble args, C3 TTI | not done: the image fit without them |
+| 12 | C4 intrinsics | ✅ for RAM access: `__ram_rd/wr/rs<k>/ws<k>` (`src/ram.rs`) lower inline to `SRC` + `RDM`/`WRM`/`RDk`/`WRk` (`I4004ISelLowering::LowerCall`); `digit`/`set_digit` go through them |
 | 13 | 42-run on chips, then RTL | ✅ chips 42/42; RTL 42/42 (Verilator, xl board) after two drum-timing fixes; image 4,095 B |
 
 ## Design decisions

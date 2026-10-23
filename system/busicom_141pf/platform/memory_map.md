@@ -46,15 +46,13 @@ backend's 16-bit AS-0 handle `[bank:2][chip:2][reg:2][char:4]`:
 
 ## Extended (xl) board
 
-The stock board cannot hold the compiled Rust firmware: the runtime + crt0 +
-HAL alone take ~697 of the 1280 ROM bytes, and the firmware's static state
-(Calculator 68 B + KeyBuffer 24 B = 92 B, before stack/spills) already exceeds
-the stock 64-byte main RAM of the two bank-0 4002s. The **xl** board variant
-(`platform/rtl/busicom_141pf_xl.sv`, `run_image.sh --board xl`, `link_xl.ld`)
-keeps the Busicom I/O **identical** — same keyboard, printer and lamp ports on
-the same chips — and only ADDS memory, to the architectural maximum where it is
-cheap: 16 × 4001 ROM and 16 × 4002 RAM. Shrinking back onto the stock board is
-a later optimisation; this variant exists to get the firmware running first.
+The stock board cannot hold the compiled Rust firmware. The image is 4,095 B
+(1,280 B on stock), and the firmware uses all four 4002s of RAM bank 0 (two on
+stock). The **xl** variant (`platform/rtl/busicom_141pf_xl.sv`,
+`run_image.sh --board xl`, `link_xl.ld`) keeps the Busicom I/O **identical**:
+the same keyboard, printer and lamp ports on the same chips. It only adds
+memory, up to the architectural maximum: 16 × 4001 ROM and 16 × 4002 RAM. The
+firmware uses the ROM and bank 0 only (issue #18); banks 1–3 are unused.
 
 ### Chip complement
 
@@ -69,11 +67,10 @@ exactly as on the stock board's #3/#4. The firmware's ROM-port select aliasing
 top so the original ROM's keyboard/printer/drum port usage is byte-identical;
 extra ROMs are invisible to a program that never fetches past 0x4FF.
 
-Bank 0's two original 4002s keep their roles: chip 0 = **RAM0** (printer red /
-hammers / paper-advance port) and chip 1 = **RAM1** (Memory / Overflow /
-Negative lamp port). Their main-character storage stays reserved for the
-firmware working set, matching the stock layout, so linker-placed data starts at
-the first ADDED chip.
+Bank 0's two original 4002s keep their I/O roles: chip 0 is **RAM0** (printer
+red / hammer / paper-advance port), and chip 1 is **RAM1** (memory / overflow /
+negative lamp port). Their characters hold the calculator registers, as on the
+original. Chips 2 and 3 are the added scratch, buffers and frames (map below).
 
 Per bank the four chips are an authentic quad: 4002-1 P0=0 → chip 0, 4002-1 P0=1
 → chip 1, 4002-2 P0=0 → chip 2, 4002-2 P0=1 → chip 3 (`intel_4002` answers
@@ -83,32 +80,56 @@ Per bank the four chips are an authentic quad: 4002-1 P0=0 → chip 0, 4002-1 P0
 
 | Space | Range | Size | Devices | Use |
 |---|---|---|---|---|
-| Program ROM | 0x000–0xFFF | 4096 bytes | 4001 #0–#15 | firmware (runtime+crt0+HAL+logic) |
-| RAM main characters | 16 chips × 4 reg × 16 nibbles | 1024 nibbles (512 bytes) | 4002 ×16, banks 0–3 | working set, `.data`/`.bss`, software stack, heap headroom |
-| RAM status characters | 16 × 4 × 4 nibbles | 256 nibbles | same | flags / opcode-addressed |
+| Program ROM | 0x000–0xFFF | 4096 bytes | 4001 #0–#15 | the flat image (4,095 B used) |
+| RAM main characters | 16 chips × 4 reg × 16 nibbles | 1024 nibbles (512 bytes) | 4002 ×16, banks 0–3 | bank 0 used (256 nibbles, map below); banks 1–3 spare |
+| RAM status characters | 16 × 4 × 4 nibbles | 256 nibbles | same | bank 0: signs, scales, flags, FIFO/selector/key state |
 
-ROM: **4096 bytes** (16-ROM architectural ceiling). RAM: **1280 nibbles total**
-(1024 main + 256 status) = 640 bytes, up from the stock 160 nibbles.
+### Bank-0 map used by the firmware (issue #18)
+
+A RAM address is the `SRC` byte `[chip:2][reg:2][char:4]`, so bank 0's 256
+main characters form one linear 8-bit space (`firmware/src/ram.rs`). Each row
+below is one register: 16 main characters plus status characters S0–S3. No
+`DCL` is ever issued; CM-RAM bank 0 is the reset default.
+
+| Register | Chip | Main characters | Status characters |
+|---|---|---|---|
+| 0x00 `WR` working | 0 | 16 BCD digits, least significant first | S0 sign, S1/S2 scale (low/high), S3 flag `ENTERING` |
+| 0x10 `DR` dividend/multiplicand | 0 | digits | sign, scale, S3 `POINT` |
+| 0x20 `CR` constant | 0 | digits | sign, scale, S3 `OP_FROM_ENTRY` |
+| 0x30 `SR` subtotal | 0 | digits | sign, scale, S3 `MODE` |
+| 0x40 `TR` main total | 1 | digits | sign, scale, S3 `MOP` |
+| 0x50 `MR` memory | 1 | digits | sign, scale, S3 `LAMP_MEMORY` |
+| 0x60 `T1` temporary | 1 | digits | sign, scale, S3 `LAMP_OVERFLOW` |
+| 0x70 `T2` temporary | 1 | digits | sign, scale |
+| 0x80–0xBF scratch | 2 | multiply: product `MULBUF` 0x80 (32 digits). Divide: remainder `DIVREM` 0x9F (17 digits), quotient window `WIN` 0xB0. Square root: remainder `SQ_REM` 0x80 and odd term `SQ_S` 0x94 (20 digits each), root in `WIN` | WIN's sign/scale |
+| 0xC0 key FIFO | 3 | slot *i*: chars *i* (low) and 8+*i* (high) of `code − 129` (host only) | S0 head, S1 count (host only); S2 `SW_DP`, S3 `SW_ROUND` (latched by every scan) |
+| 0xD0 frames | 3 | compiler spill frames (packer overlay, `frames` region) | — |
+| 0xE0 print register `PR` | 3 | chars 0–14: each column's drum sector (0–9, 10 point, 12 minus, 15 blank) | S0/S1 symbol A/B sector, S2 bit 0 red, S3 red latch (host driver) |
+| 0xF0 frames | 3 | compiler spill frames (`frames2` region) | S0 `KB_DOWN` (a key was down on the last scan pass) |
+
+The minus lamp is `WR`'s sign (S0 of 0x00); there is no separate flag.
 
 ### Linker regions (`link_xl.ld`)
 
-Same AS-0 handle model `[bank:2][chip:2][reg:2][char:4]` as the stock script.
+| Region | Range | Size | Use |
+|---|---|---|---|
+| `rom` | 0x000–0xFFF | 4096 B | `.reset` (at 0), `.text`, `.rodata` |
+| `frames` | 0x00D0–0x00DF | 16 chars | per-function spill frames (packer overlay) |
+| `frames2` | 0x00F0–0x00FF | 16 chars | more frames |
+| `ram`, `stack` | — | 0 | empty: the firmware has no `.data`/`.bss` and no software stack; the link fails if a static appears |
 
-| Region | Handle range | Device | Size | Use |
-|---|---|---|---|---|
-| `rom` | 0x000–0xFFF | 4001 #0–#15 | 4096 B | `.reset` (at 0), `.text`, `.rodata`, `.data` load image |
-| `ram` | 0x0020–0x005F | bank 0 chips 2–3 main | 128 nibbles | `.data` (copied from ROM by crt0) + `.bss` arena |
-| `stack` | 0x0100–0x013F | bank 1 (4 chips) main | 256 nibbles | software return stack (abi.md §4.4, P7/SSP, grows upward) |
-| (spare) | 0x0200–0x03FF | banks 2–3 main | 512 nibbles | heap/arena headroom; add a named region when a build needs it |
-
-- Bank 0 chips 0–1 handles (0x0000–0x001F) are **not** linker-placed: they hold
-  the firmware's own working set and back the printer/lamp I/O port latches,
-  identical to the stock board.
-- The `.data`/`.bss` arena and the software stack are in **different CM-RAM
-  banks**, so a deep call graph cannot corrupt live variables.
-- `link_xl.ld` ends with `ASSERT(. <= 0x1000, …)`, the 4096-byte ceiling.
+- The firmware lays out the rest of bank 0 itself (table above), not the
+  linker.
+- `link_xl.ld` ends with `ASSERT(. <= 0x1000, …)`, the 4096-byte ceiling. The
+  packer also fails the link if a call chain exceeds the 3-level hardware
+  stack.
 
 ## Extended (xl+bank) ROM bank switching — a DEVIATION from the original hardware
+
+**Frozen (2026-10-22).** This section describes the 2026-10-21 banked build
+(~100 KiB, 0/42). Since issue #18 the firmware is a flat 4 KB image that never
+writes the latch. The machinery remains in the packer and the chips adapter
+but receives no work.
 
 The Rust firmware compiled by `llvm-i4004` is far larger than the 4096-byte
 architectural ROM maximum (the 4004's 12-bit program counter addresses only
