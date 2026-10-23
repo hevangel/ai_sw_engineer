@@ -30,6 +30,10 @@ public:
   I4004RegisterInfo();
 
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
+  const uint32_t *getCallPreservedMask(const MachineFunction &MF,
+                                       CallingConv::ID) const override;
+  /// Preserved set of a call to a `__leaf_*` / `__bus_*` routine: P4-P6.
+  static const uint32_t *getLeafCallPreservedMask();
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
   const TargetRegisterClass *

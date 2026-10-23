@@ -50,22 +50,43 @@ if [[ ! -f "$ir" ]]; then
   status "firmware IR missing; building it (build_target_ir.sh)"
   "$title_dir/scripts/build_target_ir.sh" >&2
 fi
+# Flat image (default, issue #18): JMS/BBL calls, bank-0 RAM without DCL,
+# page-local branches relaxed by the packer only where they cross a page, and
+# unreferenced runtime helpers dropped (--gc-sections). LEGACY_BANKED=1 keeps
+# the frozen soft-call / DCL-banked / bank-latched flow (BANKS=N etc.).
+llc_args=( -mtriple=i4004 -function-sections -filetype=obj )
+crt0=crt0.s
+if [[ "${LEGACY_BANKED:-0}" == "1" ]]; then
+  llc_args+=( -i4004-softcall -i4004-banked-ram -i4004-relax-all-branches )
+  crt0=crt0_banked.s
+fi
 status "llc: firmware IR -> $out_dir/$software.o"
-timeout 180 "$bin/llc" -mtriple=i4004 -function-sections -filetype=obj "$ir" -o "$out_dir/$software.o"
+timeout 180 "$bin/llc" "${llc_args[@]}" "$ir" -o "$out_dir/$software.o"
 
-# 2. assemble crt0 + runtime + HAL. crt0.s MUST be first object so .reset lands
-#    at ROM 0 (the packer places sections in object order within a section).
+# 2. assemble crt0 + runtime + HAL. crt0 MUST be the first object so .reset
+#    lands at ROM 0 (the packer places sections in object order).
 hal="$root/../system/busicom_141pf/platform/runtime/hal.s"
-rtsrcs=(crt0.s arith.s arith16.s bcd.s logic.s logic16.s shift.s shift16.s mem.s stack.s regops.s)
+rtsrcs=(arith.s arith16.s bcd.s logic.s logic16.s shift.s shift16.s mem.s stack.s regops.s)
 objs=("$out_dir/crt0.o")
-timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$rt/crt0.s" -o "$out_dir/crt0.o"
-for s in "${rtsrcs[@]:1}"; do
+timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$rt/$crt0" -o "$out_dir/crt0.o"
+for s in "${rtsrcs[@]}"; do
   b="$(basename "$s" .s)"
   timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$rt/$s" -o "$out_dir/$b.o"
   objs+=("$out_dir/$b.o")
 done
 timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$hal" -o "$out_dir/hal.o"
 objs+=("$out_dir/hal.o")
+# The title's own hand-written routines (e.g. the Busicom BCD primitives).
+for s in "$title_dir"/asm/*.s; do
+  [[ -f $s ]] || continue
+  b="title_$(basename "$s" .s)"
+  timeout 60 "$bin/llvm-mc" -triple i4004 --filetype=obj "$s" -o "$out_dir/$b.o"
+  objs+=("$out_dir/$b.o")
+done
+if [[ -n "${EXTRA_OBJS:-}" ]]; then
+  # extra hand-written objects (e.g. the firmware's arithmetic primitives)
+  for o in $EXTRA_OBJS; do objs+=("$o"); done
+fi
 
 # firmware object LAST (crt0 first for .reset@0; the packer resolves cross-
 # object relocations regardless of order).
@@ -73,16 +94,18 @@ objs+=("$out_dir/$software.o")
 
 # 3. link + page-pack into a ROM image.
 status "i4004_pack: link $((${#objs[@]})) objects -> $out_dir/$software.bin (max $maxrom)"
-# No --pad-pages: I4004BranchRelax made every JCN/ISZ page-independent (JCN !cc,
-# .L; JUN Dest), so functions may freely span 256-byte ROM pages.
-# --softcall synthesizes the software-call return dispatch (__soft_ret, __srtab,
-# per-page jin-p0 stubs, __push_off/__push_pg) and asserts the JMS leaf rule;
-# compiled calls are CALLSOFT so this is mandatory for a runnable firmware.
-pack_args=( --linker-script "$link" --max "$maxrom" --pad "$maxrom" --softcall )
-if [[ -n "${BANKS:-}" ]]; then
-    pack_args+=( --banks "$BANKS" )
-    [[ -n "${COMMON_BYTES:-}" ]] && pack_args+=( --common-bytes "$COMMON_BYTES" )
-    [[ -n "${BANK_BYTES:-}" ]] && pack_args+=( --bank-bytes "$BANK_BYTES" )
+pack_args=( --linker-script "$link" --max "$maxrom" --pad "$maxrom" )
+if [[ "${LEGACY_BANKED:-0}" == "1" ]]; then
+  # --softcall synthesizes the software-call return dispatch (__soft_ret,
+  # __srtab, per-page jin-p0 stubs, __push_off/__push_pg).
+  pack_args+=( --softcall )
+  if [[ -n "${BANKS:-}" ]]; then
+      pack_args+=( --banks "$BANKS" )
+      [[ -n "${COMMON_BYTES:-}" ]] && pack_args+=( --common-bytes "$COMMON_BYTES" )
+      [[ -n "${BANK_BYTES:-}" ]] && pack_args+=( --bank-bytes "$BANK_BYTES" )
+  fi
+else
+  pack_args+=( --gc-sections )
 fi
 timeout 180 python3 "$root/asm/i4004_pack.py" "${objs[@]}" \
     -o "$out_dir/$software.bin" -m "$out_dir/$software.map" \

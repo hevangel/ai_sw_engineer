@@ -16,7 +16,7 @@
 //! | Port | Dir | Bit | Signal |
 //! |---|---|---|---|
 //! | ROM0 | out | 0 | 4003 #0 (keyboard) shift clock — active-low pulse |
-//! | ROM0 | out | 1 | serial data to 4003 #0 and #1 — **active low** |
+//! | ROM0 | out | 1 | serial data to 4003 #0 and #1 — keyboard: a **0** selects the row; printer: a **1** fires the hammer |
 //! | ROM0 | out | 2 | 4003 #1/#2 (printer chain) shift clock — active low |
 //! | ROM1 | in  | 3:0 | keyboard matrix column nibble (row set by 4003 #0) |
 //! | ROM2 | in  | 0 | printer drum index — one pulse per revolution |
@@ -48,10 +48,10 @@ pub const RAM_PRINTER: u8 = 0;
 /// RAM chip (CM-RAM0, P0=1) carrying the three lamps (RAM1).
 pub const RAM_LAMPS: u8 = 1;
 
-// ROM0 output bits (clocks are active-low pulses; data is active low).
+// ROM0 output bits (clocks are active-low pulses).
 /// ROM0 bit 0: keyboard 4003 #0 shift clock.
 pub const ROM0_KB_CLOCK: u8 = 1 << 0;
-/// ROM0 bit 1: serial data to the 4003 chain (active low).
+/// ROM0 bit 1: serial data to both 4003 chains (keyboard: 0 selects; printer: 1 fires).
 pub const ROM0_SERIAL_DATA: u8 = 1 << 1;
 /// ROM0 bit 2: printer 4003 #1/#2 shift clock.
 pub const ROM0_PR_CLOCK: u8 = 1 << 2;

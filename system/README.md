@@ -4,7 +4,7 @@ One folder per historical machine. Each holds the machine's `platform/` (memory 
 
 | System | Year | CPU | LLVM backend | HW simulator in ai_hw_engineer | Software titles | Folder |
 |---|---|---|---|---|---|---|
-| Busicom 141-PF calculator | 1971 | Intel 4004 | `llvm-i4004` | `system/busicom_141pf` (4004/4001/4002/4003 RTL) | [firmware](busicom_141pf/firmware/) (M1, 7/42) | [busicom_141pf/](busicom_141pf/) |
+| Busicom 141-PF calculator | 1971 | Intel 4004 | `llvm-i4004` | `system/busicom_141pf` (4004/4001/4002/4003 RTL) | [firmware](busicom_141pf/firmware/) (M5: 4,095 B ROM, 42/42 on RTL and chips) | [busicom_141pf/](busicom_141pf/) |
 | Micral N | 1973 | Intel 8008 | `llvm-i8008` | `system/micral_n` (8008 RTL) | — | planned |
 | Apple II | 1977 | MOS 6502 | `llvm-mos6502` | `system/apple_ii` (in progress), `design/mos_6502` | — | planned |
 | Atari 2600 (VCS) | 1977 | MOS 6507 | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |

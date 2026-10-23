@@ -12,7 +12,6 @@
 mod target {
     use core::panic::PanicInfo;
     use software::driver_keyboard::{KeyBuffer, KeyboardDriver};
-    use software::driver_lamps::write_lamps;
     use software::driver_printer::PrinterDriver;
     use software::hal::Hal;
     use software::Calculator;
@@ -36,25 +35,25 @@ mod target {
         fn __bus_ram_port_write(chip: u8, value: u8);
         /// `JCN`/`JTN` on the `TEST` pin: 1 = TEST HIGH (drum half-spin level).
         fn __bus_test_pin() -> u8;
+        /// The lamp nibble (`Calculator::lamp_nibble`) to RAM1, read from the
+        /// flags (asm/drivers.s).
+        fn __bus_lamps();
     }
 
-    /// The firmware main loop, generic over the board `Hal`: scan the keyboard
-    /// 40×/s into the 8-key buffer, run each buffered key on the calculator
-    /// driving the drum printer, and push the lamps out.
+    /// The firmware main loop, generic over the board `Hal`: scan the keyboard,
+    /// run a newly pressed key on the calculator driving the drum printer, and
+    /// push the lamps out.
+    #[inline(always)]
     pub fn run<H: Hal>(hal: &mut H) -> ! {
         let mut calc = Calculator::new();
-        let mut buffer = KeyBuffer::new();
+        KeyBuffer::new(); // the scanner state: no key down
         loop {
-            let sw = {
-                let mut kb = KeyboardDriver::new(hal);
-                kb.scan_pass(&mut buffer)
-            };
-            while let Some(key) = buffer.pop() {
-                {
-                    let mut printer = PrinterDriver::new(hal);
-                    calc.press(key, sw, &mut printer);
-                }
-                write_lamps(hal, calc.lamps());
+            let rc = KeyboardDriver::new(hal).scan_key();
+            if rc != 0xFF {
+                let mut printer = PrinterDriver::new(hal);
+                calc.press_at(rc >> 4, rc & 15, &mut printer);
+                // `__bus_lamps` (asm/drivers.s): `calc.lamp_nibble()` to RAM1.
+                unsafe { __bus_lamps() };
             }
         }
     }
@@ -97,12 +96,12 @@ fn main() {
     struct Tape;
     impl Printer for Tape {
         fn print(&mut self, row: &Row) {
-            let cols: String = row.cols.iter().map(|&c| c as char).collect();
+            let cols: String = row.cols().iter().map(|&c| c as char).collect();
             println!(
                 "{cols} {:<2}{:<2}{}",
-                row.sym_a.glyph(),
-                row.sym_b.glyph(),
-                if row.red { " (red)" } else { "" }
+                row.sym_a().glyph(),
+                row.sym_b().glyph(),
+                if row.red() { " (red)" } else { "" }
             );
         }
     }

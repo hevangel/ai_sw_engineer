@@ -38,77 +38,49 @@ pub enum Key {
 }
 
 impl Key {
-    /// Decode a matrix code; `None` for the two unpopulated positions.
+    // Plain comparisons, not `RangeInclusive::contains`: on the 4004 the
+    // latter stays an out-of-line call of ~290 bytes.
+    /// Decode a matrix code; `None` for the two unpopulated positions (143,
+    /// 144) and anything outside 129..=160. Arithmetic only, so no lookup
+    /// table reaches the 4004 image.
     pub fn from_code(code: u8) -> Option<Key> {
-        use Key::*;
-        const TABLE: [Option<Key>; 32] = [
-            Some(Cm),
-            Some(Rm),
-            Some(MMinus),
-            Some(MPlus),
-            Some(Sqrt),
-            Some(Percent),
-            Some(MEqMinus),
-            Some(MEqPlus),
-            Some(St),
-            Some(Div),
-            Some(Mul),
-            Some(Eq),
-            Some(Minus),
-            Some(Plus),
-            None,
-            None,
-            Some(D9),
-            Some(D6),
-            Some(D3),
-            Some(Point),
-            Some(D8),
-            Some(D5),
-            Some(D2),
-            Some(D00),
-            Some(D7),
-            Some(D4),
-            Some(D1),
-            Some(D0),
-            Some(Sign),
-            Some(Ex),
-            Some(Ce),
-            Some(C),
-        ];
-        if (129..=160).contains(&code) {
-            TABLE[(code - 129) as usize]
-        } else {
-            None
+        if !(129..=160).contains(&code) || code == 143 || code == 144 {
+            return None;
         }
+        // SAFETY: `Key` is `repr(u8)` and every code in 129..=160 except
+        // 143/144 is a declared discriminant.
+        Some(unsafe { core::mem::transmute::<u8, Key>(code) })
     }
 
-    /// Digit value for `0`–`9`.
+    /// Digit value for `0`–`9`. The digit keys sit in matrix rows 4..6
+    /// (codes 145..156): column 0/1/2 of row r is `9 - r - 3*column`, and `0`
+    /// is code 156 (column 3 carries `.`, `00`).
     pub fn digit(self) -> Option<u8> {
-        use Key::*;
-        Some(match self {
-            D0 => 0,
-            D1 => 1,
-            D2 => 2,
-            D3 => 3,
-            D4 => 4,
-            D5 => 5,
-            D6 => 6,
-            D7 => 7,
-            D8 => 8,
-            D9 => 9,
-            _ => return None,
-        })
+        let code = self as u8;
+        if code == Key::D0 as u8 {
+            return Some(0);
+        }
+        if !(145..=155).contains(&code) {
+            return None;
+        }
+        let k = code - 145;
+        let col = k & 3;
+        if col == 3 {
+            return None;
+        }
+        Some(9 - (k >> 2) - col - col - col)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Rounding {
     /// FL: floating decimal point.
-    Float,
+    Float = 0,
     /// 5/4: round half up.
-    Round,
+    Round = 1,
     /// IN: truncate.
-    Truncate,
+    Truncate = 2,
 }
 
 impl Rounding {

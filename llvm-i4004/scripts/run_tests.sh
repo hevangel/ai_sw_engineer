@@ -42,7 +42,7 @@ fi
 
 echo
 echo "==> differential disassembler cross-check (executes every encoding on external/chips)"
-LLVM_MC="$BIN/llvm-mc" "$BACKEND_DIR/scripts/crosscheck_disasm.py"
+LLVM_MC="$BIN/llvm-mc" python3 "$BACKEND_DIR/scripts/crosscheck_disasm.py"
 
 echo
 echo "==> CodeGen execution test: run llc-compiled functions on external/chips"
@@ -51,6 +51,24 @@ if [[ -x $BIN/llc ]]; then
     python3 "$BACKEND_DIR/scripts/exec_fn.py"
   LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
     python3 "$BACKEND_DIR/scripts/exec_i16.py"
+  LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
+    python3 "$BACKEND_DIR/scripts/exec_cmp.py"
+  LLC="$BIN/llc" LLVM_MC="$BIN/llvm-mc" LLVM_OBJDUMP="$BIN/llvm-objdump" \
+    python3 "$BACKEND_DIR/scripts/exec_nibble.py"
 else
   echo "    (skipped: llc not built)"
+fi
+
+echo
+echo "==> whole-firmware size gate (busicom_141pf; ROM_BUDGET=${ROM_BUDGET:-4096}, FN_MAX=${FN_MAX:-1024})"
+# Fails the run (exit 3) while the firmware does not fit -- by design: the
+# 2026-10-19 failure note's lesson is that every component was green while the
+# whole could not be built. SIZE_GATE=report downgrades it to a report.
+FW_IR="$BACKEND_DIR/../system/busicom_141pf/firmware/build/firmware_i4004.ll"
+if [[ -x $BIN/llc && -f $FW_IR ]]; then
+  LLVM_OBJDUMP="$BIN/llvm-objdump" python3 \
+    "$BACKEND_DIR/../system/busicom_141pf/firmware/scripts/gen_worklist.py" \
+    "$FW_IR" "$BIN/llc" "$BACKEND_DIR/rust/codegen_worklist.md"
+else
+  echo "    (skipped: no llc or no firmware IR -- run build_target_ir.sh)"
 fi

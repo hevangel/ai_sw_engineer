@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=i4004 < %s | FileCheck %s
+; RUN: llc -mtriple=i4004 -i4004-softcall < %s | FileCheck %s
 ;
 ; Software-call convention (abi.md 4.4.1). A call to a compiled firmware
 ; function pushes a 3-nibble return token (offset lo, offset hi, page) through

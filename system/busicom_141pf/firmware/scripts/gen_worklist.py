@@ -14,8 +14,22 @@ other backend error). We normalise each failing node to its operation
 signature (drop SSA ids, addresses, constants) and count how many functions hit
 it. The ranked list is the backlog the codegen agent burns down.
 
+It also runs the whole-program SIZE GATE: the module is compiled once with
+`-function-sections -filetype=obj`, every `.text.<fn>` section is measured
+(llvm-objdump -h), and the run FAILS (exit 3) if the summed `.text` exceeds
+ROM_BUDGET or any single function exceeds FN_MAX. The top-10 functions by size
+are printed and written to the report. This is the gate the 2026-10-19 failure
+note asked for: it runs from the first function that lowers, long before an
+image links.
+
 Usage:
   gen_worklist.py <firmware_i4004.ll> <llc-path> <out.md> [--triple i4004]
+
+Environment:
+  ROM_BUDGET  summed .text limit in bytes (default 4096, the 16 x 4001 ceiling)
+  FN_MAX      per-function limit in bytes (default 1024)
+  SIZE_GATE   enforce (default) | report  -- report never fails the run
+  LLVM_OBJDUMP  objdump path (default: next to <llc-path>)
 """
 from __future__ import annotations
 
@@ -77,9 +91,67 @@ def extract_failure(stderr: str):
     return None
 
 
+ROM_BUDGET = int(os.environ.get("ROM_BUDGET", "4096"))
+FN_MAX = int(os.environ.get("FN_MAX", "1024"))
+SIZE_GATE = os.environ.get("SIZE_GATE", "enforce")
+
+
+def measure_text(ll_path: str, llc: str, objdump: str, triple: str):
+    """Compile the whole module once; return [(function, bytes)] largest first.
+
+    With -function-sections each function lands in `.text.<symbol>`, so the
+    section table is the per-function size list. Returns None if the module
+    does not compile as a whole (the per-function pass above reports why).
+    """
+    with tempfile.TemporaryDirectory() as td:
+        obj = Path(td) / "fw.o"
+        r = subprocess.run(
+            [llc, "-mtriple=" + triple, "-function-sections", "-filetype=obj",
+             ll_path, "-o", str(obj)],
+            capture_output=True, text=True, timeout=LLC_TIMEOUT * 10,
+        )
+        if r.returncode != 0:
+            return None
+        h = subprocess.run([objdump, "-h", str(obj)], capture_output=True,
+                           text=True, check=True).stdout
+    sizes = []
+    for line in h.splitlines():
+        m = re.match(r"\s*\d+\s+(\.text\S*)\s+([0-9a-fA-F]+)\s", line)
+        if m and int(m.group(2), 16):
+            name = m.group(1)[len(".text."):] if m.group(1) != ".text" else ".text"
+            sizes.append((name, int(m.group(2), 16)))
+    sizes.sort(key=lambda t: -t[1])
+    return sizes
+
+
 def demangle_hint(sym: str) -> str:
     """Best-effort readable hint from a Rust mangled name (no rustc needed)."""
     s = sym.lstrip("@").strip('"')
+    if s.startswith("_R"):
+        # v0 mangling: walk the structure, keeping length-prefixed identifiers
+        # and skipping `s<base62>_` disambiguators and `B<base62>_` backrefs
+        # (whose base62 digits would otherwise read as identifier lengths).
+        idents, i = [], 2
+        while i < len(s):
+            c = s[i]
+            if c.isdigit():
+                j = i
+                while j < len(s) and s[j].isdigit():
+                    j += 1
+                n = int(s[i:j])
+                if j < len(s) and s[j] == "_":  # `_` separates a leading digit
+                    j += 1
+                idents.append(s[j:j + n])
+                i = j + n
+            elif c in "sB":
+                k = s.find("_", i)
+                i = len(s) if k < 0 else k + 1
+            else:
+                i += 1
+        # Drop the crate names (firmware/software) for brevity.
+        idents = [t for t in idents if t not in ("software", "firmware", "target")]
+        if idents:
+            return "::".join(idents)
     toks = re.findall(r"[0-9]+([A-Za-z_][A-Za-z0-9_]*)", s)
     hint = "::".join(t for t in toks if not t.startswith("Cs"))
     return hint or s
@@ -193,6 +265,21 @@ def main() -> int:
                 op_funcs[op].append(name)
                 failed.append((name, op, sig))
 
+    objdump = os.environ.get("LLVM_OBJDUMP",
+                             str(Path(llc).with_name("llvm-objdump")))
+    sizes = measure_text(ll_path, llc, objdump, triple)
+    gate_fail = []
+    if sizes is None:
+        gate_fail.append("whole module does not compile; .text not measurable")
+    else:
+        text = sum(n for _, n in sizes)
+        if text > ROM_BUDGET:
+            gate_fail.append(f".text {text} B > ROM_BUDGET {ROM_BUDGET} B "
+                             f"({text / ROM_BUDGET:.1f}x)")
+        big = [(f, n) for f, n in sizes if n > FN_MAX]
+        if big:
+            gate_fail.append(f"{len(big)} function(s) > FN_MAX {FN_MAX} B")
+
     total = len(bodies)
     md = []
     md.append("# i4004 codegen work list (from the firmware whole-program IR)\n")
@@ -207,6 +294,23 @@ def main() -> int:
     md.append(f"- Functions in module: **{total}**")
     md.append(f"- Select cleanly today: **{len(ok)}**")
     md.append(f"- Fail to select: **{len(failed)}**\n")
+
+    md.append("## Size gate\n")
+    if sizes is None:
+        md.append("- whole module does not compile; `.text` not measurable\n")
+    else:
+        text = sum(n for _, n in sizes)
+        md.append(f"- `.text` (sum of {len(sizes)} sections): **{text} B** "
+                  f"vs ROM_BUDGET {ROM_BUDGET} B ({text / ROM_BUDGET:.2f}x); "
+                  f"vs the 1,280 B original ROM {text / 1280:.1f}x")
+        md.append(f"- Largest function: **{sizes[0][1]} B** (FN_MAX {FN_MAX} B)")
+        md.append(f"- Gate: **{'FAIL' if gate_fail else 'pass'}**"
+                  + (f" — {'; '.join(gate_fail)}" if gate_fail else "") + "\n")
+        md.append("| Rank | Function | Bytes |")
+        md.append("|---|---|---|")
+        for rank, (fn, n) in enumerate(sizes[:10], 1):
+            md.append(f"| {rank} | `{demangle_hint(fn)}` | {n} |")
+        md.append("")
 
     md.append("## Ranked by failing operation (functions blocked)\n")
     md.append("| Rank | Operation (first unselected node) | Functions blocked |")
@@ -254,6 +358,15 @@ def main() -> int:
         f"gen_worklist: {len(ok)}/{total} select, {len(failed)} fail; "
         f"top ops: {', '.join(f'{o}({c})' for o, c in ops.most_common(5)) or 'none'}\n"
     )
+    if sizes is not None:
+        sys.stderr.write(f"size gate: .text {sum(n for _, n in sizes)} B "
+                         f"(ROM_BUDGET {ROM_BUDGET}, FN_MAX {FN_MAX}); top 10:\n")
+        for fn, n in sizes[:10]:
+            sys.stderr.write(f"  {n:6d}  {demangle_hint(fn)}\n")
+    if gate_fail:
+        sys.stderr.write("SIZE GATE FAIL: " + "; ".join(gate_fail) + "\n")
+        if SIZE_GATE != "report":
+            return 3
     return 0
 
 

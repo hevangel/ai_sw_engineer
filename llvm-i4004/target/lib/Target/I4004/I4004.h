@@ -31,6 +31,8 @@ FunctionPass *createI4004ISelDag(I4004TargetMachine &TM,
 // Post-RA pseudo expander (expands the ACC-centric pseudos into real 4004
 // instruction sequences).
 FunctionPass *createI4004ExpandPseudosPass();
+/// `-i4004-softcall` or `-i4004-banked-ram` is on (I4004ExpandPseudos.cpp).
+bool i4004LegacyLayout();
 
 // Post-expansion peephole: removes redundant FIM/SRC pointer setups (the
 // largest single source of code size on this target).
@@ -40,10 +42,14 @@ FunctionPass *createI4004PeepholePass();
 // so a function may span 256-byte ROM pages.
 FunctionPass *createI4004BranchRelaxPass();
 
+// Pre-RA: compare-with-constant branches (BRCC* with a MOVi operand -> *ri).
+FunctionPass *createI4004ImmComparePass();
+
 void initializeI4004DAGToDAGISelLegacyPass(PassRegistry &);
 void initializeI4004ExpandPseudosPass(PassRegistry &);
 void initializeI4004PeepholePass(PassRegistry &);
 void initializeI4004BranchRelaxPass(PassRegistry &);
+void initializeI4004ImmComparePass(PassRegistry &);
 
 } // namespace llvm
 

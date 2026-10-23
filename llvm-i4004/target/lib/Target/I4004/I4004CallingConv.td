@@ -45,3 +45,9 @@ def RetCC_I4004 : CallingConv<[
 // caller-saved i16 argument/return pair -- a `{ i16, ptr }` return lands its
 // second word there -- so it cannot also be callee-saved.
 def CSR_I4004 : CalleeSavedRegs<(add P6)>;
+
+// Hand-written leaf routines named `__leaf_*` (and the platform HAL's
+// `__bus_*`) touch only P0-P3, ACC and CY, so a call to one also preserves
+// P4:P5 (issue #18: values live across the hot digit-loop calls stay in
+// registers instead of being spilled). Selected per call site in LowerCall.
+def CSR_I4004_Leaf : CalleeSavedRegs<(add P4, P5, P6)>;

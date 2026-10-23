@@ -18,6 +18,7 @@ add_llvm_target(I4004CodeGen
   I4004AsmPrinter.cpp
   I4004BranchRelax.cpp
   I4004ExpandPseudos.cpp
+  I4004ImmCompare.cpp
   I4004FrameLowering.cpp
   I4004ISelDAGToDAG.cpp
   I4004ISelLowering.cpp

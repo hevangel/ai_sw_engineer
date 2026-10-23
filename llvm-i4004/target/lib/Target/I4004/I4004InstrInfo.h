@@ -14,6 +14,7 @@
 #define LLVM_LIB_TARGET_I4004_I4004INSTRINFO_H
 
 #include "I4004RegisterInfo.h"
+#include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
@@ -86,6 +87,37 @@ public:
 
   bool reverseBranchCondition(
       SmallVectorImpl<MachineOperand> &Cond) const override;
+
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
+
+  // MachineOutliner (issue #18): repeated straight-line sequences become a
+  // `JMS` to an outlined body ending in `BBL 0`. Bodies hold no call, so a
+  // call to one adds exactly one level to the 3-level hardware stack; the
+  // packer still checks the whole graph.
+  bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
+                                   bool OutlineFromLinkOnceODRs) const override;
+  bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override {
+    return true;
+  }
+  bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
+                              unsigned &Flags) const override {
+    return true;
+  }
+  std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+  getOutliningCandidateInfo(const MachineModuleInfo &MMI,
+                            std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+                            unsigned MinRepeats) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
+  MachineBasicBlock::iterator
+  insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &It, MachineFunction &MF,
+                     outliner::Candidate &C) const override;
+
+protected:
+  outliner::InstrType getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                           MachineBasicBlock::iterator &MIT,
+                                           unsigned Flags) const override;
 };
 
 } // end namespace llvm

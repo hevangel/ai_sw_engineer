@@ -26,17 +26,17 @@ struct Recorder(Vec<TapeRow>);
 
 impl Printer for Recorder {
     fn print(&mut self, row: &Row) {
-        let (value, symbol) = if row.overflow {
+        let (value, symbol) = if row.overflow_line() {
             (None, "overflow".to_string())
         } else {
-            let s: String = row.cols.iter().map(|&c| c as char).collect();
+            let s: String = row.cols().iter().map(|&c| c as char).collect();
             let s = s.trim().to_string();
             (Some(s), row.oracle_symbol().to_string())
         };
         self.0.push(TapeRow {
             value,
             symbol,
-            red: row.red,
+            red: row.red(),
             rounded: row.rounded(),
         });
     }

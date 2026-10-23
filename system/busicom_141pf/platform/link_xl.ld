@@ -32,25 +32,22 @@ MEMORY {
   /* Program ROM: 16 x 4001 = 4096 bytes on the xl board. */
   rom  (rx) : ORIGIN = 0x0000, LENGTH = 0x1000   /* 0x000-0xFFF, 4096 bytes */
 
-  /* Data RAM arena: bank 0 chips 2-3 (the two ADDED 4002s of bank 0), main
-   * characters. AS-0 handles 0x0020..0x005F =
-   * [bank0][chip2..3][reg0..3][char0..15] = 128 nibbles. Bank 0 chips 0-1
-   * (handles 0x0000..0x001F) are left to the firmware working set + the
-   * printer/lamp port chips, matching the stock layout. */
-  ram  (rw) : ORIGIN = 0x0020, LENGTH = 0x0040   /* bank0 chips 2-3 main, 128 nibbles */
-
-  /* Software return stack: CM-RAM BANK 0, SRC 0x80..0xFF (128 nibbles).
-   * MUST be in bank 0 and within an 8-bit SRC address: SSP is P7 = R14:R15, a
-   * single 8-bit pair, so `fim p7, __sstack_base` can only load an 8-bit base
-   * and the push/pop helpers address the stack with a plain SRC under the
-   * current DCL bank (bank 0, set by crt0). An earlier layout put the stack at
-   * handle 0x100 (CM-RAM bank 1); FIM truncated that to 0x00, so the stack grew
-   * from SRC 0x00 over the firmware's working registers and the printer/lamp
-   * port chips -> the calculator produced no tape. Bank-0 0x80..0xFF is clear
-   * of the working set / I/O (0x00..0x1F), the (empty) data arena (0x20..0x5F)
-   * and the per-function frame overlay (packer-placed from 0x20 up, a few dozen
-   * chars). Depth-16 x (<=8 nibbles/far call) fits 128 nibbles. */
-  stack (rw) : ORIGIN = 0x0080, LENGTH = 0x0080  /* bank0 SRC 0x80..0xFF, 128 nibbles */
+  /* CM-RAM bank 0 only (issue #18: no DCL). The 16 registers of bank 0's four
+   * 4002s (SRC address = [chip:2][reg:2][char:4]) are laid out by the firmware,
+   * not the linker -- see memory_map.md "Extended (xl) board, bank-0 map":
+   *   0x00-0x7F  Num registers WR DR CR SR TR MR T1 T2 (flags in status S3)
+   *   0x80-0xBF  arithmetic scratch (mul / div / sqrt buffers)
+   *   0xC0       key FIFO            0xE0  print register
+   *   0xD0, 0xF0 per-function frames (packer overlay, below); status 0xF0 S0
+   *              = key-down flag of the last keyboard scan pass
+   * The firmware keeps all state in those registers, so `.data`/`.bss` must be
+   * empty: the `ram` region has no room, and the packer fails the link if a
+   * static appears. There is no software return stack (JMS/BBL calls; the
+   * packer checks the 3-level hardware-stack depth). */
+  ram    (rw) : ORIGIN = 0x00D0, LENGTH = 0x0000
+  stack  (rw) : ORIGIN = 0x00F0, LENGTH = 0x0000
+  frames (rw) : ORIGIN = 0x00D0, LENGTH = 0x0010   /* reg 0xD0, 16 chars */
+  frames2 (rw) : ORIGIN = 0x00F0, LENGTH = 0x0010  /* reg 0xF0, 16 chars */
 
   /* Banks 2-3 (handles 0x0200..0x03FF, 512 more nibbles) are present on the
    * board and documented in memory_map.md as spare heap/arena headroom; they

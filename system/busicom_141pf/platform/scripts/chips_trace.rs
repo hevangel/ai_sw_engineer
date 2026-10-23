@@ -191,5 +191,22 @@ fn main() {
             }
             spin += 1;
         }
+        // CHIPS_DUMP_RAM=1: after each key, bank-0 registers 0x00-0x7F (digits
+        // most significant first, then status S0-S3) on stderr -- a debugging
+        // aid for the compiled firmware; the tape on stdout is unchanged.
+        if std::env::var_os("CHIPS_DUMP_RAM").is_some() {
+            eprintln!("key {key}");
+            for r in 0..8usize {
+                let reg = &b.rams[r / 4].registers[r % 4];
+                let d: String = (0..16u8)
+                    .rev()
+                    .map(|i| format!("{:x}", reg.characters.read_nibble(i).value()))
+                    .collect();
+                let s: String = (0..4u8)
+                    .map(|k| format!("{:x}", reg.status.read_nibble(k).value()))
+                    .collect();
+                eprintln!("  {:02x}: {d} {s}", r * 16);
+            }
+        }
     }
 }

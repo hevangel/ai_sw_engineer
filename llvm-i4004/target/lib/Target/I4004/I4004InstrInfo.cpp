@@ -12,6 +12,7 @@
 #include "I4004Subtarget.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/Module.h"
 
 using namespace llvm;
 
@@ -131,7 +132,9 @@ bool I4004InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   //   BR <tgt>                                -> unconditional
   // Cond encoding: [opcode, ccimm, lhs, rhs] (4 operands).
   auto isCondBr = [](unsigned Op) {
-    return Op == I4004::BRCCi8 || Op == I4004::BRCCi16;
+    return Op == I4004::BRCCi8 || Op == I4004::BRCCi16 ||
+           Op == I4004::BRCCi8ri || Op == I4004::BRCCi16ri ||
+           Op == I4004::BRRAM;
   };
 
   for (auto T = FirstTerm; T != MBB.end(); ++T) {
@@ -174,7 +177,8 @@ bool I4004InstrInfo::reverseBranchCondition(
   if (Cond.size() != 4)
     return true; // cannot reverse
   // Cond[1] is the I4004CC code; flip to its complement.
-  int CC = Cond[1].getImm();
+  const int Used = Cond[1].getImm() & 0xF0;
+  int CC = I4004CC::code(Cond[1].getImm());
   int Rev;
   switch (CC) {
   case I4004CC::EQ:  Rev = I4004CC::NE;  break;
@@ -183,9 +187,13 @@ bool I4004InstrInfo::reverseBranchCondition(
   case I4004CC::UGE: Rev = I4004CC::ULT; break;
   case I4004CC::UGT: Rev = I4004CC::ULE; break;
   case I4004CC::ULE: Rev = I4004CC::UGT; break;
+  case I4004CC::SLT: Rev = I4004CC::SGE; break;
+  case I4004CC::SGE: Rev = I4004CC::SLT; break;
+  case I4004CC::NEG: Rev = I4004CC::NONNEG; break;
+  case I4004CC::NONNEG: Rev = I4004CC::NEG; break;
   default: return true;
   }
-  Cond[1].setImm(Rev);
+  Cond[1].setImm(Rev | Used);
   return false;
 }
 
@@ -240,7 +248,8 @@ unsigned I4004InstrInfo::removeBranch(MachineBasicBlock &MBB,
     // Only remove branches we model (BR and the conditional BRCC pseudos);
     // stop at the first non-(modeled)-terminator.
     unsigned Op = I->getOpcode();
-    if (Op != I4004::BR && Op != I4004::BRCCi8 && Op != I4004::BRCCi16)
+    if (Op != I4004::BR && Op != I4004::BRCCi8 && Op != I4004::BRCCi16 &&
+        Op != I4004::BRCCi8ri && Op != I4004::BRCCi16ri && Op != I4004::BRRAM)
       break;
     Bytes += 2;
     I->eraseFromParent();
@@ -250,4 +259,174 @@ unsigned I4004InstrInfo::removeBranch(MachineBasicBlock &MBB,
   if (BytesRemoved)
     *BytesRemoved = Bytes;
   return Count;
+}
+
+unsigned I4004InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  if (MI.isMetaInstruction())
+    return 0;
+  return get(MI.getOpcode()).getSize();
+}
+
+//===----------------------------------------------------------------------===//
+// MachineOutliner (issue #18). The outliner runs after I4004ExpandPseudos, on
+// real MCS-4 instructions. Those do not model ACC as an operand, so its
+// liveness is computed here from the opcodes: an outlined body returns with
+// BBL 0, which loads ACC, so ACC must be dead after the sequence. CY and the
+// index registers pass through JMS/BBL untouched.
+//===----------------------------------------------------------------------===//
+
+namespace {
+/// How a call to an outlined body is built.
+enum : unsigned { OutlineCall, OutlineTailCall };
+
+enum class AccUse { None, Reads, Writes };
+
+/// How an instruction uses ACC first: reads it (live before), or overwrites
+/// it without reading (dead before).
+AccUse accUse(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case I4004::LD:
+  case I4004::LDM:
+  case I4004::CLB:
+  case I4004::RDM:
+  case I4004::RDR:
+  case I4004::RD0:
+  case I4004::RD1:
+  case I4004::RD2:
+  case I4004::RD3:
+  case I4004::TCC:
+  case I4004::TCS:
+  case I4004::BBL:
+    return AccUse::Writes;
+  case I4004::JMS: {
+    // No routine takes an argument in ACC (abi.md 4.1), but an outlined body
+    // may continue a computation in ACC from its caller.
+    const MachineOperand &T = MI.getOperand(0);
+    if (T.isGlobal() && T.getGlobal()->getName().starts_with("OUTLINED_FUNCTION"))
+      return AccUse::Reads;
+    return AccUse::Writes;
+  }
+  case I4004::NOP:
+  case I4004::FIM:
+  case I4004::SRC:
+  case I4004::INC:
+  case I4004::CLC:
+  case I4004::CMC:
+  case I4004::STC:
+    return AccUse::None;
+  default: // ADD SUB XCH IAC DAC CMA RAL RAR DAA KBP ADM SBM, the writes
+           // (WRM WR0-3 WRR WMP WPM DCL), JCN, and anything unknown
+    return AccUse::Reads;
+  }
+}
+
+/// Whether ACC may be read after `From` in `MBB` before being overwritten:
+/// scan forward, then into the successors (Depth levels); unknown is live.
+bool accLiveFrom(const MachineBasicBlock &MBB,
+                 MachineBasicBlock::const_iterator From, unsigned Depth) {
+  for (auto I = From, E = MBB.end(); I != E; ++I) {
+    if (I->isMetaInstruction())
+      continue;
+    switch (accUse(*I)) {
+    case AccUse::Reads:
+      return true;
+    case AccUse::Writes:
+      return false;
+    case AccUse::None:
+      break;
+    }
+  }
+  if (MBB.succ_empty())
+    return false;
+  if (Depth == 0)
+    return true;
+  for (const MachineBasicBlock *S : MBB.successors())
+    if (accLiveFrom(*S, S->begin(), Depth - 1))
+      return true;
+  return false;
+}
+} // namespace
+
+bool I4004InstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  if (i4004LegacyLayout())
+    return false;
+  const Function &F = MF.getFunction();
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
+    return false;
+  return !F.hasSection();
+}
+
+outliner::InstrType
+I4004InstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                     MachineBasicBlock::iterator &MIT,
+                                     unsigned Flags) const {
+  const MachineInstr &MI = *MIT;
+  // A sequence may end in the function's return: it is then entered with JUN
+  // (a tail call: no stack level, no extra BBL).
+  if (MI.getOpcode() == I4004::BBL && MI.getOperand(0).getImm() == 0)
+    return outliner::InstrType::LegalTerminator;
+  switch (MI.getOpcode()) {
+  // Control flow stays put: branches are page-local, calls would deepen the
+  // hardware stack, FIN/JIN depend on the page they execute in.
+  case I4004::JCN:
+  case I4004::JUN:
+  case I4004::JMS:
+  case I4004::ISZ:
+  case I4004::JIN:
+  case I4004::FIN:
+  case I4004::BBL:
+  case I4004::DCL: // a bank bracket stays whole
+    return outliner::InstrType::Illegal;
+  default:
+    break;
+  }
+  if (MI.isPseudo() || MI.isCall() || MI.isBranch() || MI.isReturn() ||
+      MI.isTerminator() || MI.isInlineAsm())
+    return outliner::InstrType::Illegal;
+  return outliner::InstrType::Legal;
+}
+
+std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+I4004InstrInfo::getOutliningCandidateInfo(
+    const MachineModuleInfo &MMI,
+    std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+    unsigned MinRepeats) const {
+  const bool TailCall =
+      RepeatedSequenceLocs[0].back().getOpcode() == I4004::BBL;
+  // A body entered by JMS returns with BBL 0, which sets ACC = 0: drop the
+  // sites where ACC is live afterwards. (A tail call returns to the caller's
+  // caller, where ACC is dead.)
+  if (!TailCall)
+    llvm::erase_if(RepeatedSequenceLocs, [](outliner::Candidate &C) {
+      return accLiveFrom(*C.getMBB(), C.end(), /*Depth=*/2);
+    });
+  if (RepeatedSequenceLocs.size() < MinRepeats)
+    return std::nullopt;
+  unsigned SequenceSize = 0;
+  for (const MachineInstr &MI : RepeatedSequenceLocs[0])
+    SequenceSize += getInstSizeInBytes(MI);
+  const unsigned ID = TailCall ? OutlineTailCall : OutlineCall;
+  for (outliner::Candidate &C : RepeatedSequenceLocs)
+    C.setCallInfo(ID, /*JMS or JUN=*/2);
+  return std::make_unique<outliner::OutlinedFunction>(
+      RepeatedSequenceLocs, SequenceSize, /*BBL=*/TailCall ? 0 : 1, ID);
+}
+
+void I4004InstrInfo::buildOutlinedFrame(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    const outliner::OutlinedFunction &OF) const {
+  if (OF.FrameConstructionID == OutlineTailCall)
+    return; // the body ends in the callers' own BBL 0
+  MBB.insert(MBB.end(), BuildMI(MF, DebugLoc(), get(I4004::BBL)).addImm(0));
+}
+
+MachineBasicBlock::iterator I4004InstrInfo::insertOutlinedCall(
+    Module &M, MachineBasicBlock &MBB, MachineBasicBlock::iterator &It,
+    MachineFunction &MF, outliner::Candidate &C) const {
+  const unsigned Opc =
+      C.CallConstructionID == OutlineTailCall ? I4004::JUN : I4004::JMS;
+  It = MBB.insert(It, BuildMI(MF, DebugLoc(), get(Opc))
+                          .addGlobalAddress(M.getNamedValue(MF.getName())));
+  return It;
 }

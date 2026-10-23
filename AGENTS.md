@@ -121,6 +121,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - [ ] Target image builds; size reported against the ROM/RAM budget
 - [ ] Target image run on a simulator and compared against the oracle (or the gap is documented)
 - [ ] Backend changes: lit + MC tests pass
+- [ ] Size scoreboard: a title whose target image is not yet signed off adds a row to `report/size_history.md` (date, commit, `.text`, image, largest function, call/libcall counts, host and target status) for every landing that touches it or its backend, measured the same way as the previous rows
 - [ ] README / report updated
 
 ## Learning From Escaped Defects
@@ -130,6 +131,7 @@ A bug found by anything other than the title's own tests (the original program's
 - **Oracle from the original**: expected behavior comes from running the original binary or from the manufacturer's documentation, never from re-reading your own Rust.
 - **Two-stage check**: host pass + target pass are both required; a host pass with a target fail points at the backend first.
 - **Assumption ledger**: behavior the documentation does not state gets an `ASSUMPTION:` comment in code and an entry in `spec/spec.md`.
+- **Whole-program size gate from the first function that lowers**: link-and-measure the whole title against the ROM budget (per-function `.text` sum and largest function) in the backend's test runner, long before linker or relaxation polish. Component tests being green says nothing about whether the whole fits.
 
 ## Commit Messages
 

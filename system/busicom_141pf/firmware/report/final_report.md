@@ -1,9 +1,63 @@
 # Busicom 141-PF firmware — report
 
-Status: **M5 wrap-up (2026-10-21)** — see the last section. M3/M4 milestone
-records below.
+Status: **M5 done (2026-10-22, issue #18)**: the Rust firmware runs as a flat
+4,095 B ROM on the 4004 and prints the original's tape, 42/42, on both
+simulators. The 2026-10-21 sign-off below is superseded. M3/M4 records follow.
 
-## M5 wrap-up (2026-10-21) — host firmware final; target run signed off as out of architectural reach
+## M5 (2026-10-22): flat 4 KB image, 42/42 on the RTL and on chips
+
+| Check | Result |
+|---|---|
+| Target image | **4,095 B of 4,096** (flat, xl board's 16 × 4001; bank-0 RAM only; no banking). SHA-256 `4c0a9535d15735ab653066d84662dc7b3ffe84c142d9966e889755dfba678061` (working tree, not yet in `bin/`) |
+| vs the 1,280 B original | 3.2× |
+| Primary sim: ai_hw_engineer RTL (Verilator, `run_image.sh primary --board xl`) | **42/42**, all 846 payload lines identical to `oracle/rom_port_trace.txt` |
+| Secondary sim: external/chips (`run_image.sh secondary --board xl`) | **42/42**, identical |
+| Host `cargo test` (recovered-ROM replay, port level, exact tape, BCD property tests) | green; `fmt` and `clippy -D warnings` clean |
+| BCD primitives (`scripts/exec_num.py`: `asm/num.s` vs Rust twin on chips) | 4,600/4,600 |
+| Backend (`llvm-i4004/scripts/run_tests.sh`) | lit 17 + 16, compares 11,180/11,180, nibble ops 7,440/7,440, size gate 2,076 B `.text` |
+| Call depth (4004 3-level stack) | ≤ 3, checked by the packer at link |
+
+What is in the 4,095 B (from `build/target/firmware.map`):
+
+| Part | Bytes |
+|---|---|
+| Compiled Rust (`.text` 2,076 B + page relaxation) | 2,096 |
+| `asm/num.s`: BCD leaves and whole operations (`__n_add/mul/div/sqrt/round/compute`) | 1,630 |
+| `asm/drivers.s`: keyboard scan, print row and drum, lamps | 367 |
+| Reset vector | 2 |
+
+How it got there (rows in `size_history.md`): the 2026-10-21 build was ~57 KB
+of `.text` in 48 banks. Issue #18's plan replaced it in three layers:
+- **A, backend:** signed compares, native nibble ops, zero compares as
+  `LD; JCN`, `i8` setcc results, constant multiplies as shift + add, disjoint
+  `or` as `add`, and the MachineOutliner with `JMS`/`JUN` bodies.
+- **B, data model:** one BCD digit per 4002 character, registers as `Num`
+  handles, and every digit loop and whole operation in hand-written
+  `asm/num.s`, each one checked on chips against its Rust twin.
+- **C1, calls:** `JMS`/`BBL` throughout, with the call graph flattened to the
+  hardware's three levels.
+
+C2–C4 were not needed.
+
+Escaped defects found on the way (post-mortems in `failure_notes/`):
+- Two silent miscompiles: signed compares and aliased frame slots.
+- Five packer relaxation bugs.
+- A division scale shortfall inherited from M2.
+- Target-only driver defects: printer polarity, held-key repeat, drum timing,
+  call depth.
+- A `zeroext i1` return in the wrong register pair.
+- The drum phase and last-sector timing that only the RTL exposed.
+
+Limits:
+- 1 B of ROM is free. Any firmware growth needs a matching saving first.
+- The image needs the xl board (16 × 4001). The stock board's 1,280 B ROM is
+  not reached.
+- The host board model still steps the drum one sector per `test_pin()`
+  sample (M3-P1). The real phase behaviour is covered only by the two
+  simulator runs.
+- The image is not yet committed to `bin/`; that waits for sign-off.
+
+## M5 wrap-up (2026-10-21, superseded) — host firmware final; target run signed off as out of architectural reach
 
 - **Host behaviour stays 42/42 exact** (recovered-ROM replay, port-level
   replay, and the full-tape `port_trace` all pass; `cargo fmt`/`clippy -D
