@@ -133,10 +133,10 @@ Reserved / special index registers (not allocatable to the general pool):
   for `FIN`-based constant loads and indirect calls; it is caller-clobbered and
   never holds a live value across those operations.
 - **R14:R15 (P7)** is reserved as the **software stack pointer (SSP)** low/high
-  nibbles when the software return stack is in use (§4.4). On a leaf-heavy
-  program that never overflows the 3-level hardware stack, P7 is freed back to
-  the allocator (a module-level attribute decides; default: reserved so stack
-  spills always have a pointer).
+  nibbles when the software return stack is in use (§4.4). It is reserved
+  unconditionally (`getReservedRegs`), including in the flat `JMS`/`BBL`
+  layout, which does not use it. Freeing it would give the allocator a
+  seventh pair; that has not been done.
 
 So the **general allocatable pool** is R2–R13 (twelve 4-bit registers = six
 8-bit pairs P1–P6), with P0 and P7 reserved as above. `ACC`/`CY` are fixed
@@ -224,10 +224,13 @@ tiny register budget.
 
 ### 4.2 Return values
 
-- `i4`/`bool`: **ACC** (low nibble), with `CY` undefined on return unless the
-  function's signature declares a carry result.
-- `i8`: **P1** (R2:R3).
-- 16-bit pointer / `i16`: **P1:P2**.
+- `i1`/`bool`/`i4`: widened to `i8` and returned in **P1**
+  (`RetCC_I4004` promotes `i1`; `getTypeForExtReturn` widens a
+  `zeroext`/`signext` return to `i8`, not the `i16` default; see
+  `failure_notes/2026-10-22-llvm-i4004-bool-return-in-wrong-pair.md`). An
+  out-of-line call cannot return in ACC, because `BBL` overwrites it (§6.1).
+- `i8`: **P1** (R2:R3). A second `i8` return value goes in P2.
+- 16-bit pointer / `i16`: **D1 = P2:P3**. A second word goes in **D2 = P4:P5**.
 - Larger: **sret** — the caller passes a hidden addrspace-0 pointer as the
   first argument (in P1), the callee writes through it, and returns that
   pointer in P1.
@@ -246,13 +249,33 @@ tiny register budget.
   aggregate in D2 — LiveIntervals rejected the `COPY $d2` reading the second
   return slot because the call never defined it. Making D2 caller-saved resolves
   it and lets the two i16 arg/return pairs D1,D2 both be freely clobbered.)
-- `P7` (SSP) is **reserved**, neither caller- nor callee-saved — it is the
-  stack machinery itself (§4.4).
+- **Leaf routines preserve more.** A call to a routine named `__leaf_*` (a
+  title's hand-written digit routines) or `__bus_*` (the platform HAL) uses the
+  preserved set **P4, P5, P6** (`CSR_I4004_Leaf`, chosen per call site in
+  `LowerCall`). Such routines may touch only P0–P3, ACC and CY. The compiler
+  keeps values in P4:P5 across these hot calls instead of spilling them. A
+  hand-written routine that breaks this rule miscompiles its callers silently.
+  Assembly entries that clobber more (the Busicom `__n_*` operations clobber
+  P0–P5) must not use these prefixes.
+- `P7` (SSP) is **reserved**, neither caller- nor callee-saved. It is the
+  soft-stack pointer in the soft-call layout (§4.4.1). The flat `JMS`/`BBL`
+  layout does not use it, but it stays reserved.
 
 ### 4.4 Stack discipline and the hardware-stack limit
 
+**Current convention (2026-10-22, issue #18): hardware calls only.** Every
+compiled call is `JMS`, and every return is `BBL 0`. The program's static call
+depth below `main` (entered by `JUN`) must be ≤ 3. The packer enforces this
+at link time (`_assert_call_depth`): it rejects recursion and names the
+deepest path on overflow. The fix for an overflow is to inline a function or
+flatten the call graph, not to enable soft calls. Spills go to static
+per-function RAM frames that the packer overlays along the call graph, not to
+a stack (`codegen.md` §3–4). The soft-stack design below (tier 2, §4.4.1–4.4.2)
+is the frozen 2026-10-19 layout, still selectable with `-i4004-softcall`, and
+not used by the Busicom image.
+
 The 4004 return stack is **3 levels** (4 slots, one being the live PC — §6 of
-`isa.md`). The ABI defines a two-tier scheme:
+`isa.md`). The original two-tier design:
 
 1. **Hardware return stack (default, depth ≤ 3).** `JMS`/`BBL` are used
    directly. The backend tracks static call depth; when the whole reachable
@@ -293,11 +316,12 @@ The 4004 return stack is **3 levels** (4 slots, one being the live PC — §6 of
 decision (`platform/link.ld` is still TODO); the ABI fixes only the frame
 *layout* and the SSP register, not the base address.
 
-### 4.4.1 Concrete convention (PROVEN on chips, 2026-10-19)
+### 4.4.1 Soft-call convention (`-i4004-softcall`; frozen, PROVEN on chips 2026-10-19)
 
-The whole-firmware call depth (`run→press→dispatch→add_sub→add_mag→reg_add…`,
-6+) exceeds the 3-level hardware stack, so compiled calls MUST use the soft
-stack. The following sequences are validated on `external/chips`
+*Historical:* the 2026-10-19 firmware's call depth
+(`run→press→dispatch→add_sub→add_mag→reg_add…`, 6+) exceeded the 3-level
+hardware stack, so its compiled calls had to use the soft stack. The issue #18
+firmware is restructured to depth 3 and uses `JMS`/`BBL` (§4.4). The following sequences are validated on `external/chips`
 (`rt/tests/softcall_core.s` depth-4 single-page; `rt/tests/softcall_mp.s`
 cross-page) and are the contract the backend + packer implement.
 
@@ -381,12 +405,21 @@ page layout for exactly this reason (`asm/README.md`).
 
 ### 5.2 Linking / image packaging
 
-Preferred: LLVM MC + `ld.lld` with an i4004 target hook. The linker script
-(`system/busicom_141pf/platform/link.ld`, currently TODO) places `.reset` at
-ROM 0x000, `.text`/`.rodata` into the 1280-byte (max 4096-byte) ROM, and the
-soft stack + imaginary file + statics into 4002 RAM per `memory_map.md`. A
-small Rust image packer in `asm/` is the fallback if `ld.lld`'s page-aware
-placement proves insufficient; `scripts/build_image.sh` is its contract.
+The linker is the project's own packer, **`asm/i4004_pack.py`** (Python).
+`ld.lld` is not used: it has no notion of 4004 pages. `scripts/build_image.sh`
+runs llc and then the packer with a linker script. The Busicom flat image
+uses `system/busicom_141pf/platform/link_xl.ld`: 16 × 4001 ROM, bank-0 RAM.
+
+The packer:
+- places `.reset` at ROM 0x000;
+- orders the other code sections to fill each 256-byte page;
+- relaxes page-crossing `JCN`/`ISZ`, to a fixed point;
+- overlays the static RAM frames along the call graph;
+- resolves relocations and checks the call depth;
+- writes the image and a map.
+
+Details are in `codegen.md` §7. The banked layout (`--banks N`) is frozen
+with the soft-call convention.
 
 ## 6. Runtime library (`libi4004rt`)
 
@@ -470,9 +503,9 @@ These are explicit unknowns, **not** guesses baked into the spec:
 3. **`i4` as a non-addressable native value width** (§1.2) — confirm the
    legalizer and TableGen type setup accept `i4` as a legal register value while
    `n8` keeps it out of memory-unit reasoning; may need a custom `ValueType`.
-4. **Soft-stack base address and size** (§4.4) depend on `platform/link.ld`,
-   still TODO; the firmware's RAM budget (`memory_map.md`: 160 nibbles) leaves
-   little room, so deep call graphs may be infeasible and inlining mandatory.
+4. ~~Soft-stack base address and size~~ **Moot since 2026-10-22:** the flat
+   layout uses no soft stack (§4.4). It inlines and flattens the call graph
+   to depth 3, and spills to packer-overlaid static frames.
 5. ~~Provisional `e_machine`~~ **Decided 2026-10-18 (project owner): `e_machine
    = 0x4004`** (§5) is the value for this toolchain. It is private and
    unregistered; the remaining check is that `ld.lld` does not special-case it,

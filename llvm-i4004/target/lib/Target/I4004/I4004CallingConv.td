@@ -10,8 +10,8 @@
 //
 //  * First three i8/pointer args in pairs P1, P2, P3.
 //  * i8 return value in P1.
-//  * i16 is split into two i8s by the legalizer, so it consumes two pairs /
-//    two return slots (P1:P2) via the same i8 rules.
+//  * i16 / pointers go in double pairs D1 (P2:P3), then D2 (P4:P5), for both
+//    arguments and returns.
 //  * Further args spill to the stack (modeled as 4002 RAM by the backend).
 //
 // P0 is never an argument register (FIN/JIN scratch); P7 is the software SP.

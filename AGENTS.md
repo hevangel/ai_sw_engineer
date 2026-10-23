@@ -64,7 +64,8 @@ ai_sw_engineer/
 ```
 llvm-<chip>/
 ├── README.md        — chip, year, ISA summary, backend strategy, status
-├── spec/            — isa.md, abi.md (calling convention, data layout), asm_syntax.md
+├── spec/            — isa.md, abi.md (calling convention, data layout), asm_syntax.md,
+│                      codegen.md (design doc: lowering, frames, calls, linker)
 ├── plans/           — implementation_plan.md, testplan.md
 ├── target/          — LLVM Target sources (lib/Target/<Chip>/*.td, *.cpp) applied onto
 │                      external/llvm-project, or an overlay/patch set for llvm-mos
@@ -98,6 +99,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - Prefer existing backends: llvm-mos for the 6502 family. Only write a new backend where none exists (4004, 8008, real-mode 8086 — LLVM's x86 `-m16` emits 386+ opcodes and is not acceptable for an 8088).
 - Each backend records its data layout and calling convention in `spec/abi.md` before code is written; the Rust target JSON must match it exactly.
 - Every instruction selection pattern gets a lit/FileCheck test; every MC encoding gets an encode test checked against the manufacturer opcode table.
+- Once a backend compiles and links a real program, `spec/codegen.md` (design doc) and `spec/abi.md` describe the backend as it is, not as it was planned. A change to lowering or pseudo expansion, the calling convention or saved registers, frames, call strategy, the linker/packer, or a runtime routine's contract updates them in the same change. A superseded design is marked frozen or historical with a date, not deleted. If the two docs disagree with the code, the docs are the defect.
 
 ### Simulators
 - Primary oracle: the RTL and ISS in `../ai_hw_engineer` (`$AI_HW_ENGINEER`). Use its `system/<system>/` builds for whole-machine runs.
@@ -121,6 +123,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - [ ] Target image builds; size reported against the ROM/RAM budget
 - [ ] Target image run on a simulator and compared against the oracle (or the gap is documented)
 - [ ] Backend changes: lit + MC tests pass
+- [ ] Backend changes: `spec/codegen.md` and `spec/abi.md` match the code (design changes documented in the same PR)
 - [ ] Size scoreboard: a title whose target image is not yet signed off adds a row to `report/size_history.md` (date, commit, `.text`, image, largest function, call/libcall counts, host and target status) for every landing that touches it or its backend, measured the same way as the previous rows
 - [ ] README / report updated
 
@@ -145,4 +148,5 @@ Areas: `system/<system>/<software>`, `system/<system>/platform`, `llvm/<chip>`, 
 
 - `main` is protected; never push to it directly.
 - Branches: `system/<name>`, `llvm/<chip>`, `docs/<topic>`, `fix/<desc>`, `infra/<desc>`.
+- Worktrees: every `git worktree add` goes under `worktrees/` in the repo root (e.g. `git worktree add worktrees/<name> <branch>`). Never create one as a sibling of the repo. `worktrees/` is gitignored.
 - PR description: What / Why / Verification / Agent.
