@@ -154,7 +154,10 @@ foreach c = 0-3 in {
   def !strconcat("JT", !toupper(CondAsm[c])) : InstAddr<!or(!shl(0b011, 5), !shl(c, 3), 0b000), !strconcat("jt", CondAsm[c])>;
 }
 
-let isCall = 1, Defs = [A, B, C, D, E, H, L, F] in {
+// What a call clobbers comes from its register-mask operand (copied from the
+// CALL pseudo by I8008ExpandPseudos), so IPRA sees a call to a `__leaf_*`
+// routine as clobbering only A and the flags. Hand-written asm has no masks.
+let isCall = 1, Defs = [A, F] in {
   def CAL : InstAddr<0b01000110, "cal">;
   let Uses = [F] in
   foreach c = 0-3 in {

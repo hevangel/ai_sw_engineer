@@ -224,3 +224,16 @@ def : Pat<(i16 (zext GR8:$x)),
           (REG_SEQUENCE GR16, GR8:$x, sub_lo, (MOV8ri 0), sub_hi)>;
 def : Pat<(i16 (anyext GR8:$x)),
           (INSERT_SUBREG (i16 (IMPLICIT_DEF)), GR8:$x, sub_lo)>;
+
+// Byte assembly and extraction are register moves, not 16-bit arithmetic:
+// (hi << 8) | lo builds a pair, (x >> 8) as u8 is the high half.
+def : Pat<(i16 (or (shl (i16 (zext GR8:$hi)), (i8 8)), (i16 (zext GR8:$lo)))),
+          (REG_SEQUENCE GR16, GR8:$lo, sub_lo, GR8:$hi, sub_hi)>;
+def : Pat<(i16 (or (shl (i16 (anyext GR8:$hi)), (i8 8)), (i16 (zext GR8:$lo)))),
+          (REG_SEQUENCE GR16, GR8:$lo, sub_lo, GR8:$hi, sub_hi)>;
+def : Pat<(i8 (trunc (srl GR16:$x, (i8 8)))), (EXTRACT_SUBREG GR16:$x, sub_hi)>;
+def i8008_build_pair : SDNode<"ISD::BUILD_PAIR",
+    SDTypeProfile<1, 2, [SDTCisVT<0, i16>, SDTCisVT<1, i8>, SDTCisSameAs<1, 2>]>>;
+def : Pat<(i16 (i8008_build_pair GR8:$lo, GR8:$hi)),
+          (REG_SEQUENCE GR16, GR8:$lo, sub_lo, GR8:$hi, sub_hi)>;
+def : Pat<(i8 (trunc (sra GR16:$x, (i8 8)))), (EXTRACT_SUBREG GR16:$x, sub_hi)>;

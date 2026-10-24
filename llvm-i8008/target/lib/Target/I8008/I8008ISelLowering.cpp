@@ -25,6 +25,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/KnownBits.h"
 
 using namespace llvm;
 
@@ -95,6 +96,9 @@ I8008TargetLowering::I8008TargetLowering(const TargetMachine &TM,
   }
   setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
+  // i16 OR/ADD of values with disjoint bytes -> a byte pair (PerformDAGCombine).
+  setTargetDAGCombine({ISD::OR, ISD::ADD});
+
   // Small constant-size memcpy/memset become loads and stores.
   MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 4;
   MaxStoresPerMemset = MaxStoresPerMemsetOptSize = 4;
@@ -130,6 +134,36 @@ SDValue I8008TargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unimplemented operation lowering");
   }
+}
+
+// `x | y` (or `x + y`) on 16 bits where one side has a zero low byte and the
+// other a zero high byte is just the pair (low of y, high of x): two register
+// moves instead of a 16-bit OR. Typical source: `(hi as u16) << 8 | lo as u16`,
+// with the shifted part hoisted out of a loop.
+SDValue I8008TargetLowering::PerformDAGCombine(SDNode *N,
+                                               DAGCombinerInfo &DCI) const {
+  if (N->getValueType(0) != MVT::i16)
+    return SDValue();
+  SelectionDAG &DAG = DCI.DAG;
+  SDValue X = N->getOperand(0), Y = N->getOperand(1);
+  KnownBits KX = DAG.computeKnownBits(X), KY = DAG.computeKnownBits(Y);
+  auto LowZero = [](const KnownBits &K) { return K.Zero.extractBitsAsZExtValue(8, 0) == 0xFF; };
+  auto HighZero = [](const KnownBits &K) { return K.Zero.extractBitsAsZExtValue(8, 8) == 0xFF; };
+  if (!(LowZero(KX) && HighZero(KY))) {
+    std::swap(X, Y);
+    std::swap(KX, KY);
+    if (!(LowZero(KX) && HighZero(KY)))
+      return SDValue();
+  }
+  // Leave the pure-constant and already-paired cases alone.
+  if (isa<ConstantSDNode>(X) && isa<ConstantSDNode>(Y))
+    return SDValue();
+  SDLoc DL(N);
+  SDValue Lo = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, Y);
+  SDValue Hi = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8,
+                           DAG.getNode(ISD::SRL, DL, MVT::i16, X,
+                                       DAG.getConstant(8, DL, MVT::i8)));
+  return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i16, Lo, Hi);
 }
 
 SDValue I8008TargetLowering::LowerAddress(SDValue Op, SelectionDAG &DAG) const {

@@ -9,6 +9,7 @@
 #include "I8008TargetMachine.h"
 #include "I8008.h"
 #include "I8008MachineFunctionInfo.h"
+#include "I8008TargetTransformInfo.h"
 #include "TargetInfo/I8008TargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -52,6 +53,11 @@ I8008TargetMachine::I8008TargetMachine(const Target &T, const Triple &TT,
 }
 
 I8008TargetMachine::~I8008TargetMachine() = default;
+
+TargetTransformInfo
+I8008TargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<I8008TTIImpl>(this, F));
+}
 
 MachineFunctionInfo *I8008TargetMachine::createMachineFunctionInfo(
     BumpPtrAllocator &Allocator, const Function &F,

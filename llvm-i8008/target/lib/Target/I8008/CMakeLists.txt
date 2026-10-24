@@ -28,6 +28,7 @@ add_llvm_target(I8008CodeGen
   I8008SelectionDAGInfo.cpp
   I8008Subtarget.cpp
   I8008TargetMachine.cpp
+  I8008TargetTransformInfo.cpp
 
   LINK_COMPONENTS
   Analysis

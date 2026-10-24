@@ -284,7 +284,19 @@ void I8008ExpandPseudos::expandShift(MachineInstr &MI, unsigned Kind,
 
   if (!Wide) {
     movR(I8008::A, S);
-    shiftA(K);
+    // A long logical shift is a short rotate the other way plus a mask:
+    // x >> 7 = rlc; ndi 1 (3 bytes, not 9).
+    if (Kind == 1 && K >= 5) {
+      for (unsigned I = K; I < 8; ++I)
+        emit(I8008::RLC);
+      aluI(ND, 0xff >> K);
+    } else if (Kind == 0 && K >= 6) {
+      for (unsigned I = K; I < 8; ++I)
+        emit(I8008::RRC);
+      aluI(ND, (0xff << K) & 0xff);
+    } else {
+      shiftA(K);
+    }
     movR(D, I8008::A);
     return;
   }
@@ -676,9 +688,13 @@ bool I8008ExpandPseudos::expand(MachineInstr &MI) {
     mov(FM, f(hi(Reg(0))));
     break;
 
-  case I8008::CALL:
-    emit(I8008::CAL).add(MI.getOperand(0));
+  case I8008::CALL: {
+    auto Cal = emit(I8008::CAL).add(MI.getOperand(0));
+    for (const MachineOperand &MO : MI.operands())
+      if (MO.isRegMask())
+        Cal.addRegMask(MO.getRegMask());
     break;
+  }
   case I8008::CALLind: {
     // Patch the RAM trampoline __icall (`jmp xxxx`, abi.md sec.3.4) and call
     // it. The linker keeps __icall's 3 bytes within one page.
@@ -688,7 +704,10 @@ bool I8008ExpandPseudos::expand(MachineInstr &MI) {
     mov(FM, f(lo(Reg(0))));
     emit(INR[FL]);
     mov(FM, f(hi(Reg(0))));
-    emit(I8008::CAL).addExternalSymbol("__icall");
+    auto Cal = emit(I8008::CAL).addExternalSymbol("__icall");
+    for (const MachineOperand &MO : MI.operands())
+      if (MO.isRegMask())
+        Cal.addRegMask(MO.getRegMask());
     break;
   }
   case I8008::RETpseudo:

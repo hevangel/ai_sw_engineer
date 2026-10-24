@@ -1,0 +1,12 @@
+# Target only: run a program into a hold, inspect the saved registers.
+# 3000: LBI 5; LCI 7; LAI 42; JMP 3010. The hold at 3010 returns to the
+# monitor, which restores the bytes there and prints the hold (spec MON-5).
+= 3000 0E 05 16 07 06 42 44 10 30
+< G3000,3010\r
+> G:3000,3010\r\n\r\n*3010\r\n
+< A   \r
+> A:42- 05- 07- 00-\r\n
+# Flags after G: carry and zero clear (MON-11), sign and parity from it.
+< I\r
+> I:0-\r\n
+? 3010 00 00 00
