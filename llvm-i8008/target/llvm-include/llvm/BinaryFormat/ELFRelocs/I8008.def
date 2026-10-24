@@ -1,0 +1,16 @@
+
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// Intel 8008 relocations - see llvm-i8008/spec/abi.md sec.5.
+// Values are private to this toolchain (no official EM_* is assigned).
+ELF_RELOC(R_I8008_NONE, 0)
+// 16-bit little-endian absolute address (JMP/CAL/Jc/Cc operand, .word).
+ELF_RELOC(R_I8008_16,   1)
+// Low byte of an address (%lo).
+ELF_RELOC(R_I8008_LO8,  2)
+// High byte of an address (%hi).
+ELF_RELOC(R_I8008_HI8,  3)
+// 8-bit value of a symbol (.byte sym, an immediate naming a symbol).
+ELF_RELOC(R_I8008_8,    4)
