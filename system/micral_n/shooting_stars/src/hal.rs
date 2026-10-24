@@ -1,15 +1,12 @@
-//! Machine I/O as seen by shooting_stars.
-//!
-//! The portable core in `lib.rs` talks only to this trait. Two implementations
-//! exist: a mock in `tests/` that replays oracle transcripts on the host, and
-//! the real-machine one in `system/micral_n/platform/runtime/`.
-//!
-//! Replace these methods with the machine's real interface (keyboard matrix
-//! scan, printer drum, video memory, ...) and keep the widths the original used.
+//! The machine as the game sees it: a teletype and a halt
+//! (../platform/io_map.md "Teletype"). The original reached the terminal
+//! through RST 6 (print A) and RST 7 (read into A, no echo).
 
 pub trait Hal {
-    /// Next input event, or `None` when there is none yet.
-    fn read_input(&mut self) -> Option<u8>;
-    /// Emit one observable output unit (character, printer column, ...).
-    fn write_output(&mut self, value: u8);
+    /// Wait for a key; 7-bit, not echoed (the original's RST 7).
+    fn getc(&mut self) -> u8;
+    /// Print one character (the original's RST 6).
+    fn putc(&mut self, c: u8);
+    /// The original's final `HLT`. On the machine this does not return.
+    fn halt(&mut self);
 }

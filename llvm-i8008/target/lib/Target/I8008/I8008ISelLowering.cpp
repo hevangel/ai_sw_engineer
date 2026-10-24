@@ -142,7 +142,9 @@ SDValue I8008TargetLowering::LowerOperation(SDValue Op,
 // with the shifted part hoisted out of a loop.
 SDValue I8008TargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
-  if (N->getValueType(0) != MVT::i16)
+  // The combiner also calls this for every target node (RET, CALL, ...).
+  if ((N->getOpcode() != ISD::OR && N->getOpcode() != ISD::ADD) ||
+      N->getValueType(0) != MVT::i16)
     return SDValue();
   SelectionDAG &DAG = DCI.DAG;
   SDValue X = N->getOperand(0), Y = N->getOperand(1);

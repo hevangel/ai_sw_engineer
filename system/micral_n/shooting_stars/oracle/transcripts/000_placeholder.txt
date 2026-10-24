@@ -1,4 +1,0 @@
-# Placeholder transcript: the template core echoes input.
-# Replace with transcripts captured from the ORIGINAL binary (see oracle/README.md).
-> 48 49
-< 48 49

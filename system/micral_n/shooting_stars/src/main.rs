@@ -1,70 +1,75 @@
-//! shooting_stars entry point.
+//! Shooting Stars entry point.
 //!
-//! * Bare-metal target (`target_os = "none"`, e.g. a `llvm-i8008` target):
-//!   `no_std`/`no_main`; the platform runtime calls `main` after reset.
-//! * Host: a small std program that drives the core from stdin/stdout, used by
-//!   `scripts/run_host.sh` for interactive checks.
+//! * Target (`target_os = "none"`, llvm-i8008): `asm/start.s` is at address
+//!   0, where the boot ROM starts a loaded program; it calls `game_main`.
+//! * Host: play on stdin/stdout (`cargo run`).
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", no_main)]
 
 #[cfg(target_os = "none")]
 mod target {
     use core::panic::PanicInfo;
+    use software::Hal;
 
-    /// Real-machine HAL. TODO: move into system/micral_n/platform/runtime/.
-    struct MachineIo;
+    extern "C" {
+        /// platform/runtime/tty.s
+        fn __leaf_tty_getc() -> u8;
+        fn __leaf_tty_putc(c: u8);
+        /// asm/start.s
+        fn __leaf_halt();
+    }
 
-    impl software::Hal for MachineIo {
-        fn read_input(&mut self) -> Option<u8> {
-            None // TODO: read the machine's input device
+    struct Board;
+    impl Hal for Board {
+        fn getc(&mut self) -> u8 {
+            unsafe { __leaf_tty_getc() }
         }
-        fn write_output(&mut self, _value: u8) {
-            // TODO: drive the machine's output device
+        fn putc(&mut self, c: u8) {
+            unsafe { __leaf_tty_putc(c) }
+        }
+        fn halt(&mut self) {
+            unsafe { __leaf_halt() }
         }
     }
 
     #[no_mangle]
-    pub extern "C" fn main() -> ! {
-        let mut machine = software::Machine::new();
-        let mut io = MachineIo;
-        loop {
-            machine.step(&mut io);
-        }
+    pub extern "C" fn game_main() {
+        software::play(&mut Board);
     }
 
     #[panic_handler]
-    fn panic(_info: &PanicInfo) -> ! {
+    fn panic(_: &PanicInfo) -> ! {
         loop {}
     }
 }
 
 #[cfg(not(target_os = "none"))]
 fn main() {
+    use software::Hal;
     use std::io::{Read, Write};
 
-    struct StdIo {
-        input: std::vec::IntoIter<u8>,
-        out: std::io::Stdout,
-    }
-
-    impl software::Hal for StdIo {
-        fn read_input(&mut self) -> Option<u8> {
-            self.input.next()
+    struct Tty;
+    impl Hal for Tty {
+        fn getc(&mut self) -> u8 {
+            let mut b = [0u8];
+            if std::io::stdin().read(&mut b).unwrap_or(0) == 0 {
+                std::process::exit(0);
+            }
+            let c = b[0] & 0x7f;
+            if c == b'\n' {
+                b'\r'
+            } else {
+                c.to_ascii_uppercase()
+            }
         }
-        fn write_output(&mut self, value: u8) {
-            let _ = self.out.write_all(&[value]);
+        fn putc(&mut self, c: u8) {
+            let c = if c == b'\r' { b'\n' } else { c };
+            let _ = std::io::stdout().write_all(&[c]);
+            let _ = std::io::stdout().flush();
+        }
+        fn halt(&mut self) {
+            std::process::exit(0);
         }
     }
-
-    let mut buf = Vec::new();
-    std::io::stdin()
-        .read_to_end(&mut buf)
-        .expect("failed to read stdin");
-    let mut io = StdIo {
-        input: buf.into_iter(),
-        out: std::io::stdout(),
-    };
-    let mut machine = software::Machine::new();
-    while machine.step(&mut io) {}
-    let _ = io.out.flush();
+    software::play(&mut Tty);
 }
