@@ -10,7 +10,7 @@ program and replaces only the SCELBI terminal routines.
 
 The oracle is the original program itself: `scripts/build_original.sh`
 assembles the listing (with `platform/scripts/as8008.py`) and swaps in Micral N
-teletype routines for RST 6 and RST 7 (`original/micral_io.asm`).
+teletype routines for RST 6 and RST 7 (`oracle/micral_io.asm`).
 `scripts/capture_oracle.py` runs it on the ai_hw_engineer RTL and records the
 transcripts in `oracle/transcripts/`.
 
