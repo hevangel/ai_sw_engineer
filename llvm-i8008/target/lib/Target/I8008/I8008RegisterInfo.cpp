@@ -36,6 +36,11 @@ I8008RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   return CSR_I8008_RegMask;
 }
 
+const uint32_t *I8008RegisterInfo::leafMask() { return CSR_I8008_Leaf_RegMask; }
+const uint32_t *I8008RegisterInfo::leafVoidMask() {
+  return CSR_I8008_LeafVoid_RegMask;
+}
+
 BitVector I8008RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   // abi.md sec.2: A, H, L and the flags are expansion scratch.

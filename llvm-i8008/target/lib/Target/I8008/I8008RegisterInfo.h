@@ -32,6 +32,20 @@ public:
                            RegScavenger *RS = nullptr) const override;
   Register getFrameRegister(const MachineFunction &MF) const override;
 
+  /// Never fold an 8-bit value into half of a 16-bit virtual register: with
+  /// only B C D E, an instruction could then need two pairs plus a byte, which
+  /// the allocator cannot satisfy. Such copies stay one-byte register moves.
+  bool shouldCoalesce(MachineInstr *MI, const TargetRegisterClass *SrcRC,
+                      unsigned SubReg, const TargetRegisterClass *DstRC,
+                      unsigned DstSubReg, const TargetRegisterClass *NewRC,
+                      LiveIntervals &LIS) const override {
+    return SubReg == 0 && DstSubReg == 0;
+  }
+
+  /// Preserved by a `__leaf_*` call that returns a value / returns nothing.
+  static const uint32_t *leafMask();
+  static const uint32_t *leafVoidMask();
+
   /// "__frame_<fn>", owned by the MCContext (module lifetime).
   static const char *frameSymbol(const MachineFunction &MF);
 };

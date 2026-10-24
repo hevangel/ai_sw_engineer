@@ -1,0 +1,9 @@
+# M: display, modify with a space, keep with a comma, end with CR (spec "M, A, H, I").
+= 3000 12 34 56
+< M3000 AB ,\r
+> M:3000 12-AB 34-,56-\r\n
+? 3000 AB
+# Only the last two hex digits of a value count; one digit is zero-filled.
+< M3001\r1234 5 \r
+> M:3001\r\n34-1234 56-5 00-\r\n
+? 3001 34 05

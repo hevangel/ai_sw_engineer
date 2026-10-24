@@ -1,13 +1,29 @@
 #!/usr/bin/env bash
-# Build a target image for one software title.
-# Usage: build_image.sh <title_dir> <out_dir> <linker_script>
-# Produces <out_dir>/<software>.{ll,s,elf,bin,map}.
+# Link an i8008 image (spec/codegen.md sec.6).
 #
-# Expected steps once the backend exists:
-#   cargo +<toolchain> rustc --release --bin <software> --target rust/i8008-none.json \
-#       -Zbuild-std=core -- --emit=llvm-ir,asm -C link-arg=-T<linker_script>
-#   llvm-objcopy -O binary <elf> <bin>
+#   build_image.sh <layout.ld> <out.bin> <input>...
+#
+# Inputs are .o files (from build_rust.sh) or .s files (assembled here with
+# llvm-mc). The rt/ helpers are always added; the linker drops the ones
+# nothing calls. Writes <out.bin> and <out.map>; prints the size line.
 set -euo pipefail
-title_dir="${1:?title_dir}"; out_dir="${2:?out_dir}"; link="${3:?linker_script}"
-echo "ERROR: llvm-i8008 build_image.sh not implemented (title=$title_dir out=$out_dir link=$link)" >&2
-exit 2
+layout="${1:?layout}"
+out="${2:?out.bin}"
+shift 2
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+backend="$(cd "$here/.." && pwd)"
+mc="$backend/install/bin/llvm-mc"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+objs=()
+n=0
+for f in "$@" "$backend"/rt/*.s; do
+  case "$f" in
+    *.s) n=$((n + 1)); o="$tmp/$n-$(basename "$f" .s).o"
+         "$mc" -triple i8008 -filetype=obj "$f" -o "$o"; objs+=("$o") ;;
+    *.o) objs+=("$f") ;;
+    *) echo "ERROR: unknown input $f" >&2; exit 2 ;;
+  esac
+done
+python3 "$backend/asm/i8008_link.py" "${objs[@]}" -T "$layout" -o "$out" -m "${out%.bin}.map"

@@ -28,3 +28,9 @@ def RetCC_I8008 : CallingConv<[
 
 // No callee-saved registers (abi.md sec.3.3).
 def CSR_I8008 : CalleeSavedRegs<(add)>;
+
+// Hand-written `__leaf_*` routines clobber only A, the flags and their result
+// register (abi.md sec.3.3): C D E H L survive, and B too when they return
+// nothing. Selected per call site in LowerCall.
+def CSR_I8008_Leaf : CalleeSavedRegs<(add C, D, E, H, L)>;
+def CSR_I8008_LeafVoid : CalleeSavedRegs<(add B, C, D, E, H, L)>;

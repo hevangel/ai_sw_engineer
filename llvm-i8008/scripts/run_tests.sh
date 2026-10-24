@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the llvm-i8008 lit suites (MC encodings, disassembly, codegen) and the
-# execution tests. Inside the ai-sw-engineer container:
+# Run the llvm-i8008 lit suites (MC encodings, disassembly, codegen). Inside
+# the ai-sw-engineer container (exec_tests.py needs the ai-hw-engineer image):
 #   llvm-i8008/scripts/run_tests.sh
 set -euo pipefail
 BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,8 +16,6 @@ echo "==> lit: tests/mc tests/codegen"
 I8008_TEST_TMP="${I8008_TEST_TMP:-/tmp/i8008-lit}" PATH="$BIN:$PATH" \
   "$LIT" -sv "$BACKEND_DIR/tests/mc" "$BACKEND_DIR/tests/codegen"
 
-if [[ -f $BACKEND_DIR/scripts/exec_tests.py ]]; then
-  echo "==> execution tests"
-  python3 "$BACKEND_DIR/scripts/exec_tests.py"
-fi
-echo "==> all llvm-i8008 tests passed"
+echo "==> lit suites passed"
+echo "    execution tests run on the RTL in the ai-hw-engineer image:"
+echo "    python3 llvm-i8008/scripts/exec_tests.py   (plans/testplan.md)"

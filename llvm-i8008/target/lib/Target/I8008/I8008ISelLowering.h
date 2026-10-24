@@ -95,6 +95,10 @@ public:
     return VT.bitsLT(MVT::i8) ? EVT(MVT::i8) : VT;
   }
 
+  /// `x * c` becomes shifts and adds when c is 2^k or 2^k +- 1 (k <= 4):
+  /// a multiply is a libcall loop on the 8008.
+  bool decomposeMulByConstant(LLVMContext &, EVT VT, SDValue C) const override;
+
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *MBB) const override;

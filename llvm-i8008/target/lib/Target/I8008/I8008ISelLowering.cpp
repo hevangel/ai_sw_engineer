@@ -380,8 +380,13 @@ SDValue I8008TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SmallVector<SDValue, 8> Ops{Chain, Callee};
   for (auto &R : RegsToPass)
     Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
-  Ops.push_back(DAG.getRegisterMask(
-      Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv)));
+  // A `__leaf_*` callee keeps C D E H L (and B when it returns nothing).
+  const uint32_t *Mask =
+      CalleeName.starts_with("__leaf_")
+          ? (CLI.Ins.empty() ? I8008RegisterInfo::leafVoidMask()
+                             : I8008RegisterInfo::leafMask())
+          : Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv);
+  Ops.push_back(DAG.getRegisterMask(Mask));
   if (Glue.getNode())
     Ops.push_back(Glue);
 
@@ -417,6 +422,18 @@ SDValue I8008TargetLowering::LowerCallResult(
     InVals.push_back(V);
   }
   return Chain;
+}
+
+bool I8008TargetLowering::decomposeMulByConstant(LLVMContext &, EVT VT,
+                                                 SDValue C) const {
+  auto *N = dyn_cast<ConstantSDNode>(C);
+  if (!N || (VT != MVT::i8 && VT != MVT::i16))
+    return false;
+  APInt Imm = N->getAPIntValue();
+  if (Imm.isNegative())
+    Imm.negate();
+  auto Small = [](const APInt &V) { return V.isPowerOf2() && V.logBase2() <= 4; };
+  return Small(Imm) || Small(Imm - 1) || Small(Imm + 1);
 }
 
 //===----------------------------------------------------------------------===//

@@ -1,0 +1,12 @@
+# A: A B C D E H L; H: H L; I: flags C Z S P then A-L (spec MON-2, MON-4).
+R 11 22 33 44 55 66 77 03
+< A 99 \r
+> A:11- 22-99 33-\r\n
+< H\r
+> H:66-\r\n
+< I 0 \r
+> I:1- 1-0 0-\r\n
+< A ,\r
+> A:11- 99-,33-\r\n
+< T     \r
+> T:1- 0- 0- 0- 11- 99-\r\n

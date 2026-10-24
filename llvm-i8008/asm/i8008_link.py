@@ -13,7 +13,12 @@ Layout file (one directive per line, '#' comments):
     DATA  follow <size>       DATA starts right after CODE, in the same image
     ENTRY <symbol>            placed first in CODE; root for --gc-sections
     KEEP  <symbol>            extra root
+    PLACE <symbol> <addr>     put the section defining <symbol> at <addr> (a
+                              fixed entry point); the rest of CODE flows around
     DEPTH <n>                 maximum call depth (default 7)
+    DATAPAGE                  .data, .bss, frames and argument areas must share
+                              one 256-byte page (the image was compiled with
+                              llc -i8008-data-page)
 
 The image covers CODE, and also DATA's .data/.bss when DATA follows CODE.
 With a separate DATA region the image holds CODE only; .data is then an error
@@ -132,7 +137,9 @@ class Layout:
     data: tuple = None          # (start, size) or ("follow", size)
     entry: str = None
     keep: list = field(default_factory=list)
+    place: dict = field(default_factory=dict)
     depth: int = 7
+    data_page: bool = False
 
 
 def read_layout(path):
@@ -151,6 +158,11 @@ def read_layout(path):
             lay.entry = args[0]
         elif d == "KEEP":
             lay.keep.append(args[0])
+        elif d == "PLACE":
+            lay.place[args[0]] = parse_num(args[1])
+            lay.keep.append(args[0])
+        elif d == "DATAPAGE":
+            lay.data_page = True
         elif d == "DEPTH":
             lay.depth = parse_num(args[0])
         else:
@@ -248,11 +260,27 @@ class Linker:
         code = [s for s in live if kind(s.name) in ("text", "rodata")]
         code.sort(key=lambda s: 0 if s is entry_sec else 1)
         start, size = self.lay.code
+        pinned = []
+        for sym, at in self.lay.place.items():
+            o, ps = self.defs[sym]
+            sec = o.sections[ps.shndx]
+            if ps.value:
+                raise LinkError(f"PLACE {sym}: not at the start of its section")
+            sec.addr = at
+            pinned.append((at, at + sec.size, sec))
         pc = start
         for s in code:
-            pc = -(-pc // s.align) * s.align
+            if any(s is p[2] for p in pinned):
+                continue
+            while True:
+                pc = -(-pc // s.align) * s.align
+                clash = [p for p in pinned if pc < p[1] and pc + s.size > p[0]]
+                if not clash:
+                    break
+                pc = max(p[1] for p in clash)
             s.addr = pc
             pc += s.size
+        pc = max([pc] + [p[1] for p in pinned])
         if pc > start + size:
             raise LinkError(f"CODE overflow: 0x{pc - start:x} bytes > 0x{size:x}")
         self.code_end = pc
@@ -432,6 +460,9 @@ class Linker:
                 p += sz
             top[f] = p
         self.frames_end = max([self.frames_start] + list(top.values()))
+        if self.lay.data_page and self.frames_end > self.data_start and                 self.data_start // PAGE != (self.frames_end - 1) // PAGE:
+            raise LinkError(f"DATAPAGE: data 0x{self.data_start:04x}..0x{self.frames_end:04x} "
+                            "is not within one page")
         if self.frames_end > self.data_limit:
             raise LinkError(f"DATA overflow: frames end at 0x{self.frames_end:04x} > "
                             f"0x{self.data_limit:04x}")

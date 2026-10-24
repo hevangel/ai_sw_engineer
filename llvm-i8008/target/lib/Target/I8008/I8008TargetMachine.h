@@ -38,6 +38,12 @@ public:
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
+  /// Interprocedural register allocation: a call keeps the registers its
+  /// (already compiled) callee does not touch, instead of assuming every
+  /// register is clobbered (abi.md sec.3.3). With four allocatable bytes this
+  /// is the difference between spilling around every helper call and not.
+  bool useIPRA() const override { return true; }
+
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
