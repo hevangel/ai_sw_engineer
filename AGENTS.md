@@ -8,13 +8,22 @@ You are the sole author of all code, documentation and configuration here. Human
 
 ## Mission
 
-Reimplement historical software in Rust and run it on the original chip:
+Build both the Rust/LLVM toolchain for each chip family and a runnable Rust
+emulator for each complete system, alongside historical software reimplementations.
+An LLVM backend or a host-only rewrite of a title does not replace the system
+emulator. Reimplement historical software in Rust and run it on the original chip:
 
 1. **Oracle** — run the original binary in a chip simulator and capture its behavior.
 2. **Rust** — reimplement it as a `no_std` crate; prove it on the host against the oracle.
 3. **LLVM IR** — `rustc --emit=llvm-ir` (or `cargo rustc -- --emit=llvm-ir`).
 4. **Backend** — lower IR to the target ISA with `llvm-<chip>/` (llc → asm → assembler → linker).
 5. **Target run** — run the image on the chip simulator and compare against the same oracle.
+6. **System emulator** — maintain `system/<system>/emulator/`, a host Rust
+   library and executable that run original and compiled machine-code images
+   through the CPU, memory and peripheral models. Include keyboard/input,
+   observable output, deterministic replay, specifications, tests and run commands.
+   Reuse pinned chip cores where appropriate; keep system wiring and behavior in
+   this repository and record dependencies and unsupported hardware explicitly.
 
 ## Repository Structure
 
@@ -28,6 +37,7 @@ ai_sw_engineer/
 │   └── <system>/              — e.g. busicom_141pf, micral_n, apple_ii, apple_iie,
 │       ├── README.md            ibm_pc, atari_2600, c64, nes
 │       ├── platform/          — memory map, I/O, boot, linker script, runtime (crt0, HAL)
+│       ├── emulator/          — host Rust whole-system library, executable, spec and tests
 │       └── <software>/        — one folder per title (see below)
 ├── llvm-_template/            — Backend template
 ├── llvm-<chip>/               — i4004, i8008, mos6502, i8086 ...
@@ -102,6 +112,9 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 - Once a backend compiles and links a real program, `spec/codegen.md` (design doc) and `spec/abi.md` describe the backend as it is, not as it was planned. A change to lowering or pseudo expansion, the calling convention or saved registers, frames, call strategy, the linker/packer, or a runtime routine's contract updates them in the same change. A superseded design is marked frozen or historical with a date, not deleted. If the two docs disagree with the code, the docs are the defect.
 
 ### Simulators
+- Deliver a Rust system emulator for every implemented system in `system/<system>/emulator/`, in addition to the per-chip LLVM/Rust backend and target software. Host emulator crates may use `std`; the target `no_std` rule does not apply to them.
+- Run both original and generated images, expose real machine I/O, and replay deterministic inputs against captured original-software output. Document hardware variants, timing approximations and gaps in `emulator/spec/spec.md` and `emulator/plans/testplan.md` before implementation, and keep them current.
+- An emulator sharing a chip core with a reference adapter is not an independent oracle. Cross-check against RTL or another independent implementation; never derive expected output from the emulator under test.
 - Primary oracle: the RTL and ISS in `../ai_hw_engineer` (`$AI_HW_ENGINEER`). Use its `system/<system>/` builds for whole-machine runs.
 - Secondary oracle: an independent third-party emulator in `external/` (MAME, AppleWin, Stella, MartyPC, ...). When the two disagree, the disagreement is a finding, not noise.
 
@@ -128,6 +141,7 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 ## Verification Before PR
 
 - [ ] Host: `cargo test` passes, oracle transcripts replay exactly
+- [ ] System emulator changes: host tests, format and clippy pass; original-image replay matches committed oracle output (or the gap is documented), with commands and dependency/core provenance recorded
 - [ ] `cargo fmt --check`, `cargo clippy -D warnings`
 - [ ] Target image builds; size reported against the ROM/RAM budget
 - [ ] Target image run on a simulator and compared against the oracle (or the gap is documented)

@@ -15,6 +15,7 @@ The Busicom 141-PF printing calculator (Nippon Calculating Machine Corp., sold a
 
 ## Simulators
 
+- Local Rust system emulator: [emulator/](emulator/README.md) — library and headless CLI running original or compiled flat ROMs with keyboard, printer and lamps on the pinned MCS-4 chip models. This shares its core with the secondary adapter below.
 - Primary: `$AI_HW_ENGINEER/system/busicom_141pf` — 4004/4001/4002/4003 RTL running the original ROM, web front panel, headless manual replay (`scripts/replay_manual.py`).
 - Secondary: `external/busicom` + `external/chips` — V. Ilmer's Rust MCS-4 emulator and board model; ai_hw_engineer already cross-checks its RTL against it (`scripts/check_reference.py`).
 

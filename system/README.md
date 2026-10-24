@@ -1,6 +1,6 @@
 # Systems
 
-One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL) and one subfolder per software title reimplemented in Rust.
+One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. The [Busicom emulator](busicom_141pf/emulator/README.md) provides the first library and CLI; emulators for the other listed systems remain planned.
 
 | System | Year | CPU | LLVM backend | HW simulator in ai_hw_engineer | Software titles | Folder |
 |---|---|---|---|---|---|---|
@@ -20,6 +20,7 @@ Year sources: dates follow the [Computer History Museum timeline](https://www.co
 ```text
 system/<system>/
 ├── README.md          — machine history, sources, CPU, memory, software list
+├── emulator/          — host Rust system library, executable, spec and replay tests
 ├── platform/          — shared by every title on this machine
 │   ├── README.md
 │   ├── memory_map.md  — ROM/RAM/I/O address map and budgets
