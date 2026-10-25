@@ -14,7 +14,7 @@ Humans contribute by writing specifications, filing issues, reviewing PRs, and a
    - "Reimplement Apple II Integer BASIC in Rust and run it on the 6502 RTL."
    - "Start the 4004 LLVM backend: data layout, register classes, and ADD/SUB selection."
    - "Capture an oracle transcript of the Busicom 141-PF manual examples."
-4. The agent verifies (see `AGENTS.md` → Verification Before PR).
+4. The agent verifies (see `AGENTS.md` and `spec/verification.md`).
 5. Open a PR with **What / Why / Verification / Agent**.
 
 Example:
@@ -38,6 +38,7 @@ Kiro (Claude) via Kiro CLI
 ## What we accept
 
 - New software titles following `system/_template/software/`, with spec, plan, oracle and report.
+- New system emulators following `system/_template/emulator/`, with spec, test plan, oracle replay and verification record.
 - New backends following `llvm-_template/`, with ABI spec and lit/MC tests.
 - Docs that are factually accurate and useful to an agent.
 - Bug fixes with reproduction and re-verification.

@@ -27,7 +27,7 @@ system/<system>/
 │   ├── io_map.md      — ports, soft switches, peripheral behavior
 │   ├── link.ld        — linker script for the target image
 │   └── runtime/       — crt0/reset vector, HAL implementation for the real machine
-└── <software>/        — see _template/software/ and AGENTS.md
+└── <software>/        — see _template/software/ and spec/repository.md
 ```
 
 Create with `./scripts/new_system.sh <system> <chip>` and `./scripts/new_software.sh <system> <software>`.
