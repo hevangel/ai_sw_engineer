@@ -10,7 +10,8 @@
 | RTL CPU differential | boundary-biased random states, expected values from this core | the hardware project's 8086 RTL (Verilator, in Docker) | `scripts/rtl_diff.sh [cases_per_encoding] [seed]` |
 | RTL system replay | unchanged BIOS + PC DOS 1.00 + typed DOS and BASIC session: screens and drive B image | the hardware project's IBM PC RTL (`Vibm_pc`) | `cargo test --release --test replay -- --ignored --nocapture` |
 | Original image | other copyrighted software, supplied by the user | recorded RTL transcripts | planned |
-| Generated image | compiled title image through the CLI | same transcripts as the target run | planned (no `llvm-i8086` output yet) |
+| Compiled code | `llvm-i8086` objects, linked in the test, called with the ABI | the same computation on the host | `cargo test --test i8086_codegen` |
+| Generated image | compiled title image through the CLI | same transcripts as the target run | planned (the backend has no linker yet) |
 
 Hygiene: `cargo fmt -- --check` and `cargo clippy --all-targets -- -D warnings`
 (use `cargo +1.99.1 ...` where no default toolchain is set).

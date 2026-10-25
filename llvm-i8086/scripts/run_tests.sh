@@ -19,9 +19,12 @@ else
   echo "    (node not installed: using the committed tests/mc/encodings.s)"
 fi
 
-echo "==> lit: tests/mc"
+echo "==> lit: tests/mc, tests/codegen"
 I8086_TEST_TMP="${I8086_TEST_TMP:-/tmp/i8086-lit}" PATH="$BIN:$PATH" \
-  "$LIT" -sv "$BACKEND_DIR/tests/mc"
+  "$LIT" -sv "$BACKEND_DIR/tests"
+
+echo "==> committed tests/run objects are current, and llc text == llc object"
+"$BACKEND_DIR/scripts/gen_run_objects.sh" --check
 
 VECTORS="${I8086_VECTORS:-/hw/design/intel_8086/work/reference/v1}"
 if [[ -f $VECTORS/metadata.json ]]; then
@@ -30,4 +33,4 @@ if [[ -f $VECTORS/metadata.json ]]; then
 else
   echo "==> skipped the corpus check: no vectors at $VECTORS (set I8086_VECTORS)"
 fi
-echo "==> llvm-i8086 tests passed"
+echo "==> llvm-i8086 tests passed (the execution tests run on the host: cd system/ibm_pc/emulator && cargo test --test i8086_codegen)"

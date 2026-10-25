@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build llvm-mc, llvm-objdump (+ lit helpers) with the experimental I8086 target.
+# Build llc, llvm-mc, llvm-objdump (+ lit helpers) with the experimental I8086 target.
 #
 # Runs inside the ai-sw-engineer container:
 #   docker run --rm -v <repo>:/workspace -v ai-sw-llvm-build:/build \
@@ -18,7 +18,7 @@ LLVM_SRC="$BUILD_ROOT/llvm-src"
 LLVM_OBJ="$BUILD_ROOT/llvm-obj-i8086"
 INSTALL="$BACKEND/install"
 JOBS="${JOBS:-16}"
-TOOLS=(llvm-mc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump)
+TOOLS=(llvm-mc llvm-tblgen FileCheck not count llvm-readobj llvm-objdump llc)
 
 echo "==> I8086 LLVM build (src $LLVM_SRC, obj $LLVM_OBJ, jobs $JOBS)"
 

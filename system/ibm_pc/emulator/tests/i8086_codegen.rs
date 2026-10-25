@@ -1,0 +1,695 @@
+//! Runs code produced by `llvm-i8086` (`llc` and `llvm-mc`) on the emulator.
+//!
+//! `llvm-i8086/tests/run/*.o` are ELF relocatable objects built from the `.ll`
+//! files beside them by `llvm-i8086/scripts/gen_run_objects.sh`. There is no
+//! linker yet (llvm-i8086 milestone 5), so this file carries a small one: it
+//! places the allocatable sections, resolves symbols and applies the five
+//! relocation types of `llvm-i8086/spec/abi.md`. Each function is then called
+//! with the ABI of `abi.md` D3 on the 8088 core, and its results are compared
+//! with a plain Rust function computing the same thing on the host. The
+//! expected values come from the host's integer arithmetic, not from the
+//! compiler or the core.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use system_emulator::cpu::Step;
+use system_emulator::machine::Machine;
+
+const LOAD: u32 = 0x1000; // first section address
+const STACK_TOP: u32 = 0xF000;
+const HALT_AT: u32 = 0x0F00; // `hlt`, the return address of every call
+
+fn run_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../llvm-i8086/tests/run")
+}
+
+// ---------------------------------------------------------------------------
+// A minimal ELF32 relocatable linker
+// ---------------------------------------------------------------------------
+
+fn u16le(b: &[u8], o: usize) -> u32 {
+    u32::from(u16::from_le_bytes([b[o], b[o + 1]]))
+}
+fn u32le(b: &[u8], o: usize) -> u32 {
+    u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+}
+
+struct Section {
+    name: String,
+    kind: u32,
+    flags: u32,
+    offset: usize,
+    size: usize,
+    link: usize,
+    info: usize,
+    align: u32,
+    addr: u32,
+}
+
+/// A linked image: bytes at their absolute addresses and the symbol table.
+struct Image {
+    bytes: Vec<(u32, Vec<u8>)>,
+    symbols: HashMap<String, u32>,
+}
+
+fn cstr(b: &[u8], o: usize) -> String {
+    let end = b[o..].iter().position(|&c| c == 0).unwrap() + o;
+    String::from_utf8(b[o..end].to_vec()).unwrap()
+}
+
+fn link(obj: &[u8]) -> Image {
+    assert_eq!(&obj[..4], b"\x7fELF");
+    assert_eq!(obj[4], 1, "ELF32");
+    assert_eq!(u16le(obj, 18), 0x8086, "e_machine");
+    let shoff = u32le(obj, 32) as usize;
+    let shentsize = u16le(obj, 46) as usize;
+    let shnum = u16le(obj, 48) as usize;
+    let shstrndx = u16le(obj, 50) as usize;
+
+    let mut secs: Vec<Section> = (0..shnum)
+        .map(|i| {
+            let h = shoff + i * shentsize;
+            Section {
+                name: String::new(),
+                kind: u32le(obj, h + 4),
+                flags: u32le(obj, h + 8),
+                offset: u32le(obj, h + 16) as usize,
+                size: u32le(obj, h + 20) as usize,
+                link: u32le(obj, h + 24) as usize,
+                info: u32le(obj, h + 28) as usize,
+                align: u32le(obj, h + 32).max(1),
+                addr: 0,
+            }
+        })
+        .collect();
+    let strtab = secs[shstrndx].offset;
+    for (i, s) in secs.iter_mut().enumerate() {
+        let h = shoff + i * shentsize;
+        s.name = cstr(obj, strtab + u32le(obj, h) as usize);
+    }
+
+    // Place the allocatable sections one after the other.
+    let mut at = LOAD;
+    for s in secs.iter_mut() {
+        if s.flags & 2 != 0 && s.size > 0 {
+            at = at.div_ceil(s.align) * s.align;
+            s.addr = at;
+            at += s.size as u32;
+        }
+    }
+
+    // Symbols.
+    let symtab = secs.iter().position(|s| s.kind == 2).expect("symbol table");
+    let names = secs[secs[symtab].link].offset;
+    let nsyms = secs[symtab].size / 16;
+    let mut sym_addr = vec![0u32; nsyms];
+    let mut symbols = HashMap::new();
+    for (i, slot) in sym_addr.iter_mut().enumerate().skip(1) {
+        let e = secs[symtab].offset + i * 16;
+        let name = cstr(obj, names + u32le(obj, e) as usize);
+        let value = u32le(obj, e + 4);
+        let shndx = u16le(obj, e + 14) as usize;
+        let addr = match shndx {
+            0 => 0,          // undefined: resolved below or an error if used
+            0xFFF1 => value, // absolute
+            n => secs[n].addr + value,
+        };
+        *slot = addr;
+        if !name.is_empty() && shndx != 0 {
+            symbols.insert(name, addr);
+        }
+    }
+
+    // Section contents, then relocations.
+    let mut data: Vec<Vec<u8>> = secs
+        .iter()
+        .map(|s| {
+            if s.kind == 1 {
+                obj[s.offset..s.offset + s.size].to_vec()
+            } else {
+                vec![0; s.size]
+            }
+        })
+        .collect();
+    for r in secs.iter().filter(|s| s.kind == 4) {
+        let target = r.info;
+        if secs[target].flags & 2 == 0 {
+            continue; // relocations of a debug section
+        }
+        for k in 0..r.size / 12 {
+            let e = r.offset + k * 12;
+            let off = u32le(obj, e) as usize;
+            let info = u32le(obj, e + 4);
+            let addend = u32le(obj, e + 8) as i32;
+            let sym = (info >> 8) as usize;
+            let kind = info & 0xff;
+            let s = i64::from(sym_addr[sym]);
+            let p = i64::from(secs[target].addr) + off as i64;
+            let a = i64::from(addend);
+            let d = &mut data[target];
+            match kind {
+                0 => {}
+                1 => d[off] = (s + a) as u8,
+                2 => d[off..off + 2].copy_from_slice(&((s + a) as u16).to_le_bytes()),
+                3 => {
+                    let v = s + a - p;
+                    assert!((-128..=127).contains(&v), "PC8 out of range");
+                    d[off] = v as i8 as u8;
+                }
+                4 => d[off..off + 2].copy_from_slice(&((s + a - p) as i16).to_le_bytes()),
+                t => panic!("unknown relocation type {t}"),
+            }
+        }
+    }
+    let bytes = secs
+        .iter()
+        .zip(data)
+        .filter(|(s, _)| s.flags & 2 != 0 && s.size > 0)
+        .map(|(s, d)| (s.addr, d))
+        .collect();
+    Image { bytes, symbols }
+}
+
+// ---------------------------------------------------------------------------
+// Calling a function with the ABI of abi.md D3
+// ---------------------------------------------------------------------------
+
+/// A linked program loaded in a machine. Memory persists between calls.
+struct Sys<'a> {
+    m: Machine,
+    img: &'a Image,
+}
+
+impl<'a> Sys<'a> {
+    fn new(img: &'a Image) -> Self {
+        let mut m = Machine::new(64);
+        for (a, d) in &img.bytes {
+            m.load_ram(*a, d).unwrap();
+        }
+        m.load_ram(HALT_AT, &[0xF4]).unwrap();
+        m.cpu.s = [0; 4];
+        Sys { m, img }
+    }
+
+    fn sym(&self, name: &str) -> u32 {
+        sym(self.img, name)
+    }
+
+    fn poke(&mut self, addr: u32, bytes: &[u8]) {
+        self.m.load_ram(addr, bytes).unwrap();
+    }
+
+    fn peek(&mut self, addr: u32, n: u32) -> Vec<u8> {
+        (0..n).map(|i| self.m.read(addr + i)).collect()
+    }
+
+    fn peek16(&mut self, addr: u32) -> u16 {
+        let b = self.peek(addr, 2);
+        u16::from_le_bytes([b[0], b[1]])
+    }
+
+    /// Calls `name` with 16-bit arguments: the first three in AX, DX, CX, the
+    /// rest pushed right to left. BX SI DI BP are preset and must come back
+    /// unchanged, and SP must be restored (abi.md D3). Returns (AX, DX).
+    fn call(&mut self, name: &str, args: &[u16]) -> (u16, u16) {
+        self.call_budget(name, args, 200_000)
+    }
+
+    fn call_budget(&mut self, name: &str, args: &[u16], budget: u64) -> (u16, u16) {
+        let addr = self.sym(name);
+        let m = &mut self.m;
+        let mut sp = STACK_TOP as u16;
+        let reg_args = args.len().min(3);
+        for &a in args[reg_args..].iter().rev() {
+            sp -= 2;
+            m.load_ram(u32::from(sp), &a.to_le_bytes()).unwrap();
+        }
+        sp -= 2;
+        m.load_ram(u32::from(sp), &(HALT_AT as u16).to_le_bytes())
+            .unwrap();
+        let entry_sp = sp;
+        // AX CX DX BX SP BP SI DI
+        m.cpu.r = [0xAAAA, 0xCCCC, 0xDDDD, 0xB0B0, sp, 0xB1B1, 0x5151, 0xD1D1];
+        for (i, &a) in args[..reg_args].iter().enumerate() {
+            m.cpu.r[[0, 2, 1][i]] = a;
+        }
+        m.cpu.ip = addr as u16;
+        m.cpu.halted = false;
+        assert_eq!(m.run(budget), Step::Halted, "{name} did not return");
+        assert_eq!(m.cpu.r[4], entry_sp + 2, "{name}: SP not restored");
+        assert_eq!(
+            [m.cpu.r[3], m.cpu.r[5], m.cpu.r[6], m.cpu.r[7]],
+            [0xB0B0, 0xB1B1, 0x5151, 0xD1D1],
+            "{name}: BX BP SI DI must be preserved (abi.md D3)"
+        );
+        (m.cpu.r[0], m.cpu.r[2])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inputs and checks
+// ---------------------------------------------------------------------------
+
+/// Deterministic inputs: edge values, then a xorshift sequence.
+fn values() -> Vec<u16> {
+    let mut v = vec![
+        0, 1, 2, 3, 0x7F, 0x80, 0xFF, 0x100, 0x7FFF, 0x8000, 0x8001, 0xFFFE, 0xFFFF,
+    ];
+    let mut x: u32 = 0x1234_5678;
+    for _ in 0..40 {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        v.push((x >> 8) as u16);
+    }
+    v
+}
+
+fn load(name: &str) -> Image {
+    let p = run_dir().join(name);
+    let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    link(&bytes)
+}
+
+fn sym(img: &Image, name: &str) -> u32 {
+    *img.symbols
+        .get(name)
+        .unwrap_or_else(|| panic!("no symbol {name}"))
+}
+
+/// A function of one 16-bit argument returning AX.
+fn check1(s: &mut Sys, name: &str, f: impl Fn(u16) -> u16) {
+    for &x in &values() {
+        let (ax, _) = s.call(name, &[x]);
+        assert_eq!(ax, f(x), "{name}({x:#x})");
+    }
+}
+
+/// Two 16-bit arguments returning AX.
+fn check2(s: &mut Sys, name: &str, f: impl Fn(u16, u16) -> u16) {
+    let vs = values();
+    for &x in &vs {
+        for &y in vs.iter().step_by(3) {
+            let (ax, _) = s.call(name, &[x, y]);
+            assert_eq!(ax, f(x, y), "{name}({x:#x}, {y:#x})");
+        }
+    }
+}
+
+/// `zeroext i8` arguments and result: the caller keeps the upper byte of each
+/// argument register zero, as the attribute promises.
+fn check1b(s: &mut Sys, name: &str, f: impl Fn(u8) -> u8) {
+    for &x in &values() {
+        let x = x & 0xFF;
+        let (ax, _) = s.call(name, &[x]);
+        assert_eq!(ax, u16::from(f(x as u8)), "{name}({x:#x})");
+    }
+}
+
+fn check2b(s: &mut Sys, name: &str, f: impl Fn(u8, u8) -> u8) {
+    let vs = values();
+    for &x in &vs {
+        for &y in vs.iter().step_by(3) {
+            let (x, y) = (x & 0xFF, y & 0xFF);
+            let (ax, _) = s.call(name, &[x, y]);
+            assert_eq!(ax, u16::from(f(x as u8, y as u8)), "{name}({x:#x}, {y:#x})");
+        }
+    }
+}
+
+fn b(v: bool) -> u16 {
+    u16::from(v)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn arithmetic() {
+    let img = load("arith.o");
+    let s = &mut Sys::new(&img);
+    check2(s, "add16", |a, b| a.wrapping_add(b));
+    check2(s, "sub16", |a, b| a.wrapping_sub(b));
+    check2(s, "and16", |a, b| a & b);
+    check2(s, "or16", |a, b| a | b);
+    check2(s, "xor16", |a, b| a ^ b);
+    check1(s, "neg16", |a| a.wrapping_neg());
+    check1(s, "not16", |a| !a);
+    check1(s, "inc16", |a| a.wrapping_add(1));
+    check1(s, "add_imm16", |a| a.wrapping_add(1000));
+    check1(s, "sub_imm16", |a| a.wrapping_sub(5));
+    check1(s, "and_imm16", |a| a & 0x0FF0);
+    check2b(s, "add8", |a, b| a.wrapping_add(b));
+    check2b(s, "sub8", |a, b| a.wrapping_sub(b));
+    check2b(s, "xor8", |a, b| a ^ b);
+}
+
+#[test]
+fn comparisons_and_branches() {
+    let img = load("cmp.o");
+    let s = &mut Sys::new(&img);
+    check2(s, "eq", |a, b_| b(a == b_));
+    check2(s, "ne", |a, b_| b(a != b_));
+    check2(s, "ult", |a, b_| b(a < b_));
+    check2(s, "ule", |a, b_| b(a <= b_));
+    check2(s, "ugt", |a, b_| b(a > b_));
+    check2(s, "uge", |a, b_| b(a >= b_));
+    check2(s, "slt", |a, b_| b((a as i16) < (b_ as i16)));
+    check2(s, "sle", |a, b_| b((a as i16) <= (b_ as i16)));
+    check2(s, "sgt", |a, b_| b((a as i16) > (b_ as i16)));
+    check2(s, "sge", |a, b_| b((a as i16) >= (b_ as i16)));
+    check1(s, "is_zero", |a| b(a == 0));
+    check1(s, "slt_imm", |a| b((a as i16) < -100));
+    check1(s, "ugt_imm", |a| b(a > 1000));
+    check2b(s, "ult8", |a, b_| u8::from(a < b_));
+    check2b(s, "slt8", |a, b_| u8::from((a as i8) < (b_ as i8)));
+    check2(s, "umin", |a, b_| a.min(b_));
+    check2(s, "smax", |a, b_| (a as i16).max(b_ as i16) as u16);
+    check1(s, "abs16", |a| (a as i16).wrapping_abs() as u16);
+    check2b(s, "umax8", |a, b_| a.max(b_));
+
+    let vs = values();
+    for &x in &vs {
+        for &lo in vs.iter().step_by(5) {
+            for &hi in vs.iter().step_by(7) {
+                let (ax, _) = s.call("clamp", &[x, lo, hi]);
+                let (xs, ls, hs) = (x as i16, lo as i16, hi as i16);
+                let want = if xs < ls {
+                    lo
+                } else if xs > hs {
+                    hi
+                } else {
+                    x
+                };
+                assert_eq!(ax, want, "clamp({x:#x}, {lo:#x}, {hi:#x})");
+            }
+        }
+    }
+    for n in [0u16, 1, 2, 3, 10, 100, 200] {
+        let (ax, _) = s.call("sum_to", &[n]);
+        let m = n.max(1);
+        assert_eq!(ax, m * (m + 1) / 2, "sum_to({n})");
+    }
+    for a in [0u16, 1, 6, 12, 35, 48, 100, 255, 300] {
+        for c in [0u16, 1, 4, 18, 35, 90, 255] {
+            let (ax, _) = s.call_budget("gcd", &[a, c], 2_000_000);
+            let (mut x, mut y) = (a, c);
+            while y != 0 {
+                let t = x % y;
+                x = y;
+                y = t;
+            }
+            let want = if a == 0 { c } else { x };
+            assert_eq!(ax, want, "gcd({a}, {c})");
+        }
+    }
+}
+
+#[test]
+fn shifts() {
+    let img = load("shift.o");
+    let s = &mut Sys::new(&img);
+    check1(s, "shl1", |a| a << 1);
+    check1(s, "shl2", |a| a << 2);
+    check1(s, "shl5", |a| a << 5);
+    check1(s, "shl8", |a| a << 8);
+    check1(s, "lshr1", |a| a >> 1);
+    check1(s, "lshr3", |a| a >> 3);
+    check1(s, "lshr9", |a| a >> 9);
+    check1(s, "ashr1", |a| ((a as i16) >> 1) as u16);
+    check1(s, "ashr4", |a| ((a as i16) >> 4) as u16);
+    check1(s, "ashr15", |a| ((a as i16) >> 15) as u16);
+    check2(s, "shl_var", |a, n| a << (n & 15));
+    check2(s, "lshr_var", |a, n| a >> (n & 15));
+    check2(s, "ashr_var", |a, n| ((a as i16) >> (n & 15)) as u16);
+    check1b(s, "shl8_const", |a| a << 3);
+    check1b(s, "lshr8_const", |a| a >> 2);
+    check1b(s, "ashr8_const", |a| ((a as i8) >> 3) as u8);
+    check2b(s, "shl8_var", |a, n| a << (n & 7));
+}
+
+#[test]
+fn extensions() {
+    let img = load("ext.o");
+    let s = &mut Sys::new(&img);
+    check1(s, "zext8", |a| a & 0xFF);
+    check1(s, "sext8", |a| (a as u8 as i8) as i16 as u16);
+    check1(s, "trunc16", |a| a & 0xFF);
+    check1(s, "trunc_hi", |a| a >> 8);
+    check1(s, "sext_inreg", |a| (a as u8 as i8) as i16 as u16);
+    check2(s, "add_bytes", |a, b_| {
+        u16::from((a as u8).wrapping_add(b_ as u8))
+    });
+    for &x in &values() {
+        assert_eq!(s.call("zext32", &[x]), (x, 0), "zext32({x:#x})");
+        assert_eq!(
+            s.call("sext32", &[x]),
+            (x, if x & 0x8000 != 0 { 0xFFFF } else { 0 }),
+            "sext32({x:#x})"
+        );
+        for &y in values().iter().step_by(4) {
+            assert_eq!(s.call("trunc32", &[x, y]).0, x, "trunc32");
+            assert_eq!(s.call("hi16", &[x, y]).0, y, "hi16");
+        }
+    }
+}
+
+#[test]
+fn memory() {
+    let img = load("mem.o");
+    let s = &mut Sys::new(&img);
+    let counter = s.sym("counter");
+    let arr = s.sym("arr");
+    let buf = s.sym("buf");
+
+    // a global scalar, through the absolute (accumulator) forms and not
+
+    for &v in &values() {
+        s.call("set_counter", &[v]);
+        let mut host = v;
+        assert_eq!(s.peek16(counter), host);
+        assert_eq!(s.call("get_counter", &[]).0, host);
+        let by = v.rotate_left(3);
+        host = host.wrapping_add(by);
+        assert_eq!(s.call("bump_counter", &[by]).0, host, "bump_counter");
+        assert_eq!(s.peek16(counter), host);
+    }
+
+    // initialised data and indexed addressing
+    for i in 0..8u16 {
+        assert_eq!(s.call("arr_get", &[i]).0, 10 * (i + 1), "arr_get({i})");
+        assert_eq!(s.call("byte_get", &[i]).0, i + 1, "byte_get({i})");
+        let want: u16 = (0..i).map(|k| 10 * (k + 1)).sum();
+        assert_eq!(s.call("sum_arr", &[i]).0, want, "sum_arr({i})");
+    }
+    assert_eq!(s.call("arr_const", &[]).0, 60);
+
+    // pointers: word and byte, with neighbours checked
+    let p = 0x2000u32;
+    for &v in &values() {
+        s.poke(p - 2, &[0x11, 0x22, 0, 0, 0x33, 0x44]);
+        s.call("ptr_store", &[p as u16, v]);
+        assert_eq!(
+            s.peek(p - 2, 6),
+            [0x11, 0x22, v as u8, (v >> 8) as u8, 0x33, 0x44]
+        );
+        assert_eq!(s.call("ptr_load", &[p as u16]).0, v);
+        s.call("ptr_store8", &[p as u16, v]);
+        assert_eq!(s.peek(p - 1, 3), [0x22, v as u8, (v >> 8) as u8]);
+        s.poke(p, &[v as u8]);
+        assert_eq!(s.call("ptr_load8", &[p as u16]).0, v & 0xFF);
+    }
+
+    // a record { i16, i8, i16 }: offsets 0, 2 and 4
+    s.poke(0x2100, &[0xEE; 8]);
+    s.call("set_fields", &[0x2100, 0x1234, 0x56, 0x789A]);
+    assert_eq!(
+        s.peek(0x2100, 8),
+        [0x34, 0x12, 0x56, 0xEE, 0x9A, 0x78, 0xEE, 0xEE]
+    );
+    assert_eq!(s.call("field", &[0x2100]).0, 0x789A);
+
+    s.poke(0x2200, &[0x01, 0x00, 0x02, 0x80]);
+    assert_eq!(s.call("swap_add", &[0x2200]).0, 0x8003);
+    assert_eq!(s.peek(0x2200, 4), [0x02, 0x80, 0x01, 0x00]);
+
+    // a byte loop
+    for n in [0u16, 1, 5, 16] {
+        s.poke(0x2300, &[0xCC; 20]);
+        s.call("fill", &[0x2300, n, 0x5A]);
+        let mut want = vec![0xCCu8; 20];
+        for w in want.iter_mut().take(n as usize) {
+            *w = 0x5A;
+        }
+        assert_eq!(s.peek(0x2300, 20), want, "fill n={n}");
+    }
+    let bytes: Vec<u8> = (0..16).map(|i| (i * 17 + 3) as u8).collect();
+    s.poke(buf, &bytes);
+    let want: u16 = bytes.iter().map(|&x| u16::from(x)).sum();
+    assert_eq!(s.call("buf_checksum", &[]).0, want);
+    let _ = arr;
+
+    // a stack object indexed at run time (needs the frame pointer)
+    for i in 0..8u16 {
+        assert_eq!(
+            s.call("local_table", &[i]).0,
+            100 * ((i & 3) + 1),
+            "local_table({i})"
+        );
+    }
+}
+
+#[test]
+fn calls() {
+    let img = load("call.o");
+    let s = &mut Sys::new(&img);
+    check1(s, "id", |a| a);
+    let vs = values();
+    for &x in &vs {
+        for &y in vs.iter().step_by(3) {
+            let (ax, _) = s.call("add3", &[x, y, x ^ y]);
+            assert_eq!(ax, x.wrapping_add(y).wrapping_add(x ^ y), "add3");
+            let (ax, _) = s.call("weigh5", &[x, y, x ^ 5, y ^ 9, x.wrapping_add(y)]);
+            let w = |a: u16, b_: u16, c: u16, d: u16, e: u16| {
+                a.wrapping_add(b_ << 1)
+                    .wrapping_add(c.wrapping_mul(3))
+                    .wrapping_add(d << 2)
+                    .wrapping_add(e << 3)
+            };
+            assert_eq!(ax, w(x, y, x ^ 5, y ^ 9, x.wrapping_add(y)), "weigh5");
+            let a = w(x, y, x, y, x);
+            assert_eq!(
+                s.call("call_weigh5", &[x, y]).0,
+                w(1, 2, 3, 4, a),
+                "call_weigh5"
+            );
+        }
+        let y = x.wrapping_add(1);
+        let sum7 = |a: u16, b_: u16, c: u16, d: u16, e: u16, f: u16, g: u16| {
+            a.wrapping_sub(b_)
+                .wrapping_add(c)
+                .wrapping_sub(d)
+                .wrapping_add(e)
+                .wrapping_sub(f)
+                .wrapping_add(g)
+        };
+        assert_eq!(
+            s.call("sum7", &[1, 2, 3, 4, 5, 6, x]).0,
+            sum7(1, 2, 3, 4, 5, 6, x)
+        );
+        assert_eq!(
+            s.call("call_sum7", &[x]).0,
+            sum7(x, y, x, y, x, y, x),
+            "call_sum7"
+        );
+        assert_eq!(
+            s.call("pressure", &[x, y, x ^ 0x55]).0,
+            2u16.wrapping_mul(x.wrapping_add(y).wrapping_add(x ^ 0x55)),
+            "pressure"
+        );
+        assert_eq!(s.call("use32", &[x, y]).0, y.wrapping_sub(x), "use32");
+        assert_eq!(s.call("make32", &[x, y]), (x, y), "make32");
+    }
+    let fib = |n: u16| -> u16 {
+        let (mut a, mut b_) = (0u16, 1u16);
+        for _ in 0..n {
+            (a, b_) = (b_, a.wrapping_add(b_));
+        }
+        a
+    };
+    for n in 0..=12u16 {
+        assert_eq!(s.call_budget("fib", &[n], 2_000_000).0, fib(n), "fib({n})");
+    }
+    for n in [0u16, 1, 2, 7, 30] {
+        let mut sv = 0u16;
+        for i in 0..n.max(1) {
+            sv = i.wrapping_add(sv).wrapping_add(1);
+        }
+        assert_eq!(s.call("loop_calls", &[n]).0, sv, "loop_calls({n})");
+    }
+}
+
+#[test]
+fn wide_integers() {
+    let img = load("wide.o");
+    let s = &mut Sys::new(&img);
+    let vals: Vec<u32> = {
+        let mut v = vec![
+            0u32,
+            1,
+            0xFFFF,
+            0x1_0000,
+            0x7FFF_FFFF,
+            0x8000_0000,
+            0xFFFF_FFFF,
+            0x1234_5678,
+            0xFFFF_0001,
+            0x0001_FFFF,
+        ];
+        let mut x: u32 = 0x9E37_79B9;
+        for _ in 0..12 {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            v.push(x);
+        }
+        v
+    };
+    let lo = |v: u32| v as u16;
+    let hi = |v: u32| (v >> 16) as u16;
+    let ret = |s: &mut Sys, name: &str, args: &[u16]| {
+        let (ax, dx) = s.call(name, args);
+        (u32::from(dx) << 16) | u32::from(ax)
+    };
+    for &a in &vals {
+        for &c in &vals {
+            let args = [lo(a), hi(a), lo(c), hi(c)];
+            assert_eq!(
+                ret(s, "add32", &args),
+                a.wrapping_add(c),
+                "add32({a:#x}, {c:#x})"
+            );
+            assert_eq!(
+                ret(s, "sub32", &args),
+                a.wrapping_sub(c),
+                "sub32({a:#x}, {c:#x})"
+            );
+            assert_eq!(ret(s, "and32", &args), a & c, "and32");
+            assert_eq!(ret(s, "or32", &args), a | c, "or32");
+            assert_eq!(ret(s, "xor32", &args), a ^ c, "xor32");
+            assert_eq!(ret(s, "umax32", &args), a.max(c), "umax32({a:#x}, {c:#x})");
+            assert_eq!(s.call("ult32", &args).0, b(a < c), "ult32({a:#x}, {c:#x})");
+            assert_eq!(
+                s.call("slt32", &args).0,
+                b((a as i32) < (c as i32)),
+                "slt32({a:#x}, {c:#x})"
+            );
+            assert_eq!(s.call("eq32", &args).0, b(a == c), "eq32");
+        }
+        let one = [lo(a), hi(a)];
+        assert_eq!(ret(s, "neg32", &one), a.wrapping_neg(), "neg32({a:#x})");
+        assert_eq!(ret(s, "shl32_16", &one), a << 16, "shl32_16");
+        assert_eq!(ret(s, "lshr32_16", &one), a >> 16, "lshr32_16");
+        assert_eq!(ret(s, "shl32_8", &one), a << 8, "shl32_8");
+        assert_eq!(ret(s, "lshr32_8", &one), a >> 8, "lshr32_8");
+        assert_eq!(
+            ret(s, "ashr32_24", &one),
+            ((a as i32) >> 24) as u32,
+            "ashr32_24"
+        );
+        assert_eq!(
+            ret(s, "add_imm32", &one),
+            a.wrapping_add(100_000),
+            "add_imm32({a:#x})"
+        );
+    }
+    for n in [0u16, 1, 2, 5, 40] {
+        let mut sv = 0u32;
+        for i in 0..n.max(1) {
+            sv = sv.wrapping_add(u32::from(i) << 12);
+        }
+        assert_eq!(ret(s, "sum32", &[n]), sv, "sum32({n})");
+    }
+}

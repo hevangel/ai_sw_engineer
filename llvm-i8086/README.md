@@ -6,7 +6,7 @@
 | Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
 | Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
 | Rust target | `rust/i8086-none.json` |
-| Status | **assembler, disassembler and object writer done** (milestone 2); code generation not started |
+| Status | **assembler, disassembler, object writer and integer code generation done** (milestones 2 and 3): `llc` compiles i8/i16 code, calls and frames, verified on the 8088 core; no runtime library, linker or Rust target yet |
 
 ## Strategy
 
@@ -16,14 +16,17 @@ The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS),
 
 In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and disassembles the whole 8086 integer instruction set in Intel syntax, relaxes branches, and writes ELF objects with the relocations of `spec/abi.md`; `llvm-objdump` and `llvm-readobj` read them. Verified against a hand-written opcode table and the physical-chip instruction corpus (`tests/`).
 
-In scope (next): integer code at 8 and 16 bits (32/64-bit by legalization and helpers), calls, stack frames, `REP` string instructions for memory operations, `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (done): `llc -mtriple=i8086` selects integer code at 8 and 16 bits (32/64-bit by the generic legalizer), calls and stack frames (`spec/codegen.md`, `spec/abi.md`).
+
+In scope (next): the runtime library (multiply, divide, 32-bit shifts, memory operations), native `mul`/`div`, add-with-carry, `REP` string instructions, a linker and image packager, and the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | [spec/isa.md](spec/isa.md) | instruction set, encodings (8086 subset, 186+ excluded) |
-| [spec/abi.md](spec/abi.md) | data layout string, register classes, calling convention, stack, relocations |
+| [spec/abi.md](spec/abi.md) | data layout string, register classes, calling convention, frames, relocations |
+| [spec/codegen.md](spec/codegen.md) | how `llc` selects instructions: registers, addressing modes, control flow, arithmetic |
 | [spec/asm_syntax.md](spec/asm_syntax.md) | assembler syntax and directives |
 | [plans/](plans/implementation_plan.md) | implementation plan, [test plan](plans/testplan.md) |
 | `target/` | LLVM `lib/Target/I8086` sources or patches applied onto `external/llvm-project` |

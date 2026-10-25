@@ -62,6 +62,15 @@ def SEGREG : RegisterClass<"I8086", [i16], 16, (add ES, CS, SS, DS)>;
 def SEGREGNC : RegisterClass<"I8086", [i16], 16, (add ES, SS, DS)>;
 def FLAGSREG : RegisterClass<"I8086", [i16], 16, (add FLAGS)>;
 
+// Classes for code generation. Only AX..BX have byte halves; only BX, SI, DI
+// (and BP) can address memory, as base (BX, BP) or index (SI, DI).
+def GR16_ABCD : RegisterClass<"I8086", [i16], 16, (add AX, CX, DX, BX)>;
+def GR8_L : RegisterClass<"I8086", [i8], 8, (add AL, CL, DL, BL)>;
+def GR8_H : RegisterClass<"I8086", [i8], 8, (add AH, CH, DH, BH)>;
+def GR16_BASE  : RegisterClass<"I8086", [i16], 16, (add BX, BP)>;
+def GR16_INDEX : RegisterClass<"I8086", [i16], 16, (add SI, DI)>;
+def GR16_PTR   : RegisterClass<"I8086", [i16], 16, (add BX, SI, DI, BP)>;
+
 // Registers an instruction names literally.
 def GR8AL  : RegisterClass<"I8086", [i8], 8, (add AL)>;
 def GR8CL  : RegisterClass<"I8086", [i8], 8, (add CL)>;

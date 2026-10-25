@@ -11,7 +11,8 @@ import lit.formats
 config.name = "llvm-i8086"
 config.test_format = lit.formats.ShTest(execute_external=False)
 config.suffixes = [".s", ".ll", ".txt"]
-config.excludes = ["README.md"]
+# tests/run holds programs for the emulator, not lit tests.
+config.excludes = ["README.md", "run"]
 
 config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(

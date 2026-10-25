@@ -2,7 +2,7 @@
 
 Written before any backend code. `rust/i8086-none.json` must match it exactly.
 
-Status of each decision: **proposed** until the first function lowers and a title links, then frozen here with a date (AGENTS: design docs describe the backend as it is). Decisions are numbered for reference.
+Status of each decision: **implemented** (with a date) once `llc` produces code that runs on the emulator (`tests/run/`); **proposed** until then. Decisions are numbered for reference; a title that links will freeze them.
 
 ## Data layout
 
@@ -15,22 +15,38 @@ Status of each decision: **proposed** until the first function lowers and a titl
 
 | Class | Registers | Allocatable | Notes |
 |---|---|---|---|
-| GR16 | AX, BX, CX, DX, SI, DI | yes | BX, SI, DI, BP are the only base/index registers in addressing modes; AX, CX, DX are fixed by MUL/DIV, shifts, string and I/O instructions |
+| GR16 | AX, BX, CX, DX, SI, DI | yes | BX (base) and SI, DI (index) address memory, BP too as a base for frames; AX, CX, DX are fixed by MUL/DIV, shifts, string and I/O instructions. Only AX..DX have byte halves |
 | GR8 | AL AH BL BH CL CH DL DH | yes (aliases of AX..DX) | |
-| BP | BP | frame pointer when needed | otherwise allocatable as a base register |
+| BP | BP | no | the frame pointer (D4); also the base of every local and spill address |
 | SP | SP | no | stack pointer |
 | SEG | CS DS ES SS | no | fixed by the tiny model |
 | FLAGS | FLAGS | no (implicit) | |
 
 Imaginary registers (memory-backed pseudo-registers): none planned. The 8086 has enough registers that the pressure of `llvm-i8008` and `llvm-i4004` does not apply.
 
-## Calling convention (proposed, D3)
+## Calling convention (implemented 2026-10-25, D3)
 
-- Arguments: the first three 16-bit scalar arguments in AX, DX, CX; further arguments pushed on the stack right to left, 2-byte slots. A 32-bit argument uses a register pair taken from that sequence. Aggregates larger than 4 bytes are passed by pointer.
-- Return values: 16-bit in AX, 32-bit in DX:AX (DX high), larger values by a caller-supplied pointer (sret) passed as the first argument.
-- Callee-saved: BX, SI, DI, BP. Caller-saved: AX, CX, DX, FLAGS.
-- Stack: full descending, SS:SP, a PUSH decrements SP by 2, SP kept even at call boundaries; the caller removes stack arguments (`ADD SP,n`). Frame pointer is BP only for functions with dynamic stack allocation or when requested. Depth is limited only by RAM; the linker script places the stack top at `_stack_top` below the data.
+- Arguments: the first three 16-bit scalar arguments in AX, DX, CX; further arguments pushed on the stack right to left, 2-byte slots. Bytes and booleans travel as 16-bit values (extended as the attribute says, any-extended otherwise). A 32-bit argument is two such pieces, low word first, taken from the same sequence, so the first i32 is AX (low) and DX (high), and a second i32 has its low word in CX and its high word on the stack. Aggregates are passed by pointer by the frontend; `byval` is rejected by the backend.
+- Return values: 16-bit in AX, 32-bit in DX:AX (DX high); anything that does not fit the two return registers is returned through a caller-supplied pointer (`sret`) passed as the first argument.
+- Callee-saved: BX, SI, DI, BP. Caller-saved: AX, CX, DX, FLAGS. The direction flag is clear at calls and returns.
+- Stack: full descending, SS:SP, a PUSH decrements SP by 2, SP kept even at call boundaries; the caller removes stack arguments (`add sp, n`). Depth is limited only by RAM; the linker script places the stack top at `_stack_top` below the data.
 - Interrupt handlers use a separate attribute (IRET, save everything) and are out of scope for the first model.
+- Variadic functions are not supported yet.
+
+## Frames (implemented 2026-10-25, D4)
+
+SP cannot address memory (there is no `[sp+disp]`), so a function with stack objects (locals, spills, incoming stack arguments) addresses its frame through BP, and BP is therefore reserved in every function. A function without stack objects has no frame pointer and no prologue.
+
+```
+push bp ; mov bp, sp        ; [bp] = saved BP, [bp+2] = return address, [bp+4] = first stack argument
+push bx / si / di           ; those the function uses, in that order: [bp-2], [bp-4], [bp-6]
+sub sp, N                   ; locals and spills, below the pushed registers
+...
+lea sp, [bp-2k]             ; k pushed registers (mov sp, bp when k = 0)
+pop di / si / bx ; pop bp ; ret
+```
+
+Callee-saved registers are pushed, never stored below SP: an interrupt pushes onto the stack at SP and would overwrite anything under it. Locals are only addressed after `sub sp, N` has made room.
 
 ## Relocations and object format (implemented, 2026-10-25)
 

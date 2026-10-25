@@ -6,8 +6,10 @@
 | MC decode | `llvm-mc --disassemble` + FileCheck | hand-worked | `tests/mc/disasm*.txt` |
 | Relaxation, relocations, diagnostics | `llvm-mc`, `llvm-objdump`, `llvm-readobj` | hand-worked from `spec/abi.md` | `tests/mc/{relax,range,fixups,errors}.s` |
 | MC vs the chip | `tests/mc/vector_check.py` | SingleStepTests/8086 (physical Intel P80C86A-2): bytes and MartyPC disassembly of random instances of every opcode | `tests/mc/` |
-| Codegen | `llc` + FileCheck | hand-checked expected asm | `tests/codegen/` (milestone 3) |
-| Execution | the `system/ibm_pc` emulator, then the RTL | expected register/memory state | `tests/smoke/` (milestone 6) |
+| Codegen shape | `llc` + FileCheck | hand-checked expected asm | `tests/codegen/` |
+| Codegen semantics | `llc -filetype=obj`, a small linker, the `system/ibm_pc` emulator | the same computation on the host (wrapping integer arithmetic), over edge values and a fixed pseudo-random sequence | `tests/run/*.ll`, `system/ibm_pc/emulator/tests/i8086_codegen.rs` |
+| Text vs object | `llc` then `llvm-mc`, against `llc -filetype=obj` | the two routes must agree section by section | `scripts/gen_run_objects.sh` |
+| Smoke programs | the `system/ibm_pc` emulator, then the RTL | expected register/memory state | `tests/smoke/` (milestone 6) |
 | Rust end-to-end | `rustc` → image → emulator | known output | `tests/smoke/` |
 
 Execution tests run on `system/ibm_pc/emulator` (itself verified against the physical-chip vectors and the RTL) and on the ai_hw_engineer RTL.

@@ -11,7 +11,7 @@ the hardware project's RTL for a 20-step session (boot, date, `DIR`, `CHKDSK`, R
 disk BASIC, `FORMAT B:`, `COPY`, and BASIC drawing in both CGA graphics modes, compared by
 video-memory hash). The CPU core passes all 566,721 physical-chip vectors
 the RTL passes. Not done: the speaker, an interactive graphical front end, character-ROM
-text rendering, and compiled `llvm-i8086` images (the backend has no code yet). Contract and limits:
+text rendering, and a whole compiled `llvm-i8086` image (compiled functions already run on the core; the backend has no linker yet). Contract and limits:
 [spec/spec.md](spec/spec.md); evidence: [report/verification.md](report/verification.md).
 
 | Path | Contents |

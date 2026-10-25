@@ -1,5 +1,26 @@
 # ibm_pc emulator verification
 
+## 2026-10-25 (fourth record): compiled `llvm-i8086` code
+
+The emulator now serves as the execution oracle for the `llvm-i8086` backend:
+`tests/i8086_codegen.rs` links ELF objects built by `llc -mtriple=i8086`
+(`llvm-i8086/tests/run/*.o`) with a small test linker, calls each function with the
+ABI of `llvm-i8086/spec/abi.md` on the 8088 core, and compares the result with the same
+computation on the host.
+
+| Command | Result |
+|---|---|
+| `cargo test --test i8086_codegen` | 7 of 7 programs, 108 functions (arithmetic, comparisons, loops, shifts, extensions, globals and pointers, stack objects, calls with stack arguments, recursion, 32-bit arithmetic); BX, SI, DI, BP and SP checked after every call |
+| `cargo fmt -- --check`, `cargo clippy --all-targets` | clean |
+| all other tests | unchanged and passing |
+
+This is a use of the core, not a change to it. What it shows about the core: the
+compiler's output executes with the results
+the host computes, including `cbw`, `lea` into SP, shifts by CL and `[bp+si+disp]`
+addressing. It does not verify timing or any device, and the linker is test code: the
+backend's own linker (llvm-i8086 milestone 5) is not written.
+
+
 ## 2026-10-25 (third record): CGA graphics
 
 Added: decoding of the CGA 320x200 four-colour and 640x200 two-colour modes to RGBI
@@ -67,7 +88,7 @@ that run, not from this emulator.
   and 40-column text are not exercised; the diskette controller's error paths other
   than "no disk" and "write protected" are covered by unit tests only.
 - IRET's interrupt shadow is an assumption (E-A3); DRAM refresh is not simulated (E-A9).
-- No compiled `llvm-i8086` image has run: the backend has no code yet.
+- No whole compiled `llvm-i8086` image (a linked program with startup code) has run on the machine; individual compiled functions run in `tests/i8086_codegen.rs` (see the fourth record).
 
 ## 2026-10-25 (first record): 8088 CPU core and memory decode
 

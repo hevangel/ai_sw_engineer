@@ -17,6 +17,8 @@ include "llvm/Target/Target.td"
 include "I8086RegisterInfo.td"
 include "I8086InstrFormats.td"
 include "I8086InstrInfo.td"
+include "I8086CallingConv.td"
+include "I8086InstrCodeGen.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GR16>;
 
