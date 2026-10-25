@@ -11,6 +11,7 @@ rustc-ice-*.txt
 
 # Per-title and per-backend generated output
 system/*/*/build/
+system/*/platform/sim/build/
 llvm-*/build/
 llvm-*/install/
 llvm-*/build_llvm.out

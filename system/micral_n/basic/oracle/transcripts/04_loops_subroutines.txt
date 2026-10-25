@@ -1,0 +1,95 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 10 FOR I=1 TO 3\r
+< 20 FOR J=10 TO 1 STEP -4.5\r
+< 30 PRINT I;J,\r
+< 40 NEXT J\r
+< 50 GOSUB 100\r
+< 60 NEXT I\r
+< 70 PRINT "DONE";I;J\r
+< 80 END\r
+< 100 PRINT "SUB";I*I\r
+< 110 IF I=2 THEN 130\r
+< 120 RETURN\r
+< 130 PRINT "TWO"\r
+< 140 RETURN\r
+< RUN\r
+< 10 FOR X=0 TO 1 STEP .25\r
+< 20 PRINT X;\r
+< 30 NEXT X\r
+< 35 PRINT\r
+< 40 END\r
+< RUN\r
+< GOSUB 200\r
+< 200 PRINT "DIRECT GOSUB"\r
+< 210 RETURN\r
+< GOSUB 200\r
+< IF 1 THEN PRINT "YES"\r
+< IF 0 THEN PRINT "NO"\r
+< IF 2>1 GOTO 200\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 FOR I=1 TO 3\r\r\n
+> 20 FOR J=10 TO 1 STEP -4.5\r\r\n
+> 30 PRINT I;J,\r\r\n
+> 40 NEXT J\r\r\n
+> 50 GOSUB 100\r\r\n
+> 60 NEXT I\r\r\n
+> 70 PRINT "DONE";I;J\r\r\n
+> 80 END\r\r\n
+> 100 PRINT "SUB";I*I\r\r\n
+> 110 IF I=2 THEN 130\r\r\n
+> 120 RETURN\r\r\n
+> 130 PRINT "TWO"\r\r\n
+> 140 RETURN\r\r\n
+> RUN\r\r\n
+>  1.0 10.0       1.0 5.5         1.0 1.0        SUB 1.0\r\n
+>  2.0 10.0       2.0 5.5         2.0 1.0        SUB 4.0\r\n
+> TWO\r\n
+>  3.0 10.0       3.0 5.5         3.0 1.0        SUB 9.0\r\n
+> DONE 3.0 1.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 FOR X=0 TO 1 STEP .25\r\r\n
+> 20 PRINT X;\r\r\n
+> 30 NEXT X\r\r\n
+> 35 PRINT\r\r\n
+> 40 END\r\r\n
+> RUN\r\r\n
+>  0 0.2500000 0.5000000 0.7500000 1.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> GOSUB 200\r\r\n
+> UN\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 200 PRINT "DIRECT GOSUB"\r\r\n
+> 210 RETURN\r\r\n
+> GOSUB 200\r\r\n
+> DIRECT GOSUB\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> IF 1 THEN PRINT "YES"\r\r\n
+> YES\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> IF 0 THEN PRINT "NO"\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> IF 2>1 GOTO 200\r\r\n
+> DIRECT GOSUB\r\n
+> \x14\r\n
+> READY\r\n
+> \n

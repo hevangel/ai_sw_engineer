@@ -1,0 +1,3 @@
+CODE 0x0000 0x2000
+DATA follow 0x1000
+ENTRY __start

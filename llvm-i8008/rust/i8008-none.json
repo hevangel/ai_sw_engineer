@@ -1,0 +1,21 @@
+{
+  "_comment": "Rust target for the Intel 8008. data-layout MUST equal llvm-i8008/spec/abi.md sec.1 exactly. The pinned rustc has no i8008 LLVM target, so builds use the avr-none route (rust/README.md); this file is for a rustc linked against our LLVM.",
+  "arch": "i8008",
+  "llvm-target": "i8008-unknown-none",
+  "data-layout": "e-m:e-p:16:8-i8:8-i16:8-i32:8-i64:8-n8-a:8",
+  "target-pointer-width": 16,
+  "target-c-int-width": 16,
+  "target-endian": "little",
+  "os": "none",
+  "env": "",
+  "vendor": "unknown",
+  "executables": true,
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "disable-redzone": true,
+  "max-atomic-width": 0,
+  "atomic-cas": false,
+  "singlethread": true
+}

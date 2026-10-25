@@ -1,0 +1,12 @@
+# Captured from the original (build/original.bin, SHA-256 fb6d472265232d04ef71c4cafa7d567b5ce5a7c77b1b9c28c195d954f45fe192) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< N\r52468N\r
+> \rS H O   SSS   TTT   AAA   RRR   SSS\n
+>         S     T     A A   R R   S\n
+> O * T   SSS   T     AAA   RRR   SSS\n
+>           S   T     A A   RR      S\n
+> I N G   SSS   T     A A   R R   SSS\n
+> **********S H O O T I N G   S T A R S******\n
+>            A BRAIN TEASER GAME\n
+> WANT THE RULES? N\r\r\r\r.  .  .  \r\r.  *  .  \r\r.  .  .  \r\r\r\r\rYOUR SHOT? 5\r\r\r.  *  .  \r\r*  .  *  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 2\r\r\r*  .  *  \r\r*  .  *  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 4\r\r\r.  .  *  \r\r.  .  *  \r\r*  *  .  \r\r\r\r\rYOUR SHOT? 6\r\r\r.  .  .  \r\r.  .  .  \r\r*  *  *  \r\r\r\r\rYOUR SHOT? 8\r\r\r.  .  .  \r\r.  .  .  \r\r.  .  .  YOU LOST THE GAME:\n
+> WANT TO SHOOT SOME MORE STARS!  N\r

@@ -1,0 +1,21 @@
+# Captured from the original (build/original.bin, SHA-256 fb6d472265232d04ef71c4cafa7d567b5ce5a7c77b1b9c28c195d954f45fe192) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< N\r1A052138752985N\r
+> \rS H O   SSS   TTT   AAA   RRR   SSS\n
+>         S     T     A A   R R   S\n
+> O * T   SSS   T     AAA   RRR   SSS\n
+>           S   T     A A   RR      S\n
+> I N G   SSS   T     A A   R R   SSS\n
+> **********S H O O T I N G   S T A R S******\n
+>            A BRAIN TEASER GAME\n
+> WANT THE RULES? N\r\r\r\r.  .  .  \r\r.  *  .  \r\r.  .  .  \r\r\r\r\rYOUR SHOT? 1\r\r\rHEY! YOU CAN ONLY SHOOT STARS,\n
+> NOT BLACK HOLES.\n
+> TRY AGAIN!\n
+> .  .  .  \r\r.  *  .  \r\r.  .  .  \r\r\r\r\rYOUR SHOT? A\r\r\rTHAT WASNT A VALID STAR NUMBER!\n
+> TRY AGAIN!\n
+> .  .  .  \r\r.  *  .  \r\r.  .  .  \r\r\r\r\rYOUR SHOT? 0\r\r\rTHAT WASNT A VALID STAR NUMBER!\n
+> TRY AGAIN!\n
+> .  .  .  \r\r.  *  .  \r\r.  .  .  \r\r\r\r\rYOUR SHOT? 5\r\r\r.  *  .  \r\r*  .  *  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 2\r\r\r*  .  *  \r\r*  .  *  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 1\r\r\r.  *  *  \r\r.  *  *  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 3\r\r\r.  .  .  \r\r.  .  .  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 8\r\r\r.  .  .  \r\r.  .  .  \r\r*  .  *  \r\r\r\r\rYOUR SHOT? 7\r\r\r.  .  .  \r\r*  *  .  \r\r.  *  *  \r\r\r\r\rYOUR SHOT? 5\r\r\r.  *  .  \r\r.  .  *  \r\r.  .  *  \r\r\r\r\rYOUR SHOT? 2\r\r\r*  .  *  \r\r.  .  *  \r\r.  .  *  \r\r\r\r\rYOUR SHOT? 9\r\r\r*  .  *  \r\r.  *  .  \r\r.  *  .  \r\r\r\r\rYOUR SHOT? 8\r\r\r*  .  *  \r\r.  *  .  \r\r*  .  *  \r\r\r\r\rYOUR SHOT? 5\r\r\r*  *  *  \r\r*  .  *  \r\r*  *  *  YOU WIN! GOOD SHOOTING:\n
+> YOU FIRED  11 SHOTS.\n
+> BEST POSSIBLE SCORE IS 11 SHOTS\n
+> WANT TO SHOOT AGAIN DEADEYE?  N\r

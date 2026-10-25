@@ -1,0 +1,9 @@
+# Unknown command, five-digit address, bad terminator: '?' and a new line.
+< X
+> X?\r\n
+< M12345
+> M:12345?\r\n
+< D3000.
+> D:3000?\r\n
+# Blank keys between commands are ignored.
+< \r \n

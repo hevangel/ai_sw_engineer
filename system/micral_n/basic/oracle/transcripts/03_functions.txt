@@ -1,0 +1,68 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< PRINT INT(3.7),INT(-3.7),INT(5),INT(-5),INT(.5)\r
+< PRINT SGN(-2),SGN(0),SGN(3.5),ABS(-4.25),ABS(6)\r
+< PRINT SQR(2),SQR(16),SQR(.25),SQR(1E6),SQR(3)\r
+< PRINT RND(1),RND(1),RND(1)\r
+< PRINT "A";TAB(10);"B";TAB(5);"C"\r
+< PRINT CHR(72);CHR(73);CHR(33)\r
+< 10 FOR I=1 TO 5\r
+< 20 PRINT TAB(I*3);I\r
+< 30 NEXT I\r
+< RUN\r
+< PRINT INT(RND(1)*100),INT(RND(1)*100)\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT INT(3.7),INT(-3.7),INT(5),INT(-5),INT(.5)\r\r\n
+>  3.0           -4.0             5.0            -5.0             0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT SGN(-2),SGN(0),SGN(3.5),ABS(-4.25),ABS(6)\r\r\n
+> -1.0            0               1.0             4.25            6.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT SQR(2),SQR(16),SQR(.25),SQR(1E6),SQR(3)\r\r\n
+>  1.414213       4.0             0.5000000       1000.0          1.732051\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT RND(1),RND(1),RND(1)\r\r\n
+>  0.5439760E-01  0.2487203       0.9428927\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT "A";TAB(10);"B";TAB(5);"C"\r\r\n
+> A        B\r\r    C\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT CHR(72);CHR(73);CHR(33)\r\r\n
+> HI!\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 FOR I=1 TO 5\r\r\n
+> 20 PRINT TAB(I*3);I\r\r\n
+> 30 NEXT I\r\r\n
+> RUN\r\r\n
+>    1.0\r\n
+>       2.0\r\n
+>          3.0\r\n
+>             4.0\r\n
+>                5.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT INT(RND(1)*100),INT(RND(1)*100)\r\r\n
+>  42.0           56.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n

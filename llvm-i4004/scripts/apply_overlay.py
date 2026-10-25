@@ -100,7 +100,7 @@ def main():
     tc = os.path.join(llvm, "lib", "TargetParser", "Triple.cpp")
     ensure(
         tc,
-        'case msp430:\n    return "msp430";',
+        'return "msp430";',
         '  case i4004:\n    return "i4004";\n',
         "Triple.cpp getArchTypeName",
         after=True,
@@ -175,7 +175,7 @@ def main():
     if os.path.exists(eof):
         ensure(
             eof,
-            'case ELF::EM_MSP430:\n      return "elf32-msp430";',
+            'return "elf32-msp430";',
             '    case ELF::EM_I4004:\n      return "elf32-i4004";\n',
             "ELFObjectFile.h getFileFormatName",
             after=True,
@@ -183,7 +183,7 @@ def main():
         )
         ensure(
             eof,
-            "case ELF::EM_MSP430:\n    return Triple::msp430;",
+            "return Triple::msp430;",
             "  case ELF::EM_I4004:\n    return Triple::i4004;\n",
             "ELFObjectFile.h getArch",
             after=True,

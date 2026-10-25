@@ -1,0 +1,10 @@
+# G with two holds: each hold becomes CAL <monitor hold entry> (mock: 3800, 3808).
+= 3010 AA BB CC
+= 3020 DD EE FF
+< G3000,3010,3020\r
+> G:3000,3010,3020\r\n
+? 3010 46 00 38
+? 3020 46 08 38
+# Holds closer than 3 bytes are refused.
+< G3000,3010,3012\r
+> G:3000,3010,3012?\r\n

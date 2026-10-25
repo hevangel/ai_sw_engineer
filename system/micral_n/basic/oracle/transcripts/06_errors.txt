@@ -1,0 +1,173 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< PRINT 1/0\r
+< PRINT SQR(-1)\r
+< PRINT (1+2\r
+< PRINT 1+2)\r
+< PRINT "OPEN\r
+< PRINT 2**3\r
+< FOO\r
+< 10 GOTO 99\r
+< RUN\r
+< 10 RETURN\r
+< RUN\r
+< 10 NEXT I\r
+< RUN\r
+< 10 FOR I=1 2\r
+< RUN\r
+< 10 IF 1 PRINT 2\r
+< RUN\r
+< 10 LET X 5\r
+< RUN\r
+< 10 X=Q(3)\r
+< RUN\r
+< 10 INPUT N\r
+< RUN\r
+< 1X\r
+< 10 DIM A3)\r
+< RUN\r
+< SCR\r
+< PRINT 1E50*1E50*1E50*1E50\r
+< PRINT INT(1E10)\r
+< PRINT 12345678901234567890\r
+< PRINT "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"\r
+< PRINT 1\x7f\x7f2+3\r
+< PRINT 4\x03\r
+< PRINT 5\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 1/0\r\r\n
+> DZ\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT SQR(-1)\r\r\n
+> SQ\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT (1+2\r\r\n
+> I(\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 1+2)\r\r\n
+> I(\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT "OPEN\r\r\n
+> OPENIQ\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 2**3\r\r\n
+> SY\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> FOO\r\r\n
+> SY\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 GOTO 99\r\r\n
+> RUN\r\r\n
+> UN AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 RETURN\r\r\n
+> RUN\r\r\n
+> RT AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 NEXT I\r\r\n
+> RUN\r\r\n
+> FN AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 FOR I=1 2\r\r\n
+> RUN\r\r\n
+> FE AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 IF 1 PRINT 2\r\r\n
+> RUN\r\r\n
+> IF AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 LET X 5\r\r\n
+> RUN\r\r\n
+> LE AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 X=Q(3)\r\r\n
+> RUN\r\r\n
+> FA AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 INPUT N\r\r\n
+> RUN\r\r\n
+> ?1X\r\r\n
+> IN AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 DIM A3)\r\r\n
+> RUN\r\r\n
+> DE AT LINE 10\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 1E50*1E50*1E50*1E50\r\r\n
+> IN\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT INT(1E10)\r\r\n
+> FX\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 12345678901234567890\r\r\n
+>  1234567.\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"\r\r\n
+> XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 1\x7f\\\x7f\\2+3\r\r\n
+>  5.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 4\x03^C\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> \r\r\n
+> PRINT 5\r\r\n
+>  5.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n

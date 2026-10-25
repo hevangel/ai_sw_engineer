@@ -1,0 +1,29 @@
+[package]
+name = "shooting_stars"
+version = "0.1.0"
+edition = "2021"
+description = "shooting_stars for micral_n, reimplemented in Rust"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across titles.
+name = "software"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shooting_stars"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false

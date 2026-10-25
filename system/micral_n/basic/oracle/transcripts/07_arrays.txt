@@ -1,0 +1,49 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 10 DIM A(10),B(5)\r
+< 20 FOR I=1 TO 10\r
+< 30 A(I)=I*I\r
+< 40 NEXT I\r
+< 50 FOR I=1 TO 5\r
+< 60 B(I)=A(I)+A(I+5)\r
+< 70 PRINT I;A(I);B(I)\r
+< 80 NEXT I\r
+< 90 PRINT A(10)/B(5)\r
+< 100 INPUT A(3)\r
+< 110 PRINT A(3)\r
+< 120 PRINT A(-1)\r
+< RUN\r
+< 7.5\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 DIM A(10),B(5)\r\r\n
+> 20 FOR I=1 TO 10\r\r\n
+> 30 A(I)=I*I\r\r\n
+> 40 NEXT I\r\r\n
+> 50 FOR I=1 TO 5\r\r\n
+> 60 B(I)=A(I)+A(I+5)\r\r\n
+> 70 PRINT I;A(I);B(I)\r\r\n
+> 80 NEXT I\r\r\n
+> 90 PRINT A(10)/B(5)\r\r\n
+> 100 INPUT A(3)\r\r\n
+> 110 PRINT A(3)\r\r\n
+> 120 PRINT A(-1)\r\r\n
+> RUN\r\r\n
+>  1.0 1.0 37.0\r\n
+>  2.0 4.0 53.0\r\n
+>  3.0 9.0 73.0\r\n
+>  4.0 16.0 97.0\r\n
+>  5.0 25.0 125.0\r\n
+>  0.7999999\r\n
+> ?7.5\r\r\n
+>  7.5\r\n
+> OR AT LINE 120\r\n
+> \x14\r\n
+> READY\r\n
+> \n

@@ -1,0 +1,7 @@
+# R: reader on (DC1), blocks until the end block, reader off (DC3) (spec MON-9).
+< R\x00\x00:0230100A0BA9\r\n:00000000\r\n
+> R:\x11\x13\r\n
+? 3010 0A 0B
+# A checksum error stops the read with '?'.
+< R:0130200A00\r\n
+> R:\x11\x13?\r\n

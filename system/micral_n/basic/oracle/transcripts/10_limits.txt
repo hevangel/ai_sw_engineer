@@ -1,0 +1,182 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< LIST\r
+< RUN\r
+< PRINT X;Y\r
+< AB=5\r
+< A1=2\r
+< PRINT AB*A1,AB+A1,AB-A1,AB/A1\r
+< LET C=AB/A1\r
+< PRINT C;'SINGLE';"DOUBLE"\r
+< D=4\r
+< E=5\r
+< F=6\r
+< G=7\r
+< H=8\r
+< I=9\r
+< J=10\r
+< K=11\r
+< L=12\r
+< M=13\r
+< N=14\r
+< O=15\r
+< P=16\r
+< Q=17\r
+< R=18\r
+< S=19\r
+< PRINT AB+A1+C+D+E+F+G+H+I+J+K+L+M+N+O+P+Q+R\r
+< PRINT "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"\r
+< PRINT 1\r
+< 10 PRINT "ONE"\r
+< 10\r
+< LIST\r
+< 10 PRINT "TEN"\r
+< 5 PRINT "FIVE"\r
+< 7 GOTO 10\r
+< RUN\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LIST\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> RUN\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT X;Y\r\r\n
+>  0 0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> AB=5\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> A1=2\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT AB*A1,AB+A1,AB-A1,AB/A1\r\r\n
+>  10.0           7.0             3.0             2.5\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LET C=AB/A1\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT C;'SINGLE';"DOUBLE"\r\r\n
+>  2.5SINGLEDOUBLE\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> D=4\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> E=5\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> F=6\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> G=7\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> H=8\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> I=9\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> J=10\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> K=11\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> L=12\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> M=13\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> N=14\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> O=15\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> P=16\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> Q=17\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> R=18\r\r\n
+> BG\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> S=19\r\r\n
+> BG\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT AB+A1+C+D+E+F+G+H+I+J+K+L+M+N+O+P+Q+R\r\r\n
+> BG\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYBG\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> YYY"\r\r\n
+> SY\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> PRINT 1\r\r\n
+>  1.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 PRINT "ONE"\r\r\n
+> 10\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LIST\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 PRINT "TEN"\r\r\n
+> 5 PRINT "FIVE"\r\r\n
+> 7 GOTO 10\r\r\n
+> RUN\r\r\n
+> FIVE\r\n
+> TEN\r\n
+> \x14\r\n
+> READY\r\n
+> \n

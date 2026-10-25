@@ -1,0 +1,62 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 10 INPUT A,B\r
+< 20 PRINT "SUM";A+B\r
+< 30 INPUT C$\r
+< 40 PRINT C,C-128\r
+< 50 IF A=0 THEN 70\r
+< 60 GOTO 10\r
+< 70 END\r
+< RUN\r
+< 3\r
+< 4.5\r
+< Z\r
+< -1E2\r
+< .25\r
+< !\r
+< 0\r
+< 0\r
+< A\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 INPUT A,B\r\r\n
+> 20 PRINT "SUM";A+B\r\r\n
+> 30 INPUT C$\r\r\n
+> 40 PRINT C,C-128\r\r\n
+> 50 IF A=0 THEN 70\r\r\n
+> 60 GOTO 10\r\r\n
+> 70 END\r\r\n
+> RUN\r\r\n
+> ?3\r\r\n
+> ?4.5\r\r\n
+> SUM 7.5\r\n
+> Z 218.0          90.0\r\n
+> ?\r\r\n
+> ?-1E2\r\r\n
+> SUM-100.0\r\n
+> . 174.0          46.0\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 25\r\r\n
+> !\r\r\n
+> SY\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 0\r\r\n
+> 0\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> A\r\r\n
+> SY\r\n
+> \x14\r\n
+> READY\r\n
+> \n

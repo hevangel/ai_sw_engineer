@@ -1,0 +1,34 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 10 REM PRIMES BELOW 60\r
+< 20 FOR N=2 TO 60\r
+< 30 FOR D=2 TO SQR(N)\r
+< 40 IF N/D=INT(N/D) THEN 70\r
+< 50 NEXT D\r
+< 60 PRINT N;\r
+< 70 NEXT N\r
+< 80 PRINT\r
+< 90 PRINT "COUNTED"\r
+< RUN\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 REM PRIMES BELOW 60\r\r\n
+> 20 FOR N=2 TO 60\r\r\n
+> 30 FOR D=2 TO SQR(N)\r\r\n
+> 40 IF N/D=INT(N/D) THEN 70\r\r\n
+> 50 NEXT D\r\r\n
+> 60 PRINT N;\r\r\n
+> 70 NEXT N\r\r\n
+> 80 PRINT\r\r\n
+> 90 PRINT "COUNTED"\r\r\n
+> RUN\r\r\n
+> FN AT LINE 70\r\n
+> \x14\r\n
+> READY\r\n
+> \n
