@@ -1,0 +1,21 @@
+{
+  "_comment": "Draft Rust target for i8086. data-layout MUST equal llvm-i8086/spec/abi.md D1 exactly. Requires nightly and -Zbuild-std=core and a rustc linked against our LLVM (the pinned rustc has no i8086 target).",
+  "arch": "i8086",
+  "llvm-target": "i8086-unknown-none",
+  "data-layout": "e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16",
+  "target-pointer-width": 16,
+  "target-c-int-width": 16,
+  "target-endian": "little",
+  "os": "none",
+  "env": "",
+  "vendor": "unknown",
+  "executables": true,
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "disable-redzone": true,
+  "max-atomic-width": 0,
+  "atomic-cas": false,
+  "singlethread": true
+}
