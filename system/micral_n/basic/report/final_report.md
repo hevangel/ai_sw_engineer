@@ -3,7 +3,7 @@
 | Check | Result |
 |---|---|
 | Host replay (transcripts identical) | 10/10 |
-| Target image size vs load area | 13826 / 14080 bytes (code 10691, the RAM image of pages 01, 26, 27 and 9 program pages, frames) |
+| Target image size vs load area | 13826 / 14080 bytes (code 10495, the RAM image of pages 01, 26, 27 and 10 program pages, frames) |
 | RAM | everything in the image except the array page (0x3700–0x37FF) |
 | Call depth | 6 of 7 |
 | RTL replay, image in RAM | 10/10 |
@@ -21,8 +21,8 @@ Speed on the RTL, cycles for the same keys (including the final wait):
 
 ## Known gaps and limits
 
-- The program buffer is 2304 bytes, half the listing's (spec BAS-4). The
-  original's 12 KiB layout would need about 2.3 KB less code.
+- The program buffer is 2560 bytes, 10 of the listing's 18 pages (spec BAS-4). The
+  original's 12 KiB layout would need about 2 KB less code.
 - Before the first `SCR` the original corrupts memory; the Rust does not
   reproduce that (BAS-2). Reads past SCELBAL's data read 0, not the
   original's code bytes (BAS-3).

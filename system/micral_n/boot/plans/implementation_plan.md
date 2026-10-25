@@ -3,7 +3,7 @@
 1. Collect the descriptions (MO5, HxC) and the MO5 emulator's disk
    protocol (done). 2. Spec and ledger BOOT-1..4 (done). 3. Rust core and
    `__leaf_` asm drivers; host disk model (done). 4. Fit 256 bytes (done,
-   245 B). 5. Boot the other titles on the RTL (done). 6. Report (done).
+   241 B). 5. Boot the other titles on the RTL (done). 6. Report (done).
 
 ## Design decisions
 

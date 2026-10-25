@@ -4,7 +4,7 @@
 2. Oracle: the listing assembled by `platform/scripts/as8008.py` with the
    Micral N teletype; 4 transcripts on the RTL (done).
 3. Spec (done). 4. Rust game; host replay (done). 5. Target image (done,
-   2475 B). 6. RTL replay, direct and booted (done). 7. Report (done).
+   2458 B). 6. RTL replay, direct and booted (done). 7. Report (done).
 
 ## Design decisions
 

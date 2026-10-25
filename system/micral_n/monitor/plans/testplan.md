@@ -3,8 +3,8 @@
 | Level | What | Oracle | Command | Image |
 |---|---|---|---|---|
 | Host replay | `oracle/transcripts/*.txt` except `t*`, through a mock machine | the manual (spec) | `cargo test --release` | ai-sw-engineer |
-| Target | `build/monitor_test.bin` on the RTL, transcripts except `h*` | same | `scripts/run_sim.sh` | ai-hw-engineer |
-| ROM fit | `layout.ld` links within 2 KiB | — | `STRICT=1 scripts/build.sh target` | ai-sw-engineer (fails today) |
+| Target | `build/monitor.bin`, the ROM image at 0x3800, on the RTL; transcripts except `h*` | same | `scripts/run_sim.sh` | ai-hw-engineer |
+| ROM fit | `layout.ld` links within 2 KiB (the linker fails otherwise) | — | `scripts/build.sh target` | ai-sw-engineer |
 
 Transcript prefixes: `h` host only (the mock's `G` returns to the command
 loop), `t` target only (a real hold). `=` lines preload RAM, `R` lines the

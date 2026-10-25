@@ -49,6 +49,12 @@ I8008TargetMachine::I8008TargetMachine(const Target &T, const Triple &TT,
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, std::string(CPU), std::string(FS), *this) {
+  // One section per function and per data object: the linker garbage-
+  // collects by section, builds the call graph per section, and keeps every
+  // object of up to 256 bytes inside one page, which instruction selection
+  // relies on (spec/codegen.md sec.2, "Page-bounded objects").
+  this->Options.FunctionSections = true;
+  this->Options.DataSections = true;
   initAsmInfo();
 }
 

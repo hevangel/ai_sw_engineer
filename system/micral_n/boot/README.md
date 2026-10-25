@@ -5,7 +5,7 @@
 | Original year | 1973, with the machine (the floppy boot EPROM on the 4 KiB RAM card; spec "Sources") |
 | Original authors | R2E |
 | Machine | Micral N — i8008 |
-| Status | behavioral rewrite: 245 B of the 256-byte EPROM; boots Shooting Stars (4/4) and SCELBAL (10/10) from disk images on the RTL; host disk-model tests 2/2 |
+| Status | behavioral rewrite: 241 B of the 256-byte EPROM; boots Shooting Stars (4/4) and SCELBAL (10/10) from disk images on the RTL; host disk-model tests 2/2 |
 
 ## History
 

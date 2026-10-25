@@ -39,6 +39,27 @@ N harness, the boot ROM, the monitor and Shooting Stars (commits 53c4c58 to
 
 ## Open
 
-- Monitor ROM fit (+1017 B).
+- Monitor ROM fit: done later in the session (below).
 - Secondary emulator (MO5 Virtual Micral N) not in `external/` yet.
 - The ai_hw_engineer RTc fix awaits its maintainers.
+
+## Later: the monitor fits its 2 KiB ROM
+
+At the user's request ("work on fitting the monitor into its 2 KB ROM").
+
+- MIC 01: 3065 to **2040 bytes**; the ROM image links at 0x3800 with the
+  entries at 0x3B30 / 0x3B49 and runs 7/7 on the RTL from the ROM (the test
+  layout is gone). Host 7/7. Steps in `monitor/report/size_history.md`:
+  `?` restarts the command loop (linker RESET); hold patching in asm behind
+  the Hal; flags saved as separate bytes ahead of A..L; the range commands
+  on two statics; checksums in hex8/tape_byte; the cold-start loop in the
+  gap between the entries.
+- llvm-i8008: one section per data object (forced in the TargetMachine);
+  page-indexed loads/stores of globals of at most 256 bytes (`LDPG8`,
+  `STPG8`, `LEAPG`); `%hi`/`%lo` bytes as `MOV8sym`; compares as values
+  without branches (`SETCC*`); best-fit code placement around PLACEd
+  sections; retarget_ir accepts code addresses taken as integers. Lit 6/6
+  (new checks), exec_tests 4650/4650.
+- Every title shrank: boot 241 B, Shooting Stars 2458 B, SCELBAL code
+  10495 B, which gave SCELBAL a tenth program page (2560 B). All re-verified
+  on the RTL through their scripts.

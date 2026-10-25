@@ -22,11 +22,16 @@ Rust crate ──rustc avr-none──▶ LLVM IR ──retarget_ir.py──▶ i
 - `rust/retarget_ir.py` rewrites the triple and data layout and strips AVR's
   code address space. It refuses floating point and `i128` types (a type
   keyword, not part of a value name such as `%x.i128`), AVR intrinsics and
-  data pointers outside address space 0. This is the same route as
+  data pointers outside address space 0 (a code address taken as an
+  integer, such as the bytes of a patched `CAL`, is not one). This is the
+  same route as
   `llvm-i4004` (`llvm-i4004/rust/README.md`).
-- `llc -function-sections` gives every function its own section, so the
-  linker can drop unused ones and see one function per section in the call
-  graph. `LLC_FLAGS` passes per-image options (`-i8008-data-page`, §5).
+- Every function and every data object gets its own section: the
+  `I8008TargetMachine` turns on function and data sections whatever the
+  command line says. The linker drops unused sections, sees one function
+  per section in the call graph, and keeps each object of up to 256 bytes
+  inside one page, which selection relies on (§2, "Page-bounded objects").
+  `LLC_FLAGS` passes per-image options (`-i8008-data-page`, §5).
 - `llc` and `llvm-mc` are built from the pinned `external/llvm-project`
   with the I8008 target overlaid (`scripts/apply_overlay.py`,
   `scripts/build_llvm.sh`).
@@ -53,7 +58,10 @@ reserved, and the expansions use them as scratch.
 | `load`/`store` at a link-time address | `LDA8`, `STA8`, `LDA16`, `STA16` (`AbsAddr`) | `LHI %hi; LLI %lo; L d,M` |
 | frame slot | spill/reload, frame index → `LEA16` | `LHI %hi; LLI %lo; L d,M` on `__frame_<fn>+off` |
 | global address | `LEA16` (`I8008ISD::WRAPPER`) | two `LdI` with `%lo`/`%hi` |
+| `load`/`store` at small-global + index | `LDPG8`, `STPG8`, `STPG8i`; `LEAPG` as a value | `L A,i; ADI %lo(g); L L,A; LHI %hi(g); L d,M` |
+| `%lo` / `%hi` of a global as a byte | `MOV8sym` (`I8008ISD::WRAPPER8`) | `LdI %hi(g)` |
 | `br_cc` | `BRCC8rr/ri`, `BRCC16rr/ri` | `CP`/`SU`/`SB` then `Jc` |
+| `setcc` (a compare as a value) | `SETCC8rr/ri`, `SETCC16rr/ri` | the borrow or a zero test, then `LAI 0; ACI 0` (no branch) |
 | `select_cc` | `SELECT_*` | branch diamond (custom inserter) |
 | call / return | `CALL`, `CALLind`, `RETpseudo` | `CAL`, `RET` |
 
@@ -62,6 +70,25 @@ equality. The 8008 has no overflow flag, so a signed compare first flips the
 sign bit of both operands (`XRI 0x80`) and then compares unsigned. Constant
 operands of a compare are moved to the right, where the `ri` forms take them.
 No jump tables: the 8008 has no indirect jump.
+
+Compares as values. The 8008 has no set-on-condition, so a compare whose
+result is a value (a `bool` returned or stored) would be a branch diamond
+and a frame slot. `LowerSETCC` reduces every relation to EQ, NE, ULT or UGE
+(signed ones flip the sign bits, `>` and `<=` swap the operands or add 1 to
+a constant) and `SETCC*` expands without branches: `L A,a; SU b` leaves the
+borrow of a - b in the carry (ULT; UGE adds `XRI 1`), or a zero test of the
+difference (16 bits: the XOR of the halves ORed) is turned into the carry by
+`SUI 1` (EQ: carry iff zero) or `ADI 0xFF` (NE: carry iff nonzero). Then
+`LAI 0; ACI 0` makes A = carry; loads keep the flags. A compare against 0 is
+just `L A,lo; OR hi`. A compare that only feeds a branch stays a `BRCC`.
+
+Page-bounded objects. A load or store at `g + y` (y not a constant), where
+g is a global of at most 256 bytes, is inside g: LLVM's memory model lets a
+pointer based on g reach only g. The linker never lets such an object cross
+a page (one section per object, §1, §6), so the high byte is g's and only
+the low byte needs the add (`pageIndexedAddress`, `I8008ISD::PGADDR`):
+`L A,y; ADI %lo(g); L L,A; LHI %hi(g)` instead of a 16-bit add into a pair.
+Larger globals (SCELBAL's RAM image) use the alignment rule below.
 
 Byte pairs. An i16 `or`/`add` whose operands have disjoint bytes (one with a
 known-zero low byte, the other with a known-zero high byte) becomes
@@ -110,7 +137,9 @@ other block starts empty. A call forgets everything, except a call to a
 `__leaf_*` routine, which keeps H:L.
 
 A second walk tracks which register A is a copy of, and deletes `L A,r` when
-A already holds r and `L r,A` when r already equals A. A third peephole
+A already holds r and `L r,A` when r already equals A. In data-page mode a
+lone `LHI %hi(g)` (the page of a page-indexed access) is dropped when H
+already holds the data page and g is in it. A third peephole
 drops `L A,r; ORA` before a zero/sign/parity branch when the instruction just
 before was `INr`/`DCr`, which set those flags from r already.
 
@@ -137,7 +166,10 @@ them is redundant whenever H already holds that page. The linker's
 
   Sections nothing reachable references are dropped. Sections keep their
   ELF alignment (a 256-aligned table starts a page). Objects of up to 256
-  bytes never cross a page.
+  bytes never cross a page. Code goes into the free intervals that the
+  `PLACE`d sections leave: the `ENTRY` section first at the start of CODE
+  (unless placed), then best fit, largest first, so the holes in front of
+  fixed entry points fill up (the monitor's ROM has two).
 - Resolves `R_I8008_*` relocations (`abi.md` §5).
 - Builds the call graph from `R_I8008_16` relocations on `CAL`/`Cc` (a call)
   and on `JMP`/`Jc` into another function (a tail jump: an edge with no stack

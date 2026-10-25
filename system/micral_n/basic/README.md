@@ -5,7 +5,7 @@
 | Original year | 1974 per the listing's header; © 1975 Scelbi Computer Consulting (spec "Sources") |
 | Original authors | Mark G. Arnold and Nat Wadsworth |
 | Machine | SCELBI 8H/8B (8008); here the Micral N |
-| Status | Rust rewrite matches the original byte for byte: host 10/10, RTL 10/10 loaded directly and booted from disk. Image 13826 B of the 14080 B load area; program buffer 2304 B (spec BAS-4) |
+| Status | Rust rewrite matches the original byte for byte: host 10/10, RTL 10/10 loaded directly and booted from disk. Image 13826 B of the 14080 B load area; program buffer 2560 B (spec BAS-4) |
 
 ## History
 

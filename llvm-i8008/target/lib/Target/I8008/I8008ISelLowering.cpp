@@ -16,6 +16,7 @@
 #include "I8008RegisterInfo.h"
 #include "I8008Subtarget.h"
 #include "I8008TargetMachine.h"
+#include "MCTargetDesc/I8008Specifiers.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -56,7 +57,7 @@ I8008TargetLowering::I8008TargetLowering(const TargetMachine &TM,
       setOperationAction(Op, MVT::i16, Custom);
     setOperationAction(ISD::BR_CC, VT, Custom);
     setOperationAction(ISD::SELECT_CC, VT, Custom);
-    setOperationAction(ISD::SETCC, VT, Expand);
+    setOperationAction(ISD::SETCC, VT, Custom);
     setOperationAction(ISD::SELECT, VT, Expand);
     setOperationAction(ISD::SHL, VT, Custom);
     setOperationAction(ISD::SRL, VT, Custom);
@@ -98,6 +99,8 @@ I8008TargetLowering::I8008TargetLowering(const TargetMachine &TM,
 
   // i16 OR/ADD of values with disjoint bytes -> a byte pair (PerformDAGCombine).
   setTargetDAGCombine({ISD::OR, ISD::ADD});
+  // Loads and stores at `small global + index` (PerformDAGCombine).
+  setTargetDAGCombine({ISD::LOAD, ISD::STORE});
 
   // Small constant-size memcpy/memset become loads and stores.
   MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 4;
@@ -110,6 +113,9 @@ const char *I8008TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case I8008ISD::RET: return "I8008ISD::RET";
   case I8008ISD::CALL: return "I8008ISD::CALL";
   case I8008ISD::WRAPPER: return "I8008ISD::WRAPPER";
+  case I8008ISD::WRAPPER8: return "I8008ISD::WRAPPER8";
+  case I8008ISD::PGADDR: return "I8008ISD::PGADDR";
+  case I8008ISD::SETCC: return "I8008ISD::SETCC";
   case I8008ISD::BRCC: return "I8008ISD::BRCC";
   case I8008ISD::SELECT_CC: return "I8008ISD::SELECT_CC";
   default: return nullptr;
@@ -127,6 +133,8 @@ SDValue I8008TargetLowering::LowerOperation(SDValue Op,
     return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
     return LowerSELECT_CC(Op, DAG);
+  case ISD::SETCC:
+    return LowerSETCC(Op, DAG);
   case ISD::SHL:
   case ISD::SRL:
   case ISD::SRA:
@@ -136,17 +144,76 @@ SDValue I8008TargetLowering::LowerOperation(SDValue Op,
   }
 }
 
+// %lo or %hi of a global address plus `Off`, as an i8 (MOV8sym).
+static SDValue symByte(SelectionDAG &DAG, const SDLoc &DL,
+                       const GlobalAddressSDNode *G, unsigned TF) {
+  return DAG.getNode(I8008ISD::WRAPPER8, DL, MVT::i8,
+                     DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i8,
+                                                G->getOffset(), TF));
+}
+
+// The address of a load or store `global + y` with y not constant: when the
+// global is a sized object of at most 256 bytes, the access is inside it
+// (LLVM's memory model: a pointer based on an object reaches only that
+// object), and such an object never crosses a page (the linker, with one
+// section per object). So the high byte is the global's and only the low
+// byte needs the add: `L = %lo(g) + y, H = %hi(g)` (LDPG8 / STPG8 / LEAPG)
+// instead of a 16-bit add.
+static SDValue pageIndexedAddress(SDValue Ptr, SelectionDAG &DAG) {
+  if (Ptr.getOpcode() != ISD::ADD || Ptr.getValueType() != MVT::i16)
+    return SDValue();
+  SDValue W = Ptr.getOperand(0), Y = Ptr.getOperand(1);
+  if (W.getOpcode() != I8008ISD::WRAPPER)
+    std::swap(W, Y);
+  if (W.getOpcode() != I8008ISD::WRAPPER || isa<ConstantSDNode>(Y))
+    return SDValue();
+  auto *G = dyn_cast<GlobalAddressSDNode>(W.getOperand(0));
+  if (!G)
+    return SDValue();
+  auto *GV = dyn_cast<GlobalVariable>(G->getGlobal());
+  if (!GV || !GV->getValueType()->isSized())
+    return SDValue();
+  uint64_t Size = DAG.getDataLayout().getTypeAllocSize(GV->getValueType());
+  if (Size == 0 || Size > 256 || G->getOffset() < 0 ||
+      (uint64_t)G->getOffset() >= Size)
+    return SDValue();
+  SDLoc DL(Ptr);
+  return DAG.getNode(I8008ISD::PGADDR, DL, MVT::i16,
+                     DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, Y),
+                     DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i16,
+                                                G->getOffset()));
+}
+
 // `x | y` (or `x + y`) on 16 bits where one side has a zero low byte and the
 // other a zero high byte is just the pair (low of y, high of x): two register
 // moves instead of a 16-bit OR. Typical source: `(hi as u16) << 8 | lo as u16`,
 // with the shifted part hoisted out of a loop.
 SDValue I8008TargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
+  SelectionDAG &DAG = DCI.DAG;
+  if (auto *LD = dyn_cast<LoadSDNode>(N)) {
+    if (LD->isIndexed())
+      return SDValue();
+    SDValue P = pageIndexedAddress(LD->getBasePtr(), DAG);
+    if (!P)
+      return SDValue();
+    return DAG.getExtLoad(LD->getExtensionType(), SDLoc(N), LD->getValueType(0),
+                          LD->getChain(), P, LD->getMemoryVT(),
+                          LD->getMemOperand());
+  }
+  if (auto *ST = dyn_cast<StoreSDNode>(N)) {
+    if (ST->isIndexed())
+      return SDValue();
+    SDValue P = pageIndexedAddress(ST->getBasePtr(), DAG);
+    if (!P)
+      return SDValue();
+    return DAG.getTruncStore(ST->getChain(), SDLoc(N), ST->getValue(), P,
+                             ST->getMemoryVT(), ST->getMemOperand());
+  }
   // The combiner also calls this for every target node (RET, CALL, ...).
   if ((N->getOpcode() != ISD::OR && N->getOpcode() != ISD::ADD) ||
       N->getValueType(0) != MVT::i16)
     return SDValue();
-  SelectionDAG &DAG = DCI.DAG;
   SDValue X = N->getOperand(0), Y = N->getOperand(1);
   KnownBits KX = DAG.computeKnownBits(X), KY = DAG.computeKnownBits(Y);
   auto LowZero = [](const KnownBits &K) { return K.Zero.extractBitsAsZExtValue(8, 0) == 0xFF; };
@@ -162,9 +229,14 @@ SDValue I8008TargetLowering::PerformDAGCombine(SDNode *N,
     return SDValue();
   SDLoc DL(N);
   SDValue Lo = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, Y);
-  SDValue Hi = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8,
-                           DAG.getNode(ISD::SRL, DL, MVT::i16, X,
-                                       DAG.getConstant(8, DL, MVT::i8)));
+  // The high byte of a global's address is one `MVI %hi(g)`.
+  auto *G = X.getOpcode() == I8008ISD::WRAPPER
+                ? dyn_cast<GlobalAddressSDNode>(X.getOperand(0))
+                : nullptr;
+  SDValue Hi = G ? symByte(DAG, DL, G, I8008II::MO_HI)
+                 : DAG.getNode(ISD::TRUNCATE, DL, MVT::i8,
+                               DAG.getNode(ISD::SRL, DL, MVT::i16, X,
+                                           DAG.getConstant(8, DL, MVT::i8)));
   return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i16, Lo, Hi);
 }
 
@@ -237,6 +309,56 @@ SDValue I8008TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(I8008ISD::BRCC, DL, MVT::Other, Op.getOperand(0), LHS, RHS,
                      DAG.getTargetConstant(Code, DL, MVT::i8),
                      Op.getOperand(4));
+}
+
+// A compare as a 0 / 1 value (I8008ISD::SETCC, expanded without branches).
+// Signed compares flip the sign bits and compare unsigned; > and <= become
+// < and >= with the operands swapped, or with the constant + 1.
+SDValue I8008TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+  EVT VT = LHS.getValueType();
+  SDLoc DL(Op);
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return SDValue();
+  if (isa<ConstantSDNode>(LHS) && !isa<ConstantSDNode>(RHS)) {
+    std::swap(LHS, RHS);
+    CC = ISD::getSetCCSwappedOperands(CC);
+  }
+  if (ISD::isSignedIntSetCC(CC)) {
+    SDValue Sign = DAG.getConstant(VT == MVT::i8 ? 0x80 : 0x8000, DL, VT);
+    LHS = DAG.getNode(ISD::XOR, DL, VT, LHS, Sign);
+    RHS = DAG.getNode(ISD::XOR, DL, VT, RHS, Sign);
+    CC = CC == ISD::SETLT   ? ISD::SETULT
+         : CC == ISD::SETLE ? ISD::SETULE
+         : CC == ISD::SETGT ? ISD::SETUGT
+                            : ISD::SETUGE;
+  }
+  uint64_t Max = VT == MVT::i8 ? 0xFF : 0xFFFF;
+  if (auto *K = dyn_cast<ConstantSDNode>(RHS)) {
+    uint64_t V = K->getZExtValue() & Max;
+    if (CC == ISD::SETUGT || CC == ISD::SETULE) {
+      if (V == Max)
+        return DAG.getConstant(CC == ISD::SETULE, DL, Op.getValueType());
+      RHS = DAG.getConstant(V + 1, DL, VT);
+      CC = CC == ISD::SETUGT ? ISD::SETUGE : ISD::SETULT;
+    }
+  } else if (CC == ISD::SETUGT || CC == ISD::SETULE) {
+    std::swap(LHS, RHS);
+    CC = CC == ISD::SETUGT ? ISD::SETULT : ISD::SETUGE;
+  }
+  int Code;
+  switch (CC) {
+  case ISD::SETEQ: Code = I8008CC::EQ; break;
+  case ISD::SETNE: Code = I8008CC::NE; break;
+  case ISD::SETULT: Code = I8008CC::ULT; break;
+  case ISD::SETUGE: Code = I8008CC::UGE; break;
+  default:
+    return SDValue();
+  }
+  SDValue R = DAG.getNode(I8008ISD::SETCC, DL, MVT::i8, LHS, RHS,
+                          DAG.getTargetConstant(Code, DL, MVT::i8));
+  return DAG.getZExtOrTrunc(R, DL, Op.getValueType());
 }
 
 SDValue I8008TargetLowering::LowerSELECT_CC(SDValue Op,

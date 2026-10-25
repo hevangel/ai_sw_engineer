@@ -34,10 +34,10 @@ by our sources.
 
 | Title | Year | Original authors | Status | Folder |
 |---|---|---|---|---|
-| Boot ROM | 1973 (with the machine) | R2E | behavioral rewrite: 245 B of 256, loads and starts both programs below from a disk image on the RTL | [boot/](boot/) |
-| MIC 01 monitor | 1974 (manual) | R2E | behavioral rewrite: host 7/7, RTL 7/7 in a test layout; 3065 B against the 2048 B ROM | [monitor/](monitor/) |
-| Shooting Stars | 1976 | Willard I. Nico | byte for byte with the original: host 4/4, RTL 4/4 direct and booted, 2475 B | [shooting_stars/](shooting_stars/) |
-| SCELBAL BASIC | 1974–75 | Mark G. Arnold, Nat Wadsworth | byte for byte with the original: host 10/10, RTL 10/10 direct and booted, 13826 B; program buffer 2304 B | [basic/](basic/) |
+| Boot ROM | 1973 (with the machine) | R2E | behavioral rewrite: 241 B of 256, loads and starts both programs below from a disk image on the RTL | [boot/](boot/) |
+| MIC 01 monitor | 1974 (manual) | R2E | behavioral rewrite: 2040 B in its 2 KiB EPROM; host 7/7, RTL 7/7 from the ROM | [monitor/](monitor/) |
+| Shooting Stars | 1976 | Willard I. Nico | byte for byte with the original: host 4/4, RTL 4/4 direct and booted, 2458 B | [shooting_stars/](shooting_stars/) |
+| SCELBAL BASIC | 1974–75 | Mark G. Arnold, Nat Wadsworth | byte for byte with the original: host 10/10, RTL 10/10 direct and booted, 13826 B; program buffer 2560 B | [basic/](basic/) |
 
 ## Sources
 

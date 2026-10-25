@@ -19,9 +19,9 @@ pub const PG27: u8 = 0o027;
 pub const PG57: u8 = 0o057;
 /// First page of the user program buffer (the listing's BGNPGRAM).
 pub const BGNPGRAM: u8 = 0o033;
-/// First page past it (ENDPGRAM). ASSUMPTION (spec BAS-4): 9 pages, not the
+/// First page past it (ENDPGRAM). ASSUMPTION (spec BAS-4): 10 pages, not the
 /// listing's 18 (055), so that the image fits the Micral N.
-pub const ENDPGRAM: u8 = BGNPGRAM + 9;
+pub const ENDPGRAM: u8 = BGNPGRAM + 10;
 const PROG_PAGES: usize = (ENDPGRAM - BGNPGRAM) as usize;
 const SIZE: usize = (3 + PROG_PAGES) * 256;
 

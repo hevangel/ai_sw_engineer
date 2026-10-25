@@ -84,3 +84,19 @@ define i8 @ldt(i8 %i) {
   %v = load i8, ptr %a
   ret i8 %v
 }
+
+; A load at small-global + index: the access stays inside the object, which
+; never crosses a page, so only L takes the add (LDPG8, codegen.md sec.2).
+@small = global [11 x i8] zeroinitializer
+; CHECK-LABEL: ldsmall:
+; CHECK: lab
+; CHECK-NEXT: adi %lo(small)
+; CHECK-NEXT: lla
+; CHECK-NEXT: lhi %hi(small)
+; CHECK-NEXT: lbm
+define i8 @ldsmall(i8 %i) {
+  %x = zext i8 %i to i16
+  %a = getelementptr inbounds i8, ptr @small, i16 %x
+  %v = load i8, ptr %a
+  ret i8 %v
+}

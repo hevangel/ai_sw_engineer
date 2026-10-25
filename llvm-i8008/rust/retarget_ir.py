@@ -69,8 +69,11 @@ def main() -> int:
     # difference. Code carries `addrspace(1)` on AVR (handled below); a DATA ptr
     # would appear as a *typed value* `ptr addrspace(N)` used by load/store/
     # getelementptr/alloca. Detect that specific shape and refuse it.
+    # A code address taken as an integer (`ptrtoint (ptr addrspace(1) @f to
+    # i8)`, e.g. stored as the bytes of a patched CAL) is not a data pointer.
+    code_ints = re.sub(r"ptrtoint \(ptr addrspace\(1\) @[^ ]+ to i\d+\)", "CODEINT", src)
     data_as = re.findall(
-        r"(?:load|store|getelementptr[^\n]*?|alloca)[^\n]*\bptr addrspace\((\d+)\)", src
+        r"(?:load|store|getelementptr[^\n]*?|alloca)[^\n]*\bptr addrspace\((\d+)\)", code_ints
     )
     bad = sorted({n for n in data_as if n != "0"})
     if bad:

@@ -197,6 +197,25 @@ bool I8008HLTrack::runOnBlock(MachineBasicBlock &MBB, Known &K) {
       }
     }
 
+    // A lone `lhi %hi(g)` (the page of a page-indexed access, LDPG8):
+    // redundant when H already holds the data page and g is in it.
+    {
+      const GlobalValue *GV;
+      StringRef ES;
+      int64_t Off;
+      if (isMVI(MI, FH) && symOf(MI, I8008II::MO_HI, GV, ES, Off) && DataPage &&
+          isDataPageObject(GV, ES)) {
+        if (HPage) {
+          MI.eraseFromParent();
+          Changed = true;
+        }
+        S = HLState();
+        HPage = true;
+        I = Next;
+        continue;
+      }
+    }
+
     // `lh<p.hi>; ll<p.lo>`
     if (Next != E && !Next->getPreInstrSymbol()) {
       for (Register P : {Register(I8008::BC), Register(I8008::DE)}) {

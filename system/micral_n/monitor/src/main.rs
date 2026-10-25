@@ -20,11 +20,12 @@ mod target {
         fn __leaf_tty_putc(c: u8);
         /// asm/entry.s: load the saved registers and jump (does not return).
         fn mon_go(addr: u16);
-        /// asm/entry.s: hold entries, the targets of the patched `CAL`s.
-        fn mon_hold0();
-        fn mon_hold1();
-        /// asm/entry.s: the user's registers A B C D E H L and flags.
-        static mut mon_regs: [u8; 8];
+        /// asm/entry.s: the hold slots.
+        fn mon_patch(n: u8, addr: u16);
+        fn mon_clear();
+        static mon_holds: [u8; 10];
+        /// asm/entry.s: the user's flags C Z S P and registers A B C D E H L.
+        static mut mon_regs: [u8; 11];
     }
 
     struct Board;
@@ -41,18 +42,27 @@ mod target {
         fn poke(&mut self, a: u16, v: u8) {
             unsafe { write_volatile(a as usize as *mut u8, v) }
         }
+        // `i` is at most REG_LAST (lib.rs `modify`), so no bounds check.
         fn reg(&mut self, i: u8) -> u8 {
-            unsafe { read_volatile(&raw const mon_regs[i as usize]) }
+            unsafe { read_volatile((&raw const mon_regs as *const u8).add(i as usize)) }
         }
         fn set_reg(&mut self, i: u8, v: u8) {
-            unsafe { write_volatile(&raw mut mon_regs[i as usize], v) }
+            unsafe { write_volatile((&raw mut mon_regs as *mut u8).add(i as usize), v) }
         }
-        fn hold_entry(&mut self, n: u8) -> u16 {
-            (if n == 0 {
-                mon_hold0 as usize
-            } else {
-                mon_hold1 as usize
-            }) as u16
+        fn patch_hold(&mut self, n: u8, a: u16) {
+            unsafe { mon_patch(n, a) }
+        }
+        fn clear_holds(&mut self) {
+            unsafe { mon_clear() }
+        }
+        fn hold_addr(&mut self, n: u8) -> u16 {
+            let i = if n == 0 { 0 } else { 5 };
+            unsafe {
+                u16::from_le_bytes([
+                    read_volatile(&raw const mon_holds[i]),
+                    read_volatile(&raw const mon_holds[i + 1]),
+                ])
+            }
         }
         fn go(&mut self, a: u16) {
             unsafe { mon_go(a) }
@@ -84,7 +94,9 @@ fn main() {
 
     struct Host {
         mem: Vec<u8>,
-        regs: [u8; 8],
+        regs: [u8; 11],
+        holds: [(u16, [u8; 3]); 2],
+        nhold: u8,
     }
     impl Hal for Host {
         fn getc(&mut self) -> u8 {
@@ -112,8 +124,32 @@ fn main() {
         fn set_reg(&mut self, i: u8, v: u8) {
             self.regs[i as usize] = v;
         }
-        fn hold_entry(&mut self, n: u8) -> u16 {
-            0x3800 + 8 * n as u16
+        fn patch_hold(&mut self, n: u8, a: u16) {
+            let n = n as usize;
+            self.holds[n].0 = a;
+            for k in 0..3 {
+                self.holds[n].1[k] = self.mem[((a + k as u16) & 0x3fff) as usize];
+            }
+            let entry = 0x3800 + 8 * n as u16;
+            for (k, v) in [0x46, entry as u8, (entry >> 8) as u8]
+                .into_iter()
+                .enumerate()
+            {
+                self.mem[((a + k as u16) & 0x3fff) as usize] = v;
+            }
+            self.nhold = n as u8 + 1;
+        }
+        fn clear_holds(&mut self) {
+            for n in 0..self.nhold as usize {
+                let (a, b) = self.holds[n];
+                for (k, v) in b.into_iter().enumerate() {
+                    self.mem[((a + k as u16) & 0x3fff) as usize] = v;
+                }
+            }
+            self.nhold = 0;
+        }
+        fn hold_addr(&mut self, n: u8) -> u16 {
+            self.holds[n as usize].0
         }
         fn go(&mut self, a: u16) {
             println!("(host: would jump to {a:04X})");
@@ -122,9 +158,14 @@ fn main() {
 
     let mut h = Host {
         mem: vec![0; 0x4000],
-        regs: [0; 8],
+        regs: [0; 11],
+        holds: [(0, [0; 3]); 2],
+        nhold: 0,
     };
+    // A `?` restarts the command loop by unwinding (lib.rs `cancel`).
+    std::panic::set_hook(Box::new(|_| {}));
     loop {
-        software::command(&mut h);
+        let _ =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| software::command(&mut h)));
     }
 }

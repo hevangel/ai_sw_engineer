@@ -19,13 +19,7 @@ fi
 if [[ $stage == target || $stage == all ]]; then
     status "target image via llvm-$CHIP"
     bash "$BACKEND_DIR/scripts/build_rust.sh" "$TITLE_DIR" "$SOFTWARE" "$BUILD_DIR"
-    # The test image: the same code in 8 KiB at 0x2000, which the RTL replay
-    # uses while the ROM image does not fit (report/final_report.md).
-    bash "$BACKEND_DIR/scripts/build_image.sh" "$TITLE_DIR/layout_test.ld" "$BUILD_DIR/monitor_test.bin"         "${ASM_SRCS[@]}" "$BUILD_DIR/$SOFTWARE.o"
-    if bash "$BACKEND_DIR/scripts/build_image.sh" "$LAYOUT" "$IMAGE" "${ASM_SRCS[@]}" "$BUILD_DIR/$SOFTWARE.o"; then
-        status "ROM image: $(wc -c < "$IMAGE" | tr -d ' ') / $ROM_BUDGET bytes"
-    else
-        status "ROM image does not fit $ROM_BUDGET bytes (known gap)"
-        [[ -z ${STRICT:-} ]] || fail "STRICT: the ROM image must fit"
-    fi
+    bash "$BACKEND_DIR/scripts/build_image.sh" "$LAYOUT" "$IMAGE" "${ASM_SRCS[@]}" "$BUILD_DIR/$SOFTWARE.o"
+    size=$(wc -c < "$IMAGE" | tr -d ' ')
+    status "ROM image: $size / $ROM_BUDGET bytes"
 fi

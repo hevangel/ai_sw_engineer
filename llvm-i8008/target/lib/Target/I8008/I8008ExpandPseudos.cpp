@@ -88,6 +88,13 @@ private:
     emit(MVI[FH]).add(symOp(Base, Off, I8008II::MO_HI));
     emit(MVI[FL]).add(symOp(Base, Off, I8008II::MO_LO));
   }
+  // H:L <- g + i inside a page-bounded global g (LDPG8 / STPG8).
+  void setHLPg(Register I, const MachineOperand &G) {
+    mov(FA, f(I));
+    emit(ALUI[AD]).add(symOp(G, 0, I8008II::MO_LO));
+    mov(FL, FA);
+    emit(MVI[FH]).add(symOp(G, 0, I8008II::MO_HI));
+  }
   // H:L <- a pointer pair.
   void setHLPtr(Register P) {
     mov(FH, f(hi(P)));
@@ -572,6 +579,9 @@ bool I8008ExpandPseudos::expand(MachineInstr &MI) {
   case I8008::MOV8ri:
     mviR(Reg(0), MI.getOperand(1).getImm());
     break;
+  case I8008::MOV8sym: // l<d>i %lo(sym) / %hi(sym)
+    emit(MVI[f(Reg(0))]).add(MI.getOperand(1));
+    break;
   case I8008::MOV16ri: {
     int64_t K = MI.getOperand(1).getImm();
     mviR(lo(Reg(0)), K);
@@ -661,6 +671,76 @@ bool I8008ExpandPseudos::expand(MachineInstr &MI) {
     mov(FM, f(lo(Reg(0))));
     incHL(false);
     mov(FM, f(hi(Reg(0))));
+    break;
+
+  case I8008::SETCC8rr:
+  case I8008::SETCC8ri:
+  case I8008::SETCC16rr:
+  case I8008::SETCC16ri: {
+    unsigned Opc = MI.getOpcode();
+    bool Wide = Opc == I8008::SETCC16rr || Opc == I8008::SETCC16ri;
+    bool Imm = Opc == I8008::SETCC8ri || Opc == I8008::SETCC16ri;
+    int CC = MI.getOperand(3).getImm();
+    Register A = Reg(1);
+    const MachineOperand &B = MI.getOperand(2);
+    bool Zero = CC == I8008CC::EQ || CC == I8008CC::NE;
+    // One byte of b: register field or immediate.
+    auto opB = [&](unsigned Op, bool High) {
+      if (Imm)
+        aluI(Op, High ? B.getImm() >> 8 : B.getImm());
+      else
+        alu(Op, Wide ? (High ? hi(B.getReg()) : lo(B.getReg())) : B.getReg());
+    };
+    bool K0 = Imm && B.getImm() == 0;
+    if (!Wide) {
+      movR(I8008::A, A);
+      if (!(Zero && K0))
+        opB(SU, false); // A = a - b: zero iff equal, borrow iff a < b
+    } else if (Zero && K0) {
+      movR(I8008::A, lo(A)); // A = a.lo | a.hi
+      alu(OR, hi(A));
+    } else if (Zero) {
+      movR(I8008::A, lo(A)); // A = (a.lo ^ b.lo) | (a.hi ^ b.hi)
+      opB(XR, false);
+      mov(FL, FA);
+      movR(I8008::A, hi(A));
+      opB(XR, true);
+      emit(ALU[OR][FL]);
+    } else {
+      movR(I8008::A, lo(A)); // borrow of the 16-bit a - b
+      opB(SU, false);
+      movR(I8008::A, hi(A));
+      opB(SB, true);
+    }
+    if (CC == I8008CC::EQ)
+      aluI(SU, 1); // carry iff A == 0
+    else if (CC == I8008CC::NE)
+      aluI(AD, 0xFF); // carry iff A != 0
+    emit(MVI[FA]).addImm(0);
+    aluI(AC, 0); // A = carry
+    if (CC == I8008CC::UGE)
+      aluI(XR, 1);
+    movR(Reg(0), I8008::A);
+    break;
+  }
+
+  case I8008::LDPG8:
+    setHLPg(Reg(1), MI.getOperand(2));
+    mov(f(Reg(0)), FM);
+    break;
+  case I8008::STPG8:
+    setHLPg(Reg(1), MI.getOperand(2));
+    mov(FM, f(Reg(0)));
+    break;
+  case I8008::STPG8i:
+    setHLPg(Reg(1), MI.getOperand(2));
+    emit(MVI[FM]).addImm(MI.getOperand(0).getImm() & 0xff);
+    break;
+  case I8008::LEAPG:
+    mov(FA, f(Reg(1)));
+    emit(ALUI[AD]).add(symOp(MI.getOperand(2), 0, I8008II::MO_LO));
+    mov(f(lo(Reg(0))), FA);
+    emit(MVI[f(hi(Reg(0)))]).add(symOp(MI.getOperand(2), 0, I8008II::MO_HI));
     break;
 
   case I8008::LDA8: // lhi %hi(a); lli %lo(a); ld m

@@ -5,7 +5,7 @@
 | Original year | 1974 (documented in R2E's *MICRAL N User's Manual*, January 1974) |
 | Original authors | R2E |
 | Machine | Micral N — i8008 |
-| Status | behavioral rewrite: host 7/7 and RTL 7/7 (6 shared transcripts, 1 host-only, 1 target-only; the RTL in an 8 KiB test layout). The ROM image is 3065 B against the 2048 B EPROM: not yet fitted |
+| Status | behavioral rewrite in its 2 KiB EPROM: ROM image 2040 / 2048 B; host 7/7, RTL 7/7 from the ROM at 0x3800 (6 shared transcripts, 1 host-only, 1 target-only) |
 
 ## History
 
@@ -20,18 +20,16 @@ but did not publish it, so the manual is the oracle (spec/spec.md).
 |---|---|
 | [spec/](spec/spec.md) | commands from the manual, assumption ledger MON-1..11 |
 | `src/` | `lib.rs` commands, `hal.rs` machine trait, `main.rs` target and host entries |
-| `asm/entry.s` | cold and warm entries, holds, `G` trampoline |
+| `asm/entry.s` | cold and warm entries, the `?` restart, hold entries and hold patching, `G` trampoline |
 | `layout.ld` | the ROM at 0x3800, entries pinned at 0x3B30 / 0x3B49 |
-| `layout_test.ld` | the same code at 0x2000 in 8 KiB, for the RTL replay while the ROM does not fit |
 | [oracle/](oracle/README.md) | transcripts written from the manual |
 | `tests/` | host replay |
 | [plans/](plans/testplan.md) | test plan |
 | `scripts/` | build, `run_target.py` RTL replay, run_all |
-| [report/](report/final_report.md) | final report |
+| [report/](report/final_report.md) | final report and [size history](report/size_history.md) |
 
 ## Run
 
 ```bash
-./scripts/run_all.sh     # lint, host replay, images (ai-sw-engineer); RTL replay (ai-hw-engineer)
-STRICT=1 ./scripts/build.sh target   # fail while the ROM image does not fit
+./scripts/run_all.sh     # lint, host replay, ROM image (ai-sw-engineer); RTL replay (ai-hw-engineer)
 ```

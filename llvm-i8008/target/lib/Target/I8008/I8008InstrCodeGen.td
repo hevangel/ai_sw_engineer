@@ -27,6 +27,18 @@ def i8008_ret  : SDNode<"I8008ISD::RET", SDT_I8008Ret,
 def i8008_call : SDNode<"I8008ISD::CALL", SDT_I8008Call,
                         [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
 def i8008_wrapper : SDNode<"I8008ISD::WRAPPER", SDT_I8008Wrap>;
+// One byte of a symbol's address: a TargetGlobalAddress with MO_LO / MO_HI.
+def SDT_I8008Wrap8 : SDTypeProfile<1, 1, [SDTCisVT<0, i8>, SDTCisSameAs<0, 1>]>;
+def i8008_wrapper8 : SDNode<"I8008ISD::WRAPPER8", SDT_I8008Wrap8>;
+// (pgaddr i, g): the address g + i inside a page-bounded global g, i an i8
+// (I8008ISelLowering.cpp pageIndexedAddress).
+def SDT_I8008PgAddr : SDTypeProfile<1, 2,
+    [SDTCisVT<0, i16>, SDTCisVT<1, i8>, SDTCisVT<2, i16>]>;
+def i8008_pgaddr : SDNode<"I8008ISD::PGADDR", SDT_I8008PgAddr>;
+// (setcc a, b, cc): 0 or 1; cc is EQ, NE, ULT or UGE (LowerSETCC).
+def SDT_I8008SetCC : SDTypeProfile<1, 3,
+    [SDTCisVT<0, i8>, SDTCisSameAs<1, 2>, SDTCisVT<3, i8>]>;
+def i8008_setcc : SDNode<"I8008ISD::SETCC", SDT_I8008SetCC>;
 
 // (brcc lhs, rhs, cc, dest): compare and branch; cc is an I8008CC code.
 def SDT_I8008BrCC : SDTypeProfile<0, 4,
@@ -84,6 +96,11 @@ let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
   def MOV16ri : Pseudo<(outs GR16:$dst), (ins i16imm:$imm),
                        [(set GR16:$dst, (i16 imm:$imm))]>;
 }
+
+// One byte of a symbol's address: lXi %lo(..) or lXi %hi(..).
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
+def MOV8sym : Pseudo<(outs GR8:$dst), (ins i8imm:$sym),
+                     [(set GR8:$dst, (i8008_wrapper8 tglobaladdr:$sym))]>;
 
 // Address of a symbol / frame slot: lXi %lo(..); lYi %hi(..).
 let isReMaterializable = 1, isAsCheapAsAMove = 1 in
@@ -150,6 +167,38 @@ let Defs = [A, F, H, L] in {
     def ST16 : Pseudo<(outs), (ins GR16:$v, GR16:$p), [(store GR16:$v, GR16:$p)]>;
   }
 }
+
+// A compare as a value, without branches: the borrow of a - b, or a zero
+// test (`SUI 1` / `ADI 0xFF` set the carry for zero / nonzero), then
+// `LAI 0; ACI 0` makes the carry 0 / 1 (loads keep the flags).
+let Defs = [A, F, L] in {
+  def SETCC8rr : Pseudo<(outs GR8:$dst), (ins GR8:$a, GR8:$b, i8imm:$cc),
+                        [(set GR8:$dst, (i8008_setcc GR8:$a, GR8:$b, timm:$cc))]>;
+  def SETCC8ri : Pseudo<(outs GR8:$dst), (ins GR8:$a, i8imm:$k, i8imm:$cc),
+                        [(set GR8:$dst, (i8008_setcc GR8:$a, (i8 imm:$k), timm:$cc))]>;
+  def SETCC16rr : Pseudo<(outs GR8:$dst), (ins GR16:$a, GR16:$b, i8imm:$cc),
+                         [(set GR8:$dst, (i8008_setcc GR16:$a, GR16:$b, timm:$cc))]>;
+  def SETCC16ri : Pseudo<(outs GR8:$dst), (ins GR16:$a, i16imm:$k, i8imm:$cc),
+                         [(set GR8:$dst, (i8008_setcc GR16:$a, (i16 imm:$k), timm:$cc))]>;
+}
+
+// Memory at g + i in a page-bounded global g:
+// `la i; adi %lo(g); lla; lhi %hi(g); ...m`.
+let Defs = [A, F, H, L], AddedComplexity = 20 in {
+  let mayLoad = 1 in
+  def LDPG8 : Pseudo<(outs GR8:$dst), (ins GR8:$i, i16imm:$g),
+                     [(set GR8:$dst, (load (i8008_pgaddr GR8:$i, tglobaladdr:$g)))]>;
+  let mayStore = 1 in {
+    def STPG8 : Pseudo<(outs), (ins GR8:$v, GR8:$i, i16imm:$g),
+                       [(store GR8:$v, (i8008_pgaddr GR8:$i, tglobaladdr:$g))]>;
+    def STPG8i : Pseudo<(outs), (ins i8imm:$v, GR8:$i, i16imm:$g),
+                        [(store (i8 imm:$v), (i8008_pgaddr GR8:$i, tglobaladdr:$g))]>;
+  }
+}
+// The same address as a value (i16 accesses, other uses).
+let Defs = [A, F] in
+def LEAPG : Pseudo<(outs GR16:$dst), (ins GR8:$i, i16imm:$g),
+                   [(set GR16:$dst, (i8008_pgaddr GR8:$i, tglobaladdr:$g))]>;
 
 // Memory at a link-time address (globals, frame slots, spills):
 // `lhi %hi(a); lli %lo(a); ...m`.

@@ -30,11 +30,14 @@ define i16 @smin16(i16 %a, i16 %b) {
   ret i16 %r
 }
 
-; x == 0 on 16 bits: OR the halves.
+; x == 0 on 16 bits as a value: OR the halves, then the carry of A - 1
+; is the result (SETCC16ri, no branch).
 ; CHECK-LABEL: iszero:
-; CHECK: lae
-; CHECK-NEXT: ord
-; CHECK-NEXT: jtz
+; CHECK: lac
+; CHECK-NEXT: orb
+; CHECK-NEXT: sui 0x01
+; CHECK-NEXT: lai 0x00
+; CHECK-NEXT: aci 0x00
 define i8 @iszero(i16 %x) {
   %c = icmp eq i16 %x, 0
   %r = zext i1 %c to i8
@@ -59,5 +62,34 @@ define i8 @isneg(i8 %x) {
 define i8 @le9(i8 %x) {
   %c = icmp ule i8 %x, 9
   %r = select i1 %c, i8 1, i8 2
+  ret i8 %r
+}
+
+; a < b unsigned as a value: the borrow of a - b (SETCC8rr).
+; CHECK-LABEL: ult8:
+; CHECK: lab
+; CHECK-NEXT: suc
+; CHECK-NEXT: lai 0x00
+; CHECK-NEXT: aci 0x00
+define i8 @ult8(i8 %a, i8 %b) {
+  %c = icmp ult i8 %a, %b
+  %r = zext i1 %c to i8
+  ret i8 %r
+}
+
+; a != b on 16 bits: XOR the halves into A; carry of A + 0xFF is nonzero.
+; CHECK-LABEL: ne16:
+; CHECK: lac
+; CHECK-NEXT: xre
+; CHECK-NEXT: lla
+; CHECK-NEXT: lab
+; CHECK-NEXT: xrd
+; CHECK-NEXT: orl
+; CHECK-NEXT: adi 0xff
+; CHECK-NEXT: lai 0x00
+; CHECK-NEXT: aci 0x00
+define i8 @ne16(i16 %a, i16 %b) {
+  %c = icmp ne i16 %a, %b
+  %r = zext i1 %c to i8
   ret i8 %r
 }

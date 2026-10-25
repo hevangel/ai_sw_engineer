@@ -5,7 +5,6 @@ DATA  0x0700 0x0100
 ENTRY mon_cold
 PLACE mon_cold 0x3B30
 PLACE mon_warm 0x3B49
-KEEP  mon_hold0
-KEEP  mon_hold1
+RESET mon_restart
 DEPTH 7
 DATAPAGE

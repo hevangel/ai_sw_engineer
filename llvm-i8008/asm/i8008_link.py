@@ -277,21 +277,44 @@ class Linker:
                 raise LinkError(f"PLACE {sym}: not at the start of its section")
             sec.addr = at
             pinned.append((at, at + sec.size, sec))
-        pc = start
-        for s in code:
-            if any(s is p[2] for p in pinned):
+        # Free intervals of CODE around the pinned sections. The ENTRY section
+        # (unless pinned) goes first, at the start; the rest best-fit,
+        # largest first, so the holes the pinned entries leave get filled.
+        free = []
+        lo = start
+        for a, b, _ in sorted(pinned, key=lambda p: p[0]):
+            if a > lo:
+                free.append([lo, a])
+            lo = max(lo, b)
+        free.append([lo, start + size])
+        rest = [s for s in code if not any(s is p[2] for p in pinned)]
+        first = [s for s in rest if s is entry_sec]
+        rest = first + sorted((s for s in rest if s is not entry_sec),
+                              key=lambda s: -s.size)
+        overflow = 0
+        for s in rest:
+            best = None
+            for iv in free:
+                a = -(-iv[0] // s.align) * s.align
+                room = iv[1] - a
+                if room >= s.size and (s is entry_sec or best is None or room < best[1]):
+                    best = (iv, room, a)
+                    if s is entry_sec:
+                        break
+            if s is entry_sec and (best is None or best[2] != start):
+                raise LinkError(f"ENTRY {self.lay.entry}: does not fit at the start of CODE")
+            if best is None:
+                overflow += s.size
+                s.addr = start + size
                 continue
-            while True:
-                pc = -(-pc // s.align) * s.align
-                clash = [p for p in pinned if pc < p[1] and pc + s.size > p[0]]
-                if not clash:
-                    break
-                pc = max(p[1] for p in clash)
-            s.addr = pc
-            pc += s.size
-        pc = max([pc] + [p[1] for p in pinned])
-        if pc > start + size:
-            raise LinkError(f"CODE overflow: 0x{pc - start:x} bytes > 0x{size:x}")
+            iv, _, a = best
+            s.addr = a
+            iv[0] = a + s.size
+        if overflow:
+            used = sum(s.size for s in code)
+            raise LinkError(f"CODE overflow: 0x{used:x} bytes of code, {overflow} B do not fit "
+                            f"in 0x{size:x}")
+        pc = max([start] + [s.addr + s.size for s in code])
         self.code_end = pc
 
         if self.lay.data is None:

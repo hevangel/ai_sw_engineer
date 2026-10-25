@@ -11,12 +11,22 @@
 use software::Hal;
 use std::collections::VecDeque;
 use std::fs;
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
+fn is_restart(p: &(dyn std::any::Any + Send)) -> bool {
+    p.downcast_ref::<String>()
+        .is_some_and(|s| s == software::RESTART)
+        || p.downcast_ref::<&str>()
+            .is_some_and(|s| *s == software::RESTART)
+}
 
 struct Mock {
     input: VecDeque<u8>,
     out: Vec<u8>,
     mem: Vec<u8>,
-    regs: [u8; 8],
+    regs: [u8; 11],
+    holds: [(u16, [u8; 3]); 2],
+    nhold: u8,
     went: Option<u16>,
 }
 
@@ -41,8 +51,32 @@ impl Hal for Mock {
     fn set_reg(&mut self, i: u8, v: u8) {
         self.regs[i as usize] = v;
     }
-    fn hold_entry(&mut self, n: u8) -> u16 {
-        0x3800 + 8 * n as u16
+    fn patch_hold(&mut self, n: u8, a: u16) {
+        let n = n as usize;
+        self.holds[n].0 = a;
+        for k in 0..3 {
+            self.holds[n].1[k] = self.mem[((a + k as u16) & 0x3fff) as usize];
+        }
+        let entry = 0x3800 + 8 * n as u16;
+        for (k, v) in [0x46, entry as u8, (entry >> 8) as u8]
+            .into_iter()
+            .enumerate()
+        {
+            self.mem[((a + k as u16) & 0x3fff) as usize] = v;
+        }
+        self.nhold = n as u8 + 1;
+    }
+    fn clear_holds(&mut self) {
+        for n in 0..self.nhold as usize {
+            let (a, b) = self.holds[n];
+            for (k, v) in b.into_iter().enumerate() {
+                self.mem[((a + k as u16) & 0x3fff) as usize] = v;
+            }
+        }
+        self.nhold = 0;
+    }
+    fn hold_addr(&mut self, n: u8) -> u16 {
+        self.holds[n as usize].0
     }
     fn go(&mut self, a: u16) {
         self.went = Some(a);
@@ -86,7 +120,9 @@ fn replay(text: &str) -> Result<(), String> {
         input: VecDeque::new(),
         out: Vec::new(),
         mem: vec![0; 0x4000],
-        regs: [0; 8],
+        regs: [0; 11],
+        holds: [(0, [0; 3]); 2],
+        nhold: 0,
         went: None,
     };
     let mut want = Vec::new();
@@ -106,12 +142,21 @@ fn replay(text: &str) -> Result<(), String> {
                 .split_whitespace()
                 .map(|x| u8::from_str_radix(x, 16).unwrap())
                 .collect();
-            m.regs.copy_from_slice(&v);
+            // A B C D E H L flags (bit 0 C, 1 Z, 2 S, 3 P) -> the save area.
+            m.regs[4..].copy_from_slice(&v[..7]);
+            for (k, r) in m.regs[..4].iter_mut().enumerate() {
+                *r = v[7] >> k & 1;
+            }
         }
     }
     software::reset();
     while !m.input.is_empty() {
-        software::command(&mut m);
+        // A `?` restarts the command loop by unwinding (lib.rs `cancel`).
+        if let Err(p) = catch_unwind(AssertUnwindSafe(|| software::command(&mut m))) {
+            if !is_restart(&*p) {
+                resume_unwind(p);
+            }
+        }
     }
     if m.out != want {
         return Err(format!(
@@ -131,6 +176,12 @@ fn replay(text: &str) -> Result<(), String> {
 
 #[test]
 fn oracle_transcripts() {
+    let quiet = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.payload_as_str() != Some(software::RESTART) {
+            quiet(info)
+        }
+    }));
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/oracle/transcripts");
     let mut names: Vec<_> = fs::read_dir(dir)
         .unwrap()

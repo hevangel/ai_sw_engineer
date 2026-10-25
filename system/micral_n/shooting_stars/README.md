@@ -5,7 +5,7 @@
 | Original year | 1976 (*BYTE*, May 1976, cover story) |
 | Original authors | Willard I. Nico (Delta t, Houston) |
 | Machine | SCELBI 8H (8008); MO5 ported it to the Micral N in 2022 (spec) |
-| Status | Rust rewrite matches the original byte for byte: host 4/4, RTL 4/4 loaded directly and booted from disk. Image 2475 B |
+| Status | Rust rewrite matches the original byte for byte: host 4/4, RTL 4/4 loaded directly and booted from disk. Image 2458 B |
 
 ## History
 

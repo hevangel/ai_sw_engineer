@@ -6,11 +6,10 @@
 | Codegen (lit) | pass: alu, mem, call, branch (6/6 lit suites with mc) |
 | Execution on the RTL | 4650/4650 cases (`exec_tests.py 30`) |
 | Smoke program on the RTL | `tests/smoke/hello` prints its expected text |
-| Titles built with this backend | Micral N boot ROM (245 B), MIC 01 monitor (3065 B, ROM 2048 B: open), Shooting Stars (2475 B), SCELBAL (13826 B); all match their oracles on the RTL |
+| Titles built with this backend | Micral N boot ROM (241 / 256 B), MIC 01 monitor (2040 / 2048 B ROM), Shooting Stars (2458 B), SCELBAL (13826 B); all match their oracles on the RTL |
 
 ## Known gaps
 
-- The monitor does not fit its ROM yet.
 - Register allocation leaves dead pair setups (`LEI`/`LDI` before `LHD; LLE`).
 - Multi-byte carry chains compile poorly (four allocatable registers, no
   access to the carry flag from IR); SCELBAL keeps five such loops in asm.

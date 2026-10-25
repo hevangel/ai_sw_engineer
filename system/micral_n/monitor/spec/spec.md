@@ -77,6 +77,26 @@ Punching goes to the teletype between DC2 (punch on) and DC4 (punch off); `R`
 starts the reader with DC1 and stops it with DC3. These are the ASR 33's
 controls with the punch-control and reader-control options §II.2.6 requires.
 
+## Target
+
+- The ROM image is 2040 of the 2048 bytes (0x3800–0x3FF7), with the cold
+  entry at 0x3B30 and the warm entry at 0x3B49 (`layout.ld` PLACE). The cold
+  entry zeroes the monitor's RAM page and falls into the warm entry.
+- `?`: the command stops where the error is found and the monitor waits for
+  the next one. The Rust `cancel` prints `?` and jumps to `mon_restart`
+  (`asm/entry.s`, a linker RESET point): the 8008's return stack is
+  circular, so the calls in progress are simply abandoned. The host unwinds
+  with a panic that the caller catches.
+- Holds are code patching, done in `asm/entry.s` (`mon_patch`, `mon_clear`)
+  behind `Hal::patch_hold` / `clear_holds` / `hold_addr`; the Rust parses and
+  checks the `G` line. `mon_holds` keeps, per slot, the hold's address and
+  the three program bytes the `CAL` covers; `mon_nhold` how many are active.
+- The saved registers (`mon_regs`, 11 bytes): the flags carry, zero, sign,
+  parity (0 or 1 each), then A B C D E H L. `I` steps from index 0, `A` from
+  4, `H` from 9 (`hal.rs`). `mon_hold` stores them, `mon_go` loads them.
+- The `D`, `P`, `N` range lives in two statics (CUR, LAST) walked by `step`;
+  the punch and read checksums accumulate in `hex8` and `tape_byte`.
+
 ## Assumption ledger
 
 | ID | Assumption | Why | How it could be checked |
@@ -90,5 +110,5 @@ controls with the punch-control and reader-control options §II.2.6 requires.
 | MON-7 | Leader and trailer are 64 NUL characters | blank tape is NUL on an ASR 33; the length is not given | — |
 | MON-8 | The PROM tape uses Intel's BNPF format (`B`, 8 × `P`/`N` from bit 7, `F`), four bytes per line | the 1702A EPROMs the Micral used were programmed from BNPF tapes; §I-4 gives no format | the original ROM |
 | MON-9 | `R` reads blocks until the end block; a checksum error prints `?` and stops | the manual says the checksum is "a check when tape is read" | the original ROM |
-| MON-10 | The monitor uses more than the original's one stack level and RAM beyond 0x07E0–0x07FF (see `report/final_report.md` for the measured amounts) | compiled Rust calls functions; the original was hand-written | measured by the linker map |
+| MON-10 | The monitor uses more than the original's one stack level (all 7) and RAM 0x0700–0x0731 instead of 0x07E0–0x07FF (`report/final_report.md`) | compiled Rust calls functions and keeps its frames in RAM; the original was hand-written | measured by the linker map |
 | MON-11 | Restoring the flags on `G` restores carry and zero; sign and parity follow from the value used to set zero | the 8008 cannot load the flags directly | — |

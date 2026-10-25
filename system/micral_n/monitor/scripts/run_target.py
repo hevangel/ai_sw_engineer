@@ -79,7 +79,9 @@ def run_one(image, syms, path):
             f = line[2:].split()
             checks.append((int(f[0], 16), [int(x, 16) for x in f[1:]]))
         elif line.startswith("R "):
-            regs = bytes(int(x, 16) for x in line[2:].split())
+            v = [int(x, 16) for x in line[2:].split()]
+            # A B C D E H L flags -> mon_regs: C Z S P (0/1 each), A..L
+            regs = bytes([v[7] >> k & 1 for k in range(4)] + v[:7])
     hold = {0x3800: syms["mon_hold0"], 0x3808: syms["mon_hold1"]}
     with tempfile.TemporaryDirectory() as d:
         args = [RTL, "--rom", f"{image}@{syms['__image']}", "--start", "0x3b49" if regs else "0x3b30",

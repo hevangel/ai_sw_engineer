@@ -67,6 +67,7 @@ public:
   const char *getTargetNodeName(unsigned Opcode) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
+  SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   /// A global's address has known low bits when the global is aligned:
   /// page-aligned data gives `base + offset` a known low byte (spec/codegen.md).
   void computeKnownBitsForTargetNode(const SDValue Op, KnownBits &Known,

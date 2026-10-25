@@ -3,7 +3,7 @@
 | Check | Result |
 |---|---|
 | Host tests | 2/2 (`tests/disk_model.rs`) |
-| Image size vs EPROM | 245 / 256 bytes |
+| Image size vs EPROM | 241 / 256 bytes |
 | RAM | frames 0x3700–0x3705 (BOOT-3) |
 | Call depth | 2 of 7 |
 | RTL: boot Shooting Stars | 4/4 transcripts |

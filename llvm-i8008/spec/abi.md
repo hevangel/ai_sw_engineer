@@ -100,7 +100,8 @@ There is no data stack. Every function that needs memory for locals, spills or
   overlay. This is safe only because nothing is reentrant: no recursion, no
   interrupts.
 - No frame, argument area or other object of up to 256 bytes crosses a
-  256-byte page boundary. Code may then step H:L through an object with
+  256-byte page boundary; every data object is a section of its own
+  (`codegen.md` §1), so the rule holds per object. Code may then step H:L through an object with
   `INL` / `DCL` alone (`codegen.md` §5).
 
 ## 5. Object format and relocations
