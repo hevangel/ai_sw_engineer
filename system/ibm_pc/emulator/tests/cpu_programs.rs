@@ -289,6 +289,6 @@ fn in_and_out_reach_the_io_bus() {
     // mov al,55h; out 80h,al; in al,81h; hlt (nothing on the bus: FFh)
     let mut m = machine(&[0xB0, 0x55, 0xE6, 0x80, 0xE4, 0x81, 0xF4]);
     run_to_halt(&mut m);
-    assert_eq!(m.io_log, vec![(0x80, 0x55)]);
+    assert_eq!(m.board.io_log, vec![(0x80, 0x55)]);
     assert_eq!(m.cpu.r[0] & 0xFF, 0xFF);
 }

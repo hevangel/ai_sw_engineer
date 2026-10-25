@@ -1,7 +1,15 @@
 # ibm_pc emulator oracle
 
-Transcripts of the original software running on the primary oracle (RTL/ISS in
-`$AI_HW_ENGINEER`), used to check the emulator. Same format as the title
-transcripts: `> hex` inputs, `< hex` outputs, `#` comments. Never write expected
-output from this emulator's own results. If a title's oracle already covers the
-machine, reference it here instead of copying it.
+Transcripts recorded from the hardware project's IBM PC RTL (`$AI_HW_ENGINEER/system/ibm_pc`,
+the whole 5150 running the unchanged IBM BIOS, Cassette BASIC and PC DOS 1.00), used to
+check the emulator. The format is the session format in `../src/session.rs`: `boot`,
+`type <text>`, `until <contains|endswith|row> <text>`, then the settled 25-row screen
+(`|` rows) and, for drive B, the SHA-256 of its image.
+
+- `transcripts/dos100_session.txt`: boot to the date prompt, date entry, `DIR`, `CHKDSK`,
+  `DATE`, `BASIC`, `print 6*7`, `SYSTEM`, `FORMAT B:`, `COPY TIME.COM B:CLOCK.COM`, `DIR B:`.
+  Recorded by `../scripts/rtl_oracle.sh` (about ten minutes); do not edit by hand.
+
+Never write expected output from this emulator's own results: re-record from the RTL, or
+leave the transcript alone. The transcripts contain only text the original programs
+displayed (prompts, file names and sizes, CHKDSK totals), not the programs themselves.

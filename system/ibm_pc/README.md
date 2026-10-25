@@ -2,7 +2,7 @@
 
 CPU: Intel 8088 (8086 instruction set). Backend: `llvm-i8086` (real-mode 8086 only).
 
-Status: **8088 CPU core done**; the rest is scaffolded. The platform maps and emulator contract are written from the hardware project's spec, and the emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes (plus 77,256 undocumented-encoding vectors) and agrees with the RTL on 433,000 fuzz states except one undocumented quirk ([report](emulator/report/verification.md)). No peripherals, boot, backend code or title yet.
+Status: **the emulator boots the unchanged IBM BIOS and PC DOS 1.00 and matches the RTL**; the backend and titles are not started. The emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes; the whole machine (8088, 8259, 8253, 8255 and keyboard, 8237, 8272, CGA text) runs a 14-step DOS and BASIC session whose screens and written disk image are identical to the RTL's ([report](emulator/report/verification.md)). No CGA graphics, speaker, compiled image, backend code or title yet.
 
 ## History
 
@@ -18,7 +18,7 @@ IBM's [manufacturer history](https://www.ibm.com/history/personal-computer) date
 
 ## Simulators
 
-- Local Rust system emulator: [emulator/](emulator/README.md): library and CLI that will run original and compiled images. Has its own 8088 core, so it shares no code with either oracle below ([emulator/spec/spec.md](emulator/spec/spec.md)).
+- Local Rust system emulator: [emulator/](emulator/README.md): library and CLI that run the original firmware and, later, compiled images. Has its own 8088 core and peripherals, so it shares no code with either oracle below ([emulator/spec/spec.md](emulator/spec/spec.md)).
 - Primary (ai_hw_engineer): `$AI_HW_ENGINEER/system/ibm_pc` (5150, 64 KiB, CGA, two drives) and `system/ibm_pc_xt_5160`; RTL CPU `design/intel_8086` with the 8259, 8253, 8255, 8237 and 8272 peripherals. It boots the unchanged IBM BIOS and PC DOS 1.00.
 - Secondary (external/): `external/martypc` ([MartyPC](https://github.com/dbalsom/martypc), cycle-accurate IBM PC/XT emulator in Rust).
 

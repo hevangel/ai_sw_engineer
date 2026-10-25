@@ -1,6 +1,53 @@
 # ibm_pc emulator verification
 
-## 2026-10-25: 8088 CPU core and memory decode
+## 2026-10-25 (second record): the whole 5150 on the Rust machine
+
+Added since the first record: the board (PIC, PIT, PPI and keyboard, DMA, diskette
+controller, CGA registers and text screen), the timed `Machine`, session replay, and
+the `ibm_pc-emulator` command line. Same toolchain as below (Rust 1.99.1; Docker
+image `ai-hw-engineer:latest` for the RTL runs). Firmware and disk: the originals
+listed in `../original/provenance.md`, read from the hardware project's cache.
+
+| Command | Result |
+|---|---|
+| `cargo test --release` | 1 unit + 13 CPU program + 9 device + 2 CLI + 2 replay-support tests pass; the silicon and the system replay tests are ignored without the firmware |
+| `cargo test --release --test replay -- --ignored` | **14 of 14 steps identical to the RTL**: unchanged IBM BIOS POST and PC DOS 1.00 boot to the date prompt, date entry, `DIR`, `CHKDSK`, `DATE`, `BASIC.COM` and the Cassette BASIC ROM (`print 6*7`), `SYSTEM`, `FORMAT B:` (all 40 tracks through the diskette controller and DMA), `COPY TIME.COM B:CLOCK.COM`, `DIR B:`. After every step the 25-row screen matches, and the SHA-256 of drive B's image matches after FORMAT and after COPY (two different values, so the writes are real). About 1 s of host time for 335 million clocks. |
+| `ibm_pc-emulator --bios ... oracle/transcripts/dos100_session.txt` diffed against the transcript | identical (the command line path, not only the test) |
+| `cargo test --release --test silicon_vectors -- --ignored` | unchanged: 566,721 of 566,721 accepted and 77,256 of 77,256 extended vectors pass |
+| `scripts/rtl_diff.sh 1500 7` | unchanged: 433,282 of 433,500 fuzz states agree; the 218 differences are REP-prefixed MUL/IMUL (E-A5) |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | pass |
+
+How the RTL transcript was made: `scripts/rtl_oracle.sh` runs the hardware project's
+`Vibm_pc` (the whole 5150 in RTL, same firmware and disk) through the session and
+records the screen and drive-B hash after each step. The expected values come from
+that run, not from this emulator.
+
+### Findings from the bring-up
+
+1. **Keyboard spacing.** The first full COPY replay hung: the 26-character command was
+   typed instantly, the 15-key BIOS buffer overflowed, the BIOS dropped keys (including
+   Enter) and beeped. The RTL host paces scan codes 25,000 clocks apart; a real keyboard
+   also sends one code at a time. The Rust keyboard now does the same (E-A8). The model
+   was wrong, not the firmware, and the RTL transcript exposed it.
+2. **Port decode.** An early draft matched I/O ports on the wrong expression, so the
+   diskette ports were silently unreachable; the BIOS then fell through to ROM BASIC.
+   Caught by the DOS session (no disk activity in the FDC trace), fixed by decoding on
+   the port number.
+3. The unmodified BIOS passes its own POST (memory, timer, DMA, PIC, keyboard, CGA and
+   diskette tests) with no firmware patches, hooks or injected state.
+
+### Not run / not verified
+
+- No timing is verified beyond what the BIOS and DOS observe (E-A2): instruction and
+  clock counts differ from the RTL's (for example 85 million clocks to the DOS date
+  prompt here, 99 million on the RTL).
+- CGA graphics mode (the DONKEY.BAS regression in the hardware project), the speaker,
+  and 40-column text are not exercised; the diskette controller's error paths other
+  than "no disk" and "write protected" are covered by unit tests only.
+- IRET's interrupt shadow is an assumption (E-A3); DRAM refresh is not simulated (E-A9).
+- No compiled `llvm-i8086` image has run: the backend has no code yet.
+
+## 2026-10-25 (first record): 8088 CPU core and memory decode
 
 Verified on Windows with Rust 1.99.1 (GNU toolchain); the RTL runs used Verilator
 5.052 inside `ai-hw-engineer:latest` (Docker). Vector corpus: SingleStepTests/8086
@@ -40,12 +87,5 @@ three defects, all fixed, all caught by the silicon test (so not escaped defects
    Not a defect; the fuzz skips it.
 3. The manual's DAA/DAS pseudo-code differs from the chip (E-V1).
 
-### Not run
-
-The peripherals, keyboard, diskette and CGA do not exist yet, so no BIOS POST, DOS
-boot or application has run on the machine model, and the CLI is still the
-template echo. RTL system-level (`system/ibm_pc`) and MartyPC whole-machine
-comparisons wait for that. The core's interrupt handling (NMI/INTR priority, the
-STI shadow, REP interruption, single-step) is tested by hand-worked programs, not
-by silicon vectors; IRET's interrupt shadow is an assumption (E-A3). No timing is
-verified (E-A2).
+The core's interrupt handling (NMI/INTR priority, the STI shadow, REP interruption,
+single-step) is tested by hand-worked programs, not by silicon vectors.

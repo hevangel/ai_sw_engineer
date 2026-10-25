@@ -1,4 +1,0 @@
-# Placeholder: the template emulator echoes its input. Replace with transcripts
-# captured from the original software on the primary oracle (see ../README.md).
-> 41 42 43
-< 41 42 43

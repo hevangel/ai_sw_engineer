@@ -1,6 +1,6 @@
 # Systems
 
-One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. The [Busicom emulator](busicom_141pf/emulator/README.md) provides the first library and CLI; emulators for the other listed systems remain planned.
+One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. The [Busicom emulator](busicom_141pf/emulator/README.md) provides the first library and CLI and the [IBM PC emulator](ibm_pc/emulator/README.md) the first whole microcomputer (it boots the original BIOS and PC DOS 1.00); emulators for the other listed systems remain planned.
 
 | System | Year | CPU | LLVM backend | HW simulator in ai_hw_engineer | Software titles | Folder |
 |---|---|---|---|---|---|---|
@@ -8,7 +8,7 @@ One folder per historical machine. Each holds the machine's `platform/` (memory 
 | Micral N | 1973 | Intel 8008 | `llvm-i8008` | `system/micral_n` (8008 RTL; our Micral N harness in `platform/sim`) | [boot](micral_n/boot/) (241 B), [monitor](micral_n/monitor/) (2 KiB ROM, 7/7), [shooting_stars](micral_n/shooting_stars/) (4/4), [basic](micral_n/basic/) (SCELBAL, 10/10) | [micral_n/](micral_n/) |
 | Apple II | 1977 | MOS 6502 | `llvm-mos6502` | `system/apple_ii` (in progress), `design/mos_6502` | — | planned |
 | Atari 2600 (VCS) | 1977 | MOS 6507 | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |
-| IBM PC 5150 | 1981 | Intel 8088 | `llvm-i8086` | `system/ibm_pc`, `system/ibm_pc_xt_5160` | — | [ibm_pc/](ibm_pc/) (scaffolded: platform maps, `llvm-i8086` specs; emulator 8088 core verified against the chip and the RTL, no peripherals yet) |
+| IBM PC 5150 | 1981 | Intel 8088 | `llvm-i8086` | `system/ibm_pc`, `system/ibm_pc_xt_5160` | — | [ibm_pc/](ibm_pc/) (scaffolded: platform maps, `llvm-i8086` specs; emulator boots the original BIOS and PC DOS 1.00 and matches the RTL; no backend code or title yet) |
 | Commodore 64 | 1982 | MOS 6510 | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |
 | Apple IIe | 1983 | MOS 6502 (65C02 from 1985 Enhanced IIe) | `llvm-mos6502` | `design/apple_iie_mmu`, `apple_iie_iou`, `apple_iie_pal` | — | planned |
 | Nintendo Entertainment System | 1983 (Famicom) / 1985 (NES) | Ricoh 2A03 (6502 core, no decimal mode) | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |
