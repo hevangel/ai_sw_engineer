@@ -13,6 +13,10 @@ Subset the backend emits: the original 8086/8088 instruction set. Source: Intel,
 | CS DS ES SS | 16 | segment registers |
 | IP, FLAGS | 16 | instruction pointer; CF PF AF ZF SF TF IF DF OF |
 
+## Verification status (2026-10-25)
+
+The encoding table below is no longer only a design summary. It is implemented as TSFlags in `target/lib/Target/I8086/I8086InstrFormats.td` and checked three ways (`tests/`): 423 rows written from the manual's opcode structure (`mc/encodings.s`), 36 branch encodings with their fixups, and `mc/vector_check.py`, which decodes and re-assembles tens of thousands of instruction instances captured from a physical Intel P80C86A-2 (SingleStepTests/8086), every opcode form, with MartyPC's mnemonic as the cross-check. Page numbers into Intel's manual are still to be added to the rows; until they are, the corpus is the authority for what the chip does with each byte string.
+
 ## Encoding summary
 
 ModRM byte: `mod(2) reg(3) rm(3)`. `mod=11` selects a register; otherwise `rm` selects `[BX+SI] [BX+DI] [BP+SI] [BP+DI] [SI] [DI] [BP] [BX]`, with `mod=00 rm=110` meaning a direct 16-bit address and `mod=01/10` adding an 8-bit sign-extended or 16-bit displacement. Bases using BP default to the SS segment, others to DS. Segment override prefixes: 26h ES, 2Eh CS, 36h SS, 3Eh DS. Opcode low bit `w` selects byte (0) or word (1); bit 1 `d` selects the direction for ModRM ALU/MOV forms.

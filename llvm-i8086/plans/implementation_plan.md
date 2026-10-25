@@ -3,8 +3,8 @@
 Milestones (each ends with passing tests):
 
 1. ISA + ABI specs written; Rust target JSON drafted. **Drafted** (this change); the ISA table still owes the row-by-row check against the Intel manual, which is the first task of milestone 2.
-2. MC layer: register info, instruction definitions, encoder; assemble every opcode (`tests/mc/`), each checked against the manufacturer opcode table; reject every 186+ opcode.
-3. Instruction selection for integer add/sub/logic/load/store/branch at the native width (`tests/codegen/`); branch relaxation for out-of-range `Jcc`.
+2. MC layer: register info, instruction definitions, encoder; assemble every opcode (`tests/mc/`), each checked against the manufacturer opcode table; reject every 186+ opcode. **Done 2026-10-25**: `llvm-mc`/`llvm-objdump`/`llvm-readobj` for the i8086 target (assembler, disassembler, relaxation, ELF writer with EM 0x8086 and five relocation types); 423 table rows, 36 branch encodings and the physical-chip corpus all pass (`report/final_report.md`). The instruction forms live in `I8086InstrInfo.td`, their encoding in TSFlags, interpreted by `I8086MCCodeEmitter.cpp` and `I8086Disassembler.cpp`.
+3. (next) Instruction selection for integer add/sub/logic/load/store/branch at the native width (`tests/codegen/`); the assembler already relaxes out-of-range `Jcc`.
 4. Legalization of wider types; runtime helpers; calls and stack frames per `spec/abi.md`.
 5. Linker + image packaging: flat binary at the platform load address, boot-sector image with the 55AAh signature; `scripts/build_image.sh` contract satisfied.
 6. `core` builds via `-Zbuild-std=core`; smoke programs run on the simulator (`tests/smoke/`): first a boot sector that writes to CGA memory, observed on the `system/ibm_pc` emulator and on the `ai_hw_engineer` RTL.

@@ -1,0 +1,16 @@
+
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// Intel 8086/8088 relocations - see llvm-i8086/spec/abi.md.
+// Values are private to this toolchain (EM_I8086 = 0x8086 is not an assigned machine number).
+ELF_RELOC(R_I8086_NONE, 0)
+// 8-bit absolute value (an immediate or .byte naming a symbol).
+ELF_RELOC(R_I8086_8,    1)
+// 16-bit little-endian absolute address (offset within the segment, .word).
+ELF_RELOC(R_I8086_16,   2)
+// 8-bit PC-relative displacement (short JMP, Jcc, LOOP, JCXZ); addend includes the -1 field bias.
+ELF_RELOC(R_I8086_PC8,  3)
+// 16-bit PC-relative displacement (near JMP and CALL); addend includes the -2 field bias.
+ELF_RELOC(R_I8086_PC16, 4)

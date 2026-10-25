@@ -6,7 +6,7 @@
 | Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
 | Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
 | Rust target | `rust/i8086-none.json` |
-| Status | scaffolded; ISA and ABI specs drafted, no backend code |
+| Status | **assembler, disassembler and object writer done** (milestone 2); code generation not started |
 
 ## Strategy
 
@@ -14,7 +14,9 @@ No usable 16-bit real-mode backend exists. LLVM's x86 `-m16` mode emits 386+ opc
 
 The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS), 16-bit near pointers, so the 8086's segment registers are set once at entry and not allocated. Far pointers, multiple segments and the large model are out of scope until a title needs more than 64 KiB.
 
-In scope: integer code at 8 and 16 bits (32/64-bit by legalization and helpers), calls, stack frames, `REP` string instructions for memory operations, `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and disassembles the whole 8086 integer instruction set in Intel syntax, relaxes branches, and writes ELF objects with the relocations of `spec/abi.md`; `llvm-objdump` and `llvm-readobj` read them. Verified against a hand-written opcode table and the physical-chip instruction corpus (`tests/`).
+
+In scope (next): integer code at 8 and 16 bits (32/64-bit by legalization and helpers), calls, stack frames, `REP` string instructions for memory operations, `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
 
 ## Layout
 

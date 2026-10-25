@@ -32,9 +32,19 @@ Imaginary registers (memory-backed pseudo-registers): none planned. The 8086 has
 - Stack: full descending, SS:SP, a PUSH decrements SP by 2, SP kept even at call boundaries; the caller removes stack arguments (`ADD SP,n`). Frame pointer is BP only for functions with dynamic stack allocation or when requested. Depth is limited only by RAM; the linker script places the stack top at `_stack_top` below the data.
 - Interrupt handlers use a separate attribute (IRET, save everything) and are out of scope for the first model.
 
-## Relocations and object format
+## Relocations and object format (implemented, 2026-10-25)
 
-ELF object files with a custom `e_machine` for i8086, recorded here when the target is registered (value chosen from the private range, no standard number is assumed). Relocation kinds: `R_I8086_16` (absolute 16-bit address), `R_I8086_PC8` (short jump, 8-bit displacement), `R_I8086_PC16` (near `JMP`/`CALL` 16-bit displacement). Conditional jumps use `PC8` plus relaxation (see [isa.md](isa.md)). The linker writes a flat binary at the platform's load address (see `system/ibm_pc/platform/link.ld`); `.EXE`/`.COM` headers are a later packager.
+ELF32 little-endian relocatable objects (RELA) with `e_machine` = **0x8086** (`EM_I8086`; a private value, no standard number is assigned), `llvm-readobj` names it "Intel 8086/8088". Relocation types (`llvm/BinaryFormat/ELFRelocs/I8086.def`, installed into the LLVM tree by `scripts/apply_overlay.py`):
+
+| Type | Value | Field | Computation |
+|---|---|---|---|
+| `R_I8086_NONE` | 0 | | |
+| `R_I8086_8` | 1 | 1 byte | S + A (an immediate or `.byte` naming a symbol) |
+| `R_I8086_16` | 2 | 2 bytes, little endian | S + A (an offset within the segment: `mov ax, sym`, `[sym]`, `.word sym`) |
+| `R_I8086_PC8` | 3 | 1 byte, signed | S + A - P, A includes -1 for the field bias (short `jmp`, `jcc`, `loop`, `jcxz`) |
+| `R_I8086_PC16` | 4 | 2 bytes, signed | S + A - P, A includes -2 (near `jmp`, `call`, and the `jmp` of a relaxed `jcc`) |
+
+The assembler relaxes a bare short branch to the near form when its target is an external symbol (the linker cannot make a long displacement fit a byte). The linker writes a flat binary at the platform load address (see `system/ibm_pc/platform/link.ld`); `.EXE`/`.COM` headers are a later packager. Far (segment:offset) references are not relocated: segments are constants in the first model.
 
 ## Runtime library
 
