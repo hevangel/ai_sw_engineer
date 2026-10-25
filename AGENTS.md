@@ -26,11 +26,13 @@ Open the file when the task matches. Do not read the whole `spec/` folder up fro
 | Open a PR or decide a task is done | [spec/verification.md](spec/verification.md) |
 | A bug escaped the title's own tests; plan verification | [spec/escaped-defects.md](spec/escaped-defects.md) |
 | Commit, branch, add a worktree, write a PR description | [spec/git-workflow.md](spec/git-workflow.md) |
+| Start, pause, hand off or finish work that has a GitHub issue; claim an issue; update the `ai_engineer` project | [spec/github-issues.md](spec/github-issues.md) |
 
 ## Rules that always apply
 
 These are the short forms; the linked file has the full rule.
 
+- Track every task on its GitHub issue and its `ai_engineer` project item with `gh`: claim it (Agent, Status, Path, Start date) when work starts, clear Agent when work stops ([github-issues](spec/github-issues.md)).
 - Never push to `main`; work on a branch, with worktrees under `worktrees/` ([git-workflow](spec/git-workflow.md)).
 - Never commit a copyrighted ROM or disk image; record provenance and SHA-256 instead ([original-software](spec/original-software.md)).
 - Never edit `external/` in place; it holds pinned third-party submodules ([repository](spec/repository.md)).
