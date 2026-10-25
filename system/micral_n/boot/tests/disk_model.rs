@@ -148,9 +148,12 @@ fn loads_the_image_from_track_0_sector_16() {
     let mut d = disk(0, 5);
     boot(&mut d);
     let start = FIRST_SECTOR as usize * 128;
-    assert_eq!(&d.ram[..LOAD_END as usize], &d.image[start..start + LOAD_END as usize]);
+    assert_eq!(
+        &d.ram[..LOAD_END as usize],
+        &d.image[start..start + LOAD_END as usize]
+    );
     // 5 steps out to track 0, then 3 in (sectors 16-31, then tracks 1-3).
-    assert_eq!(d.steps, 5 + (LOAD_END as usize / 128 - 16 + 31) / 32);
+    assert_eq!(d.steps, 5 + (LOAD_END as usize / 128 - 16).div_ceil(32));
     assert_eq!(d.reads, LOAD_END as usize / 128);
 }
 
@@ -159,6 +162,9 @@ fn rereads_a_sector_whose_checksum_fails() {
     let mut d = disk(2, 0);
     boot(&mut d);
     let start = FIRST_SECTOR as usize * 128;
-    assert_eq!(&d.ram[..LOAD_END as usize], &d.image[start..start + LOAD_END as usize]);
+    assert_eq!(
+        &d.ram[..LOAD_END as usize],
+        &d.image[start..start + LOAD_END as usize]
+    );
     assert_eq!(d.reads, LOAD_END as usize / 128 + 2);
 }

@@ -59,3 +59,28 @@ define void @stg() {
 define ptr @addr() {
   ret ptr @w
 }
+
+; memset's value is an i8 argument: after the pointer (BC) it takes D,
+; which rt/mem.s reads (abi.md sec.6).
+; CHECK-LABEL: fill5:
+; CHECK: ldi 0x00
+; CHECK: cal memset
+declare void @llvm.memset.p0.i16(ptr, i8, i16, i1)
+define void @fill5(ptr %p) {
+  call void @llvm.memset.p0.i16(ptr %p, i8 0, i16 5, i1 false)
+  ret void
+}
+
+; A 256-aligned table: &t[i] is H = the page, L = i, no 16-bit add
+; (computeKnownBitsForTargetNode, codegen.md sec.2).
+@t = global [256 x i8] zeroinitializer, align 256
+; CHECK-LABEL: ldt:
+; CHECK-NOT: adb
+; CHECK-NOT: aci
+; CHECK: lbm
+define i8 @ldt(i8 %i) {
+  %x = zext i8 %i to i16
+  %a = getelementptr inbounds i8, ptr @t, i16 %x
+  %v = load i8, ptr %a
+  ret i8 %v
+}

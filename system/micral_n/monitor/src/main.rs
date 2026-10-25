@@ -48,7 +48,11 @@ mod target {
             unsafe { write_volatile(&raw mut mon_regs[i as usize], v) }
         }
         fn hold_entry(&mut self, n: u8) -> u16 {
-            (if n == 0 { mon_hold0 as usize } else { mon_hold1 as usize }) as u16
+            (if n == 0 {
+                mon_hold0 as usize
+            } else {
+                mon_hold1 as usize
+            }) as u16
         }
         fn go(&mut self, a: u16) {
             unsafe { mon_go(a) }

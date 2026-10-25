@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
-# Run the target image against every oracle transcript on a simulator.
-# SIM=primary (ai_hw_engineer, default) | secondary (external emulator)
-# Output: build/sim/<transcript>.txt in transcript format (only '<' lines matter).
+# The boot ROM's target test: boot the other titles' disk images on the RTL
+# and replay their transcripts (their scripts/build.sh target first).
+# Runs in the ai-hw-engineer image (platform/sim/build_rtl.sh first).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
-SIM="${SIM:-primary}"
-image="$BUILD_DIR/target/$SOFTWARE.bin"
-runner="$PLATFORM_DIR/scripts/run_image.sh"
-
-[[ -f $image ]] || fail "no target image; run scripts/build.sh target"
-[[ -x $runner ]] || fail "$runner missing: the micral_n platform has no simulator runner yet"
-
-mkdir -p "$BUILD_DIR/sim"
-for t in "$TITLE_DIR"/oracle/transcripts/*.txt; do
-    name=$(basename "$t")
-    status "$SIM: $name"
-    # Contract: run_image.sh <sim> <image> <input_transcript> > <output_transcript>
-    "$runner" "$SIM" "$image" "$t" > "$BUILD_DIR/sim/$name"
+[[ -f $IMAGE ]] || fail "no boot ROM; run scripts/build.sh target"
+for t in shooting_stars basic; do
+    disk="$ROOT/system/$SYSTEM/$t/build/disk.img"
+    [[ -f $disk ]] || fail "no $disk; build system/$SYSTEM/$t first"
+    status "RTL: boot $t"
+    python3 "$PLATFORM_DIR/scripts/run_tty.py" --disk "$disk" --boot "$IMAGE" \
+        "$ROOT/system/$SYSTEM/$t"/oracle/transcripts/*.txt
 done

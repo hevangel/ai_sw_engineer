@@ -1,87 +1,118 @@
-//! Replay every oracle transcript in `oracle/transcripts/` through the core.
-//!
-//! Transcript format (one event per line, `#` starts a comment):
-//!
-//! ```text
-//! > 41 42        input bytes (hex), fed to Hal::read_input in order
-//! < 41 42        output bytes (hex) the original produced, in order
-//! ```
-//!
-//! Inputs and expected outputs are compared as two ordered streams; timing
-//! between them is not modeled here (add it if the title depends on it).
+//! Replay the oracle transcripts (captured from the original SCELBAL by
+//! scripts/capture_oracle.py) through the Rust SCELBAL on the host: the
+//! typed keys go in, the printed bytes must match exactly, and every key
+//! must be read. An error restarts the executive with a panic, caught here
+//! as the target's jump to `basic_restart` would; running out of keys ends
+//! the session.
 
-use software::{Hal, Machine};
+use software::Hal;
 use std::collections::VecDeque;
-use std::path::Path;
+use std::fs;
+use std::panic::{catch_unwind, panic_any, AssertUnwindSafe};
 
-struct ReplayIo {
-    input: VecDeque<u8>,
-    output: Vec<u8>,
+struct Mock {
+    keys: VecDeque<u8>,
+    out: Vec<u8>,
 }
 
-impl Hal for ReplayIo {
-    fn read_input(&mut self) -> Option<u8> {
-        self.input.pop_front()
-    }
-    fn write_output(&mut self, value: u8) {
-        self.output.push(value);
-    }
-}
+/// The session is over: no keys left, or the program halted.
+struct End;
 
-fn parse_hex(line: &str, file: &Path) -> Vec<u8> {
-    line.split_whitespace()
-        .map(|t| {
-            u8::from_str_radix(t, 16)
-                .unwrap_or_else(|_| panic!("{}: bad hex byte {t:?}", file.display()))
-        })
-        .collect()
-}
-
-fn replay(file: &Path) {
-    let text = std::fs::read_to_string(file).expect("read transcript");
-    let mut input = VecDeque::new();
-    let mut expected = Vec::new();
-    for raw in text.lines() {
-        let line = raw.split('#').next().unwrap_or("").trim();
-        if let Some(rest) = line.strip_prefix('>') {
-            input.extend(parse_hex(rest, file));
-        } else if let Some(rest) = line.strip_prefix('<') {
-            expected.extend(parse_hex(rest, file));
-        } else if !line.is_empty() {
-            panic!("{}: unrecognized line {raw:?}", file.display());
+impl Hal for Mock {
+    fn getc(&mut self) -> u8 {
+        match self.keys.pop_front() {
+            Some(c) => c,
+            None => panic_any(End),
         }
     }
+    fn putc(&mut self, c: u8) {
+        self.out.push(c);
+    }
+    fn halt(&mut self) {
+        panic_any(End)
+    }
+}
 
-    let mut io = ReplayIo {
-        input,
-        output: Vec::new(),
-    };
-    let mut machine = Machine::new();
-    // Bound the run so a hung reimplementation fails instead of spinning.
-    for _ in 0..1_000_000 {
-        if !machine.step(&mut io) && io.input.is_empty() {
-            break;
+fn play(m: &mut Mock) {
+    software::power_on();
+    loop {
+        if let Err(p) = catch_unwind(AssertUnwindSafe(|| software::exec(m))) {
+            if p.is::<End>() {
+                return;
+            }
         }
     }
-    assert_eq!(
-        io.output,
-        expected,
-        "output differs from oracle in {}",
-        file.display()
-    );
+}
+
+fn unescape(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let (mut out, mut i) = (Vec::new(), 0);
+    while i < b.len() {
+        if b[i] == b'\\' {
+            match b[i + 1] {
+                b'r' => out.push(13),
+                b'n' => out.push(10),
+                b'\\' => out.push(b'\\'),
+                b'x' => {
+                    out.push(u8::from_str_radix(&s[i + 2..i + 4], 16).unwrap());
+                    i += 2;
+                }
+                c => panic!("bad escape {}", c as char),
+            }
+            i += 2;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 #[test]
-fn oracle_transcripts_replay_exactly() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("oracle/transcripts");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
-        .expect("oracle/transcripts missing")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+fn oracle_transcripts() {
+    std::panic::set_hook(Box::new(|_| {}));
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/oracle/transcripts");
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
         .collect();
-    files.sort();
-    assert!(!files.is_empty(), "no transcripts in {}", dir.display());
-    for file in &files {
-        replay(file);
+    names.sort();
+    let mut failed = 0;
+    for p in &names {
+        let text = fs::read_to_string(p).unwrap();
+        let mut m = Mock {
+            keys: VecDeque::new(),
+            out: Vec::new(),
+        };
+        let mut want = Vec::new();
+        for line in text.lines() {
+            if let Some(r) = line.strip_prefix("< ") {
+                m.keys.extend(unescape(r));
+            } else if let Some(r) = line.strip_prefix("> ") {
+                want.extend(unescape(r));
+            }
+        }
+        play(&mut m);
+        let name = p.file_name().unwrap().to_string_lossy();
+        if m.out == want && m.keys.is_empty() {
+            println!("ok   {name}");
+        } else {
+            failed += 1;
+            let at = m
+                .out
+                .iter()
+                .zip(&want)
+                .position(|(a, b)| a != b)
+                .unwrap_or(m.out.len().min(want.len()));
+            println!(
+                "FAIL {name}: first difference at byte {at} (got {}, want {})\n  got:  {:?}\n  want: {:?}",
+                m.out.len(),
+                want.len(),
+                String::from_utf8_lossy(&m.out[at.saturating_sub(30)..(at + 40).min(m.out.len())]),
+                String::from_utf8_lossy(&want[at.saturating_sub(30)..(at + 40).min(want.len())])
+            );
+        }
     }
+    assert!(!names.is_empty());
+    assert_eq!(failed, 0, "{failed} transcript(s) differ from the original");
 }

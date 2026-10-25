@@ -168,6 +168,28 @@ SDValue I8008TargetLowering::PerformDAGCombine(SDNode *N,
   return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i16, Lo, Hi);
 }
 
+// WRAPPER(global + offset): the low bits below the global's alignment are
+// the offset's. A 256-aligned table makes `&table[i]` (i < 256) a byte pair
+// (H = the page, L = i) through the combine above, instead of a 16-bit add.
+void I8008TargetLowering::computeKnownBitsForTargetNode(
+    const SDValue Op, KnownBits &Known, const APInt &DemandedElts,
+    const SelectionDAG &DAG, unsigned Depth) const {
+  Known.resetAll();
+  if (Op.getOpcode() != I8008ISD::WRAPPER)
+    return;
+  auto *G = dyn_cast<GlobalAddressSDNode>(Op.getOperand(0));
+  if (!G)
+    return;
+  Align A = G->getGlobal()->getPointerAlignment(DAG.getDataLayout());
+  unsigned Bits = std::min<unsigned>(Log2(A), 16);
+  if (Bits == 0)
+    return;
+  APInt Off(16, (uint64_t)G->getOffset());
+  APInt Mask = APInt::getLowBitsSet(16, Bits);
+  Known.One = Off & Mask;
+  Known.Zero = ~Off & Mask;
+}
+
 SDValue I8008TargetLowering::LowerAddress(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   SDValue T;

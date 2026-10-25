@@ -1,0 +1,110 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 10 REM SQUARES, SUMS, FACTORIAL, ODD PRIMES\r
+< 20 PRINT "N","SQUARE","CUBE"\r
+< 30 FOR N=1 TO 6\r
+< 40 PRINT N,N*N,N*N*N\r
+< 50 NEXT N\r
+< 60 LET S=0\r
+< 70 FOR K=1 TO 100\r
+< 80 S=S+K\r
+< 90 NEXT K\r
+< 100 PRINT "SUM 1..100 =";S\r
+< 110 GOSUB 200\r
+< 120 PRINT "10 FACTORIAL";F\r
+< 130 FOR N=3 TO 41 STEP 2\r
+< 140 P=1\r
+< 150 FOR D=3 TO N-2 STEP 2\r
+< 160 IF N/D=INT(N/D) THEN P=0\r
+< 170 NEXT D\r
+< 180 IF P=1 THEN PRINT N;\r
+< 190 NEXT N\r
+< 195 END\r
+< 200 F=1\r
+< 210 FOR K=2 TO 10\r
+< 220 F=F*K\r
+< 230 NEXT K\r
+< 240 RETURN\r
+< RUN\r
+< PRINT\r
+< LIST\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 10 REM SQUARES, SUMS, FACTORIAL, ODD PRIMES\r\r\n
+> 20 PRINT "N","SQUARE","CUBE"\r\r\n
+> 30 FOR N=1 TO 6\r\r\n
+> 40 PRINT N,N*N,N*N*N\r\r\n
+> 50 NEXT N\r\r\n
+> 60 LET S=0\r\r\n
+> 70 FOR K=1 TO 100\r\r\n
+> 80 S=S+K\r\r\n
+> 90 NEXT K\r\r\n
+> 100 PRINT "SUM 1..100 =";S\r\r\n
+> 110 GOSUB 200\r\r\n
+> 120 PRINT "10 FACTORIAL";F\r\r\n
+> 130 FOR N=3 TO 41 STEP 2\r\r\n
+> 140 P=1\r\r\n
+> 150 FOR D=3 TO N-2 STEP 2\r\r\n
+> 160 IF N/D=INT(N/D) THEN P=0\r\r\n
+> 170 NEXT D\r\r\n
+> 180 IF P=1 THEN PRINT N;\r\r\n
+> 190 NEXT N\r\r\n
+> 195 END\r\r\n
+> 200 F=1\r\r\n
+> 210 FOR K=2 TO 10\r\r\n
+> 220 F=F*K\r\r\n
+> 230 NEXT K\r\r\n
+> 240 RETURN\r\r\n
+> RUN\r\r\n
+> N              SQUARE          CUBE\r\n
+>  1.0            1.0             1.0\r\n
+>  2.0            4.0             8.0\r\n
+>  3.0            9.0             27.0\r\n
+>  4.0            16.0            64.0\r\n
+>  5.0            25.0            125.0\r\n
+>  6.0            36.0            216.0\r\n
+> SUM 1..100 = 5050.0\r\n
+> 10 FACTORIAL 3628802.\r\n
+>  5.0 7.0 11.0 13.0 17.0 19.0 23.0 29.0 31.0 37.0 41.0\x14\r\n
+> READY\r\n
+> \n
+> PRINT\r\r\n
+> \r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LIST\r\r\n
+> 10 REM SQUARES, SUMS, FACTORIAL, ODD PRIMES\r\n
+> 20 PRINT "N","SQUARE","CUBE"\r\n
+> 30 FOR N=1 TO 6\r\n
+> 40 PRINT N,N*N,N*N*N\r\n
+> 50 NEXT N\r\n
+> 60 LET S=0\r\n
+> 70 FOR K=1 TO 100\r\n
+> 80 S=S+K\r\n
+> 90 NEXT K\r\n
+> 100 PRINT "SUM 1..100 =";S\r\n
+> 110 GOSUB 200\r\n
+> 120 PRINT "10 FACTORIAL";F\r\n
+> 130 FOR N=3 TO 41 STEP 2\r\n
+> 140 P=1\r\n
+> 150 FOR D=3 TO N-2 STEP 2\r\n
+> 160 IF N/D=INT(N/D) THEN P=0\r\n
+> 170 NEXT D\r\n
+> 180 IF P=1 THEN PRINT N;\r\n
+> 190 NEXT N\r\n
+> 195 END\r\n
+> 200 F=1\r\n
+> 210 FOR K=2 TO 10\r\n
+> 220 F=F*K\r\n
+> 230 NEXT K\r\n
+> 240 RETURN\r\n
+> \x14\r\n
+> READY\r\n
+> \n

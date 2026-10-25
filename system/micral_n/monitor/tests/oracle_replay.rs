@@ -22,7 +22,9 @@ struct Mock {
 
 impl Hal for Mock {
     fn getc(&mut self) -> u8 {
-        self.input.pop_front().expect("monitor read past the end of the input")
+        self.input
+            .pop_front()
+            .expect("monitor read past the end of the input")
     }
     fn putc(&mut self, c: u8) {
         self.out.push(c);
@@ -100,7 +102,10 @@ fn replay(text: &str) -> Result<(), String> {
         } else if let Some(r) = line.strip_prefix("? ") {
             checks.push(bytes(r));
         } else if let Some(r) = line.strip_prefix("R ") {
-            let v: Vec<u8> = r.split_whitespace().map(|x| u8::from_str_radix(x, 16).unwrap()).collect();
+            let v: Vec<u8> = r
+                .split_whitespace()
+                .map(|x| u8::from_str_radix(x, 16).unwrap())
+                .collect();
             m.regs.copy_from_slice(&v);
         }
     }
@@ -127,7 +132,10 @@ fn replay(text: &str) -> Result<(), String> {
 #[test]
 fn oracle_transcripts() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/oracle/transcripts");
-    let mut names: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
     names.sort();
     let mut failed = Vec::new();
     // `t*` transcripts need the machine (a real `G` does not come back).

@@ -1,12 +1,19 @@
-# shooting_stars oracle
+# Shooting Stars oracle
 
-Expected behavior captured from the **original** program running on a simulator of the real machine. Never derived from this repository's Rust.
+Expected behaviour captured from the **original** program on the
+ai_hw_engineer 8008 RTL (Micral N harness, `platform/sim`). Never derived
+from this repository's Rust.
 
 ```text
 oracle/
-├── transcripts/   — *.txt input/output transcripts replayed by tests/oracle_replay.rs
-├── traces/        — optional instruction/bus traces (compressed if large)
-└── capture.md     — how each file was captured: simulator, revision, original SHA-256, command
+├── micral_io.asm  — Micral N teletype routines for RST 6 / RST 7 (spec SS-2)
+└── transcripts/   — NN_name.txt, replayed by tests/oracle_replay.rs and run_sim.sh
 ```
 
-Transcript format: `> hex bytes` for inputs, `< hex bytes` for outputs, `#` comments. Name files `NNN_description.txt`.
+Capture: `scripts/build_original.sh` (the listing from `original/fetch.sh`
+plus `micral_io.asm`, assembled by `platform/scripts/as8008.py`), then
+`scripts/capture_oracle.py`; each transcript's header records the SHA-256 of
+`build/original.bin`.
+
+Format: `<` keys typed, `>` bytes printed (`\r \n \ \xNN` escapes), split
+after each LF; `#` comments. The game halts after the final answer.

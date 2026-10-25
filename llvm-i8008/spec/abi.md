@@ -63,7 +63,15 @@ access (`LHI`, `LLI`, op), so spills go to the function's static frame (§4).
 ### 3.3 Saved registers
 
 None. A, B, C, D, E, H, L and the flags are all clobbered by a call. A value
-live across a call is kept in the caller's static frame.
+live across a call is kept in the caller's static frame, or in a register
+the callee is known not to touch (IPRA, `codegen.md` §4).
+
+One exception by name: a hand-written routine called `__leaf_<name>` clobbers
+only A, the flags and its result register. It keeps C, D, E, H and L, and B
+too when it returns nothing (`CSR_I8008_Leaf`, `CSR_I8008_LeafVoid`). Device
+drivers use it (`system/micral_n/platform/runtime/tty.s`): the caller keeps
+its registers and H:L across the call. A routine with this prefix must keep
+the promise; one that needs more registers takes an ordinary name.
 
 ### 3.4 Calls and returns
 
@@ -72,6 +80,10 @@ live across a call is kept in the caller's static frame.
   static call depth of the whole image, counting runtime helpers, and fails the
   link above the limit set for the image (7 by default; the monitor reserves
   levels for the user program it runs). Recursion fails the link.
+- A restart point (linker `RESET`, `codegen.md` §6) may be called or jumped
+  to from any depth and never returns: the stack is circular, so the levels
+  it abandons are overwritten harmlessly. Code after the restart starts a
+  new chain of 7 levels.
 - Indirect calls go through the RAM trampoline `__icall` (a 3-byte `JMP`
   whose address bytes the caller patches). The linker treats an indirect call
   as a call to every address-taken function.
@@ -120,7 +132,10 @@ in §3, clobber what §3.3 says, and use no frame of their own unless noted.
 | `__udivhi3` `__umodhi3` `__divhi3` `__modhi3` | i16 divide / remainder |
 | `__udivsi3` `__umodsi3` `__divsi3` `__modsi3` | i32 divide / remainder |
 | `__ashlqi3` `__lshrqi3` `__ashrqi3` (and `hi3`) | shift by a variable amount |
-| `memcpy`, `memmove`, `memset` | C semantics; the count is a memory argument |
+| `memcpy(dst, src, n)`, `memmove(dst, src, n)` | C semantics: dst in BC, src in DE, n a memory argument |
+| `memset(dst, c, n)` | dst in BC, c in D, n a memory argument |
 
-The i32 helpers take two i32s, so the second operand is a memory argument in
-`__args_<helper>`.
+The registers follow §3.1 from the types SelectionDAG gives the libcall:
+`memset`'s value is an i8 (the width of the IR value), so after the pointer
+in BC it takes D, not DE. The i32 helpers take two i32s, so the second
+operand is a memory argument in `__args_<helper>`.

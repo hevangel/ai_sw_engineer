@@ -18,12 +18,10 @@ test = false
 
 [dependencies]
 
-[profile.dev]
-panic = "abort"
-
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
-panic = "abort"
 debug = false
+# The target build (llvm-i8008/scripts/build_rust.sh) adds -C panic=abort.
+# The host unwinds: an error restarts the executive by a caught panic.

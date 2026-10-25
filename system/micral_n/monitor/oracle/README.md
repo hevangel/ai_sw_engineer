@@ -1,12 +1,15 @@
-# monitor oracle
+# MIC 01 monitor oracle
 
-Expected behavior captured from the **original** program running on a simulator of the real machine. Never derived from this repository's Rust.
+The original ROM's bytes are unpublished, so there is no program to capture
+from. The transcripts are written from R2E's *MICRAL N User's Manual*
+(January 1974, chapter II): each expected output follows the manual's text,
+and every format the manual leaves open is an assumption in
+`../spec/spec.md` (MON-1..11), cited where it decides an output.
 
 ```text
-oracle/
-├── transcripts/   — *.txt input/output transcripts replayed by tests/oracle_replay.rs
-├── traces/        — optional instruction/bus traces (compressed if large)
-└── capture.md     — how each file was captured: simulator, revision, original SHA-256, command
+oracle/transcripts/  — NN_name.txt; h* host only, t* target only (plans/testplan.md)
 ```
 
-Transcript format: `> hex bytes` for inputs, `< hex bytes` for outputs, `#` comments. Name files `NNN_description.txt`.
+Format: `<` keys typed, `>` bytes printed (`\r \n \ \xNN` escapes),
+`=` RAM preloads, `R` saved-register preloads, `?` memory checks, `#`
+comments.

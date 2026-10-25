@@ -1,5 +1,7 @@
 ; libi8008rt: memcpy, memmove, memset (abi.md sec.6).
-;   memcpy(dst BC, src DE, n)   memmove(dst BC, src DE, n)   memset(dst BC, c DE, n)
+;   memcpy(dst BC, src DE, n)   memmove(dst BC, src DE, n)   memset(dst BC, c D, n)
+; memset's c is an i8 (SelectionDAG passes the value at its own width), so
+; it takes the next 8-bit register after BC: D.
 ; n (16 bits) is the third argument, a memory argument at __args_<fn>+0
 ; (abi.md sec.3.1). LLVM ignores the returned pointer of these intrinsics;
 ; BC is not preserved.
@@ -130,7 +132,7 @@ memset:
 	lma
 	lhb
 	llc
-	lme
+	lmd
 	inc
 	jfz 1b
 	inb

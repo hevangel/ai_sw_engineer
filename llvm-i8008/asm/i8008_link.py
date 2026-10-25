@@ -16,6 +16,11 @@ Layout file (one directive per line, '#' comments):
     PLACE <symbol> <addr>     put the section defining <symbol> at <addr> (a
                               fixed entry point); the rest of CODE flows around
     DEPTH <n>                 maximum call depth (default 7)
+    RESET <symbol>            a restart point: code jumps or calls to it from
+                              any depth and never returns (the 8008's stack
+                              is circular, so the return addresses left
+                              behind are harmless). Calls to it are not call
+                              graph edges; it is a root of its own, like ENTRY
     DATAPAGE                  .data, .bss, frames and argument areas must share
                               one 256-byte page (the image was compiled with
                               llc -i8008-data-page)
@@ -137,6 +142,7 @@ class Layout:
     data: tuple = None          # (start, size) or ("follow", size)
     entry: str = None
     keep: list = field(default_factory=list)
+    reset: list = field(default_factory=list)
     place: dict = field(default_factory=dict)
     depth: int = 7
     data_page: bool = False
@@ -160,6 +166,9 @@ def read_layout(path):
             lay.keep.append(args[0])
         elif d == "PLACE":
             lay.place[args[0]] = parse_num(args[1])
+            lay.keep.append(args[0])
+        elif d == "RESET":
+            lay.reset.append(args[0])
             lay.keep.append(args[0])
         elif d == "DATAPAGE":
             lay.data_page = True
@@ -361,6 +370,9 @@ class Linker:
                     name = self.sym_name(o, rel)
                     t = self.target_section(o, rel)
                     tf = fos.get((id(t.obj), t.index)) if t is not None else None
+                    if tf in self.lay.reset:
+                        calls.setdefault(tf, set())
+                        continue                    # a restart, not a call
                     if rel.rtype == R_16 and rel.offset >= 1:
                         op = sec.data[rel.offset - 1]
                         is_call = op == 0o106 or (op & 0o307) == 0o102
@@ -398,13 +410,13 @@ class Linker:
             depth[f] = v
             return v
 
-        roots = [self.lay.entry] if self.lay.entry else list(calls)
+        roots = [self.lay.entry] + self.lay.reset if self.lay.entry else list(calls)
         worst = max((d(r, []) for r in roots if r), default=0)
         for f in calls:
             d(f, [])
         self.depth = depth
         if worst > self.lay.depth:
-            chain = [self.lay.entry]
+            chain = [max((r for r in roots if r), key=lambda r: depth.get(r, 0))]
             while calls.get(chain[-1]):
                 chain.append(max(calls[chain[-1]], key=lambda c: depth.get(c, 0)))
             raise LinkError(f"call depth {worst} > {self.lay.depth}: " + " -> ".join(chain))

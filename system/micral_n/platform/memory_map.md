@@ -19,7 +19,7 @@ Sources as in `io_map.md`.
 |---|---|---|---|
 | boot ROM | 0x0000–0x00FF (256 B) | 0x3700–0x37FF | runs before anything is loaded; loads 14 KiB to 0x0000 |
 | monitor | 0x3800–0x3FFF (2 KiB) | 0x0700–0x07FF | see the monitor's spec for its RAM deviation |
-| programs (BASIC, Shooting Stars) | from 0x0000 (boot) or 0x0100 (monitor `R`/`G`) | after the code, up to 0x36FF | 0x3700–0x37FF stays free for the boot ROM's buffer |
+| programs (BASIC, Shooting Stars) | from 0x0000 (boot) or 0x0100 (monitor `R`/`G`) | after the code, up to 0x36FF | the image must end below 0x3700, the boot ROM's buffer while it loads; once the program runs, 0x3700–0x37FF is free RAM with the boot ROM's leftovers in it (BASIC keeps its array page there) |
 
 The 8008 stack has 7 return levels. A program that the monitor starts with
 `G` returns into the monitor only through its breakpoints, so it may use all 7.

@@ -287,7 +287,7 @@ fn go<H: Hal>(h: &mut H) -> R {
     }
     let d = holds[0].wrapping_sub(holds[1]);
     // Holds patch 3 bytes each, so they must be at least 3 apart.
-    if term() != CR || (n == 2 && (d < 3 || d > 0xFFFD)) {
+    if term() != CR || (n == 2 && !(3..=0xFFFD).contains(&d)) {
         return Err(Cancel);
     }
     crlf(h);

@@ -246,7 +246,9 @@ def main():
                  "\tinl", f"\tlmi {n >> 8}",
                  f"\tlci %lo(buf+{dst})", f"\tlbi %hi(buf+{dst})"]
         if fn == "memset":
-            lines += [f"\tlei {a2}", "\tldi 0"]
+            # c is an i8 argument after the pointer: D, as llc passes it
+            # (tests/codegen/mem.ll); E is junk the routine must not read.
+            lines += [f"\tldi {a2}", "\tlei 0xa5"]
         else:
             lines += [f"\tlei %lo(buf+{a2})", f"\tldi %hi(buf+{a2})"]
         return lines + [f"\tcal {fn}"]

@@ -40,6 +40,11 @@ I8008_TRIPLE = "i8008-none"
 I8008_DATALAYOUT = "e-m:e-p:16:8-i8:8-i16:8-i32:8-i64:8-n8-a:8"
 
 
+# A type keyword, not part of a value name such as %_0.i60.i128.i (LLVM names
+# may contain ".", "$" and "-").
+TYPE = r"(?<![\w.$%@-]){}(?![\w.$-])"
+
+
 def fail(msg: str) -> "NoReturn":  # type: ignore[name-defined]
     sys.stderr.write(f"retarget_ir: REFUSED: {msg}\n")
     sys.exit(2)
@@ -55,9 +60,9 @@ def main() -> int:
     for tok in ("llvm.avr.", "__flash", "progmem", "addrspacecast"):
         if tok in src:
             fail(f"module contains {tok!r} (target-specific; cannot map to i8008)")
-    if re.search(r"\bi128\b", src):
+    if re.search(TYPE.format("i128"), src):
         fail("module uses i128 (not legalizable on a 8-bit target)")
-    if re.search(r"\b(float|double|fp128|half)\b", src):
+    if re.search(TYPE.format("(float|double|fp128|half)"), src):
         fail("module uses floating point (the 8008 has no FP unit)")
 
     # A DATA pointer in a non-default address space would be a real memory-model

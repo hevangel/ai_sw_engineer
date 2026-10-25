@@ -1,0 +1,83 @@
+# Captured from the original (build/original.bin, SHA-256 860e751781ebfdfa5f63fd9cfd86e3bd2bbc7b13c828ad7c088ae4b2cc8ce1e1) on the
+# ai_hw_engineer 8008 RTL by scripts/capture_oracle.py. Do not edit.
+< SCR\r
+< 30 PRINT "THIRD"\r
+< 10 PRINT "FIRST"\r
+< 20 PRINT 'SECOND'\r
+< 25 PRINT "EXTRA"\r
+< LIST\r
+< 25\r
+< 20 PRINT "NEW SECOND";20\r
+< LIST\r
+< RUN\r
+< 40 END\r
+< 35 PRINT "NOT REACHED AFTER END?"\r
+< RUN\r
+< SAVE\r
+< LOAD\r
+< LIST\r
+> \x14\r\n
+> READY\r\n
+> \n
+> SCR\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 30 PRINT "THIRD"\r\r\n
+> 10 PRINT "FIRST"\r\r\n
+> 20 PRINT 'SECOND'\r\r\n
+> 25 PRINT "EXTRA"\r\r\n
+> LIST\r\r\n
+> 10 PRINT "FIRST"\r\n
+> 20 PRINT 'SECOND'\r\n
+> 25 PRINT "EXTRA"\r\n
+> 30 PRINT "THIRD"\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 25\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 20 PRINT "NEW SECOND";20\r\r\n
+> LIST\r\r\n
+> 10 PRINT "FIRST"\r\n
+> 20 PRINT "NEW SECOND";20\r\n
+> 30 PRINT "THIRD"\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> RUN\r\r\n
+> FIRST\r\n
+> NEW SECOND 20.0\r\n
+> THIRD\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> 40 END\r\r\n
+> 35 PRINT "NOT REACHED AFTER END?"\r\r\n
+> RUN\r\r\n
+> FIRST\r\n
+> NEW SECOND 20.0\r\n
+> THIRD\r\n
+> NOT REACHED AFTER END?\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> SAVE\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LOAD\r\r\n
+> \x14\r\n
+> READY\r\n
+> \n
+> LIST\r\r\n
+> 10 PRINT "FIRST"\r\n
+> 20 PRINT "NEW SECOND";20\r\n
+> 30 PRINT "THIRD"\r\n
+> 35 PRINT "NOT REACHED AFTER END?"\r\n
+> 40 END\r\n
+> \x14\r\n
+> READY\r\n
+> \n

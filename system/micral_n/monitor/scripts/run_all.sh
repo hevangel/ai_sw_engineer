@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Full flow: lint, host replay, LLVM IR, target image, simulator compare.
+# Full flow: lint, host replay, target image, RTL replay.
+# The first three steps run in the ai-sw-engineer image, the last in the
+# ai-hw-engineer image (SKIP_SIM=1 stops before it).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/config.sh"
@@ -10,14 +12,13 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
 status "host replay against oracle"
-cargo test
+cargo test --release
 
-"$here/build.sh" all
+"$here/build.sh" target
 
-if [[ -f $BUILD_DIR/target/$SOFTWARE.bin ]]; then
-    "$here/run_sim.sh"
-    "$here/compare.sh"
+if [[ -n ${SKIP_SIM:-} ]]; then
+    status "SKIP simulator stage (SKIP_SIM)"
 else
-    status "SKIP simulator stage: no target image yet"
+    "$here/compare.sh"
 fi
 status "done"

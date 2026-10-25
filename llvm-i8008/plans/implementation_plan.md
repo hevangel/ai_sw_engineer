@@ -1,11 +1,15 @@
 # llvm-i8008 implementation plan
 
-Milestones (each ends with passing tests):
+| # | Milestone | Status |
+|---|---|---|
+| 1 | ISA + ABI specs; Rust route | done |
+| 2 | MC layer: registers, instructions, encoder, assembler, disassembler; every opcode encodes | done (`tests/mc/`) |
+| 3 | Instruction selection for i8/i16 arithmetic, logic, loads, stores, branches | done (`tests/codegen/`) |
+| 4 | Legalization of wider types; `rt/` helpers; calls, static frames, memory arguments | done (`exec_tests.py`) |
+| 5 | Linker: layouts, GC, frames by overlay, call depth, relocations | done (`asm/i8008_link.py`) |
+| 6 | Rust `core` via build-std; smoke program on the RTL | done (`tests/smoke/hello`) |
+| 7 | Titles: Micral N boot ROM, monitor, Shooting Stars, SCELBAL | done; the monitor's ROM fit is open |
+| 8 | Size: H:L and A tracking, IPRA, `__leaf_` convention, data-page mode, byte pairs, aligned-data known bits | done; more for the monitor |
 
-1. ISA + ABI specs written; Rust target JSON drafted.
-2. MC layer: register info, instruction definitions, encoder; assemble every opcode (`tests/mc/`).
-3. Instruction selection for integer add/sub/logic/load/store/branch at the native width (`tests/codegen/`).
-4. Legalization of wider types; runtime helpers; calls and stack frames.
-5. Linker + image packaging; `scripts/build_image.sh` contract satisfied.
-6. `core` builds via `-Zbuild-std=core`; smoke programs run on the simulator (`tests/smoke/`).
-7. First real title compiled and run.
+Next: fit the monitor's 2 KiB ROM; better register allocation around H:L
+(an `LEI %lo(x)` before a pair move is often dead).

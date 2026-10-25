@@ -1,12 +1,6 @@
-# boot oracle
+# Boot ROM oracle
 
-Expected behavior captured from the **original** program running on a simulator of the real machine. Never derived from this repository's Rust.
-
-```text
-oracle/
-├── transcripts/   — *.txt input/output transcripts replayed by tests/oracle_replay.rs
-├── traces/        — optional instruction/bus traces (compressed if large)
-└── capture.md     — how each file was captured: simulator, revision, original SHA-256, command
-```
-
-Transcript format: `> hex bytes` for inputs, `< hex bytes` for outputs, `#` comments. Name files `NNN_description.txt`.
+The original EPROM's bytes are unpublished. The boot ROM's oracle is the
+programs it loads: `scripts/run_sim.sh` boots the other titles' disk images
+on the RTL and replays their own transcripts, which were captured from their
+originals. The disk protocol follows the MO5 emulator (`../spec/spec.md`).

@@ -1,15 +1,16 @@
-//! Machine I/O as seen by basic.
+//! Machine I/O as seen by SCELBAL: the teletype, and the halt instruction.
 //!
-//! The portable core in `lib.rs` talks only to this trait. Two implementations
-//! exist: a mock in `tests/` that replays oracle transcripts on the host, and
-//! the real-machine one in `system/micral_n/platform/runtime/`.
-//!
-//! Replace these methods with the machine's real interface (keyboard matrix
-//! scan, printer drum, video memory, ...) and keep the widths the original used.
+//! The portable core in `lib.rs` talks only to this trait. Two
+//! implementations exist: the mock in `tests/oracle_replay.rs`, which replays
+//! oracle transcripts on the host, and the Micral N one in `main.rs`
+//! (platform/runtime/tty.s).
 
 pub trait Hal {
-    /// Next input event, or `None` when there is none yet.
-    fn read_input(&mut self) -> Option<u8>;
-    /// Emit one observable output unit (character, printer column, ...).
-    fn write_output(&mut self, value: u8);
+    /// Next key from the teletype, 7-bit ASCII (platform IO-2); waits for
+    /// one. A host that runs out of keys ends the session by unwinding.
+    fn getc(&mut self) -> u8;
+    /// Print one character, 7-bit ASCII.
+    fn putc(&mut self, c: u8);
+    /// The original executes HLT (UDF and the safety halts).
+    fn halt(&mut self);
 }

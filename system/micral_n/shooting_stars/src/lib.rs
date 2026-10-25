@@ -122,7 +122,11 @@ fn game<H: Hal>(h: &mut H) -> bool {
                 continue;
             }
             let (pos, galaxy, flip) = MASKS[(c - b'1') as usize];
-            let is_star = if pos == 0 { centre == 1 } else { fringe & pos != 0 };
+            let is_star = if pos == 0 {
+                centre == 1
+            } else {
+                fringe & pos != 0
+            };
             if !is_star {
                 puts(h, MESS1);
                 continue;

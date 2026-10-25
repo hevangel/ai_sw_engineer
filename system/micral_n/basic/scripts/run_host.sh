@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the host build interactively: stdin -> core -> stdout.
+# Run SCELBAL on the host: stdin -> teletype -> stdout. Start with SCR.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 cd "$TITLE_DIR"

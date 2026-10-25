@@ -14,7 +14,9 @@ struct Mock {
 
 impl Hal for Mock {
     fn getc(&mut self) -> u8 {
-        self.keys.pop_front().expect("the game read past the typed keys")
+        self.keys
+            .pop_front()
+            .expect("the game read past the typed keys")
     }
     fn putc(&mut self, c: u8) {
         self.out.push(c);
@@ -51,12 +53,19 @@ fn unescape(s: &str) -> Vec<u8> {
 #[test]
 fn oracle_transcripts() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/oracle/transcripts");
-    let mut names: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
     names.sort();
     let mut failed = 0;
     for p in &names {
         let text = fs::read_to_string(p).unwrap();
-        let mut m = Mock { keys: VecDeque::new(), out: Vec::new(), halted: false };
+        let mut m = Mock {
+            keys: VecDeque::new(),
+            out: Vec::new(),
+            halted: false,
+        };
         let mut want = Vec::new();
         for line in text.lines() {
             if let Some(r) = line.strip_prefix("< ") {
@@ -71,7 +80,12 @@ fn oracle_transcripts() {
             println!("ok   {name}");
         } else {
             failed += 1;
-            let at = m.out.iter().zip(&want).position(|(a, b)| a != b).unwrap_or(m.out.len().min(want.len()));
+            let at = m
+                .out
+                .iter()
+                .zip(&want)
+                .position(|(a, b)| a != b)
+                .unwrap_or(m.out.len().min(want.len()));
             println!(
                 "FAIL {name}: first difference at byte {at}\n  got:  {:?}\n  want: {:?}",
                 String::from_utf8_lossy(&m.out[at.saturating_sub(20)..(at + 40).min(m.out.len())]),

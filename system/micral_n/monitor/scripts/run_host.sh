@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the host build interactively: stdin -> core -> stdout.
+# Run monitor on the host: stdin -> teletype -> stdout.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 cd "$TITLE_DIR"
