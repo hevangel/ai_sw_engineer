@@ -3,6 +3,10 @@
 Memory map, I/O, linker script and the **image runner** that executes any 4004
 ROM image on a whole-machine simulator and captures the printed tape.
 
+The standalone [Rust system emulator](../emulator/README.md) also provides a
+host library and CLI for flat-ROM, stock-RAM runs. It uses the same pinned
+`chips` cores as the secondary runner; XL/banked variants remain in this runner.
+
 - [memory_map.md](memory_map.md) — ROM/RAM spaces and the 1280-byte budget
   (plus the **Extended (xl) board** section: 16 × 4001 ROM + 16 × 4002 RAM)
 - [io_map.md](io_map.md) — ports, keyboard matrix, printer hammer word

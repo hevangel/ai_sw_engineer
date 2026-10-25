@@ -10,6 +10,10 @@ This is the software-side sibling of [ai_hw_engineer](https://github.com/hevange
 
 **This repository is the AI software engineer.** Its specs, plans, tool docs, templates, scripts, Rust sources, compiler backends and reports are the working context the engineer uses.
 
+Each system also gets a host Rust emulator that runs machine-code images with
+the machine's memory and peripherals. The first standalone system emulator is
+the [Busicom 141-PF library and CLI](system/busicom_141pf/emulator/README.md).
+
 ## The pipeline
 
 Every piece of software goes through the same pipeline:
