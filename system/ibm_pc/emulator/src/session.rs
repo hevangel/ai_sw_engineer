@@ -8,7 +8,10 @@
 //! boot                          power on (reset); first step only
 //! type 10-14-81\r               keys typed through scan codes (\r = Enter)
 //! until contains|endswith|row T wait until the screen shows T
+//! until idle N                  wait N clocks (screens that cannot be read as text)
 //! screen                        (output only) 25 rows follow, prefixed '|'
+//! vram sha256 <hex> mode <hex> palette <hex>
+//!                               (output only, graphics modes) video memory and registers
 //! disk 1 sha256 <hex>           (output only) drive image fingerprint
 //! ```
 //!
@@ -31,6 +34,8 @@ pub enum Kind {
     Contains,
     EndsWith,
     Row,
+    /// Run for a fixed number of clocks; the needle is the count.
+    Idle,
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +57,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
             || line.starts_with('|')
             || line == "screen"
             || line.starts_with("disk ")
+            || line.starts_with("vram ")
         {
             continue;
         } else if line == "boot" {
@@ -66,6 +72,12 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 "contains" => Kind::Contains,
                 "endswith" => Kind::EndsWith,
                 "row" => Kind::Row,
+                "idle" => {
+                    needle
+                        .parse::<u64>()
+                        .map_err(|_| at("idle needs a clock count"))?;
+                    Kind::Idle
+                }
                 other => return Err(at(&format!("unknown condition {other:?}"))),
             };
             let keys = action
@@ -90,6 +102,7 @@ fn holds(rows: &[String], kind: Kind, needle: &str) -> bool {
     match kind {
         Kind::Contains => rows.iter().any(|r| r.contains(needle)),
         Kind::Row => rows.iter().any(|r| r == needle),
+        Kind::Idle => true,
         Kind::EndsWith => rows
             .iter()
             .rfind(|r| !r.trim().is_empty())
@@ -123,11 +136,19 @@ pub fn run(machine: &mut Machine, steps: &[Step]) -> Result<String, String> {
         }
         let before = rows(machine);
         let limit = machine.clock() + STEP_LIMIT_CLOCKS;
+        let idle_until = match step.kind {
+            Kind::Idle => machine.clock() + step.needle.parse::<u64>().unwrap_or(0),
+            _ => 0,
+        };
         loop {
             machine.run(20_000);
             let now = rows(machine);
             let changed = step.keys.is_none() || now != before;
-            if machine.board.kbd.queued() == 0 && changed && holds(&now, step.kind, &step.needle) {
+            if machine.board.kbd.queued() == 0
+                && changed
+                && machine.clock() >= idle_until
+                && holds(&now, step.kind, &step.needle)
+            {
                 break;
             }
             if machine.clock() > limit {
@@ -148,10 +169,20 @@ pub fn run(machine: &mut Machine, steps: &[Step]) -> Result<String, String> {
             Kind::Contains => "contains",
             Kind::EndsWith => "endswith",
             Kind::Row => "row",
+            Kind::Idle => "idle",
         };
         let _ = writeln!(out, "until {kind} {}\nscreen", step.needle);
         for row in rows(machine) {
             let _ = writeln!(out, "|{row}");
+        }
+        if machine.board.cga.graphics() {
+            let _ = writeln!(
+                out,
+                "vram sha256 {} mode {:02x} palette {:02x}",
+                sha256::hex(machine.vram()),
+                machine.board.cga.mode,
+                machine.board.cga.palette
+            );
         }
         if let Some(d) = &machine.board.fdc.disks[1] {
             let _ = writeln!(out, "disk 1 sha256 {}", sha256::hex(&d.data));

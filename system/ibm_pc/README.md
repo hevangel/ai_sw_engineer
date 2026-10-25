@@ -2,7 +2,7 @@
 
 CPU: Intel 8088 (8086 instruction set). Backend: `llvm-i8086` (real-mode 8086 only).
 
-Status: **the emulator boots the unchanged IBM BIOS and PC DOS 1.00 and matches the RTL**; the backend and titles are not started. The emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes; the whole machine (8088, 8259, 8253, 8255 and keyboard, 8237, 8272, CGA text) runs a 14-step DOS and BASIC session whose screens and written disk image are identical to the RTL's ([report](emulator/report/verification.md)). No CGA graphics, speaker, compiled image, backend code or title yet.
+Status: **the emulator boots the unchanged IBM BIOS and PC DOS 1.00 and matches the RTL**; the backend and titles are not started. The emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes; the whole machine (8088, 8259, 8253, 8255 and keyboard, 8237, 8272, CGA text) runs a 20-step DOS and BASIC session, including CGA graphics, whose screens, video memory and written disk image are identical to the RTL's ([report](emulator/report/verification.md)). No speaker, compiled image, backend code or title yet.
 
 ## History
 

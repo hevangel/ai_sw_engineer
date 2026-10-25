@@ -4,12 +4,15 @@
 Runs the RTL system build (`Vibm_pc`: unchanged IBM BIOS, Cassette BASIC and PC
 DOS 1.00 on the RTL 8088 and peripheral chips) through a scripted session and
 writes what the CGA screen shows each time the machine settles, in the format
-`tests/dos_session.rs` replays on the Rust emulator:
+`tests/replay.rs` replays on the Rust emulator:
 
     boot                       power on (the first step only)
     type <text>                keys typed through scan codes (\\r = Enter)
-    until <contains|endswith> <text>
+    until <contains|endswith|row> <text>
+    until idle <clocks>        wait a fixed time (graphics screens cannot be read as text)
     screen                     25 lines follow, each prefixed with '|'
+    vram sha256 <hex> mode <hex> palette <hex>   graphics modes only
+    disk <drive> sha256 <hex>  SHA-256 of the drive image at that point
 
 Expected output therefore comes from the RTL, never from the Rust emulator.
 Run inside the project's Docker image, from `scripts/rtl_oracle.sh`.
@@ -46,6 +49,13 @@ SESSION = [
     ('n', ('endswith', 'A>')),
     ('copy time.com b:clock.com\r', ('endswith', 'A>')),
     ('dir b:\r', ('endswith', 'A>')),
+    # CGA graphics from ROM BASIC: 320x200 four colours, then 640x200.
+    ('basic\r', ('contains', 'Ok')),
+    ('screen 1,0\r', ('idle', '20000000')),
+    ('line (20,20)-(180,120),2,bf\r', ('idle', '20000000')),
+    ('circle (160,100),70,3\r', ('idle', '20000000')),
+    ('screen 2\r', ('idle', '20000000')),
+    ('line (0,0)-(639,199)\r', ('idle', '20000000')),
 ]
 
 
@@ -69,6 +79,8 @@ def holds(rows, cond):
         return any(text in r for r in rows)
     if kind == 'row':
         return any(r == text for r in rows)
+    if kind == 'idle':
+        return True
     body = [r for r in rows if r.strip()]
     return bool(body) and body[-1].rstrip().endswith(text)
 
@@ -114,11 +126,13 @@ def main():
         else:
             type_text(text)
             lines.append('type ' + text.replace('\r', '\\r'))
-        limit = state['cycles'] + 400_000_000
+        start = state['cycles']
+        limit = start + 400_000_000
+        idle_until = start + int(cond[1]) if cond[0] == 'idle' else 0
         while True:
             state = command('RUN 1000000')
             rows = screen(state)
-            if state['keysQueued'] == 0 and holds(rows, cond):
+            if state['keysQueued'] == 0 and state['cycles'] >= idle_until and holds(rows, cond):
                 break
             if state['cycles'] > limit:
                 raise SystemExit(f'timeout waiting for {cond}\n' + '\n'.join(rows))
@@ -129,6 +143,9 @@ def main():
         lines.append(f'until {cond[0]} {cond[1]}')
         lines.append('screen')
         lines.extend('|' + r for r in rows)
+        if state['mode'] & 2:
+            vram = hashlib.sha256(bytes.fromhex(state['vram'])).hexdigest()
+            lines.append(f"vram sha256 {vram} mode {state['mode']:02x} palette {state['palette']:02x}")
         lines.append(f'disk 1 sha256 {drive_hash(command)}')
         print(f'recorded after {state["cycles"]} clocks: {cond}', flush=True)
     proc.stdin.write('QUIT\n')

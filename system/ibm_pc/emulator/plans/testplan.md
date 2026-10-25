@@ -2,7 +2,7 @@
 
 | Level | What | Oracle | Command (from `system/ibm_pc/emulator/`) |
 |---|---|---|---|
-| Units | SHA-256, scan codes, script parsing, firmware/disk size checks | FIPS 180-4 vectors; hand-worked | `cargo test` |
+| Units | SHA-256, scan codes, script parsing, firmware/disk size checks, CGA graphics decoding (banks, palettes, 640x200) | FIPS 180-4 vectors; hand-worked from the Technical Reference | `cargo test` |
 | CPU programs | control flow, stack, interrupts and shadows, `REP` interruption, memory map, I/O | Intel manual, worked by hand | `cargo test --test cpu_programs` |
 | Devices | PIC priority/EOI, PIT modes and latch, DMA flip-flop and terminal count, FDC command phases, keyboard handshake | datasheets, worked by hand | `cargo test --test devices` |
 | CLI | usage and error exits | n/a | `cargo test --test cli` |
@@ -44,8 +44,9 @@ that modify the instruction's own bytes.
 `scripts/rtl_oracle.sh` drives the RTL's `Vibm_pc` simulator (the whole 5150 on the
 RTL 8088, 8259, 8253, 8255, 8237 and 8272, running the unchanged firmware) through
 the session in `scripts/rtl_oracle.py` and writes
-`oracle/transcripts/dos100_session.txt`: after each typed step, the 25-row text screen
-and the SHA-256 of drive B. `cargo test --test replay -- --ignored` runs the same
+`oracle/transcripts/dos100_session.txt`: after each typed step, the 25-row text screen,
+in graphics modes the SHA-256 of the 16 KiB video memory with the CGA mode and colour
+registers, and the SHA-256 of drive B. `cargo test --test replay -- --ignored` runs the same
 steps on the Rust machine and compares the transcripts exactly; the same comparison
 is available from the command line (`ibm_pc-emulator ... session.txt | diff`). The
 firmware's SHA-256s are checked first (`original/provenance.md`). Both machines run

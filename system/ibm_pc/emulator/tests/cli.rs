@@ -20,6 +20,7 @@ fn help_exits_zero_and_describes_the_options() {
         "--disk-a",
         "--disk-b",
         "--ram",
+        "--ppm",
         "<session.txt>",
     ] {
         assert!(text.contains(option), "usage lacks {option}: {text}");

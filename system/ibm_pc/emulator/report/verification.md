@@ -1,5 +1,27 @@
 # ibm_pc emulator verification
 
+## 2026-10-25 (third record): CGA graphics
+
+Added: decoding of the CGA 320x200 four-colour and 640x200 two-colour modes to RGBI
+pixels and PPM (`Cga::pixels`, `Cga::ppm`, `ibm_pc-emulator --ppm`), the `until idle` wait
+and the `vram sha256 ... mode ... palette ...` transcript line. The RTL session now
+continues from `DIR B:` into ROM BASIC graphics: `SCREEN 1,0`, a filled box
+(`LINE ... ,2,BF`), a circle, `SCREEN 2` and a diagonal line (6 more steps, 20 in all).
+
+| Command | Result |
+|---|---|
+| `scripts/rtl_oracle.sh` | re-recorded the 20-step session on the RTL (about 12 minutes, 448 million clocks); five graphics checkpoints with distinct video-memory hashes in modes 2Ah (320x200) and 1Eh (640x200) |
+| `cargo test --release --test replay -- --ignored` | **20 of 20 steps identical to the RTL**: every screen, drive B's hash, and the SHA-256 of the 16 KiB video memory plus the mode and colour-select registers at each graphics checkpoint (1.4 s of host time) |
+| CLI run diffed against the transcript | identical |
+| unit tests for the decoder | banks interleave (even rows at 0, odd at 2000h), palette 0 and 1, the black-and-white bit, intensity, background colour, and 640-pixel mode |
+| silicon vectors, `fmt`, `clippy -D warnings`, all other tests | unchanged and passing |
+
+What this does and does not show: the video memory contents, written by the original
+BIOS and ROM BASIC through the real INT 10h graphics routines, are byte-identical to the
+RTL's; the colours the decoder assigns follow the Technical Reference's palette rules
+but were checked by hand-worked unit tests and by looking at the rendered image, not
+against an RTL image (the RTL has no pixel dump to compare).
+
 ## 2026-10-25 (second record): the whole 5150 on the Rust machine
 
 Added since the first record: the board (PIC, PIT, PPI and keyboard, DMA, diskette

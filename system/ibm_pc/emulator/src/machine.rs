@@ -344,6 +344,11 @@ impl Machine {
         self.board.cga.text(&self.board.cga_mem)
     }
 
+    /// The 16 KiB of CGA video memory.
+    pub fn vram(&self) -> &[u8] {
+        &self.board.cga_mem
+    }
+
     pub fn clock(&self) -> u64 {
         self.board.clock
     }

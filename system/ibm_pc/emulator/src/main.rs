@@ -4,13 +4,15 @@ use system_emulator::session;
 
 const USAGE: &str =
     "Usage: ibm_pc-emulator --bios <bios.bin> [--basic <basic.bin>] [--disk-a <160K.img>]\n\
-                     [--disk-b <160K.img>] [--ram <KiB>] <session.txt>\n\
+                     [--disk-b <160K.img>] [--ram <KiB>] [--ppm <out.ppm>] <session.txt>\n\
 Boots the IBM 5150 model and replays a session script (see src/session.rs);\n\
-prints the recorded transcript. Exits nonzero on invalid input or a timeout.";
+prints the recorded transcript. --ppm saves the final screen as an image when it is\n\
+in a CGA graphics mode. Exits nonzero on invalid input or a timeout.";
 
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
-    let (mut bios, mut basic, mut disk_a, mut disk_b, mut script) = (None, None, None, None, None);
+    let (mut bios, mut basic, mut disk_a, mut disk_b, mut script, mut ppm) =
+        (None, None, None, None, None, None);
     let mut ram = 64usize;
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
@@ -23,6 +25,7 @@ fn run() -> Result<(), String> {
             "--basic" => basic = Some(value("--basic")?),
             "--disk-a" => disk_a = Some(value("--disk-a")?),
             "--disk-b" => disk_b = Some(value("--disk-b")?),
+            "--ppm" => ppm = Some(value("--ppm")?),
             "--ram" => {
                 ram = value("--ram")?
                     .parse()
@@ -52,6 +55,14 @@ fn run() -> Result<(), String> {
     }
     let steps = session::parse(&fs::read_to_string(&script).map_err(|e| format!("session: {e}"))?)?;
     print!("{}", session::run(&mut machine, &steps)?);
+    if let Some(path) = ppm {
+        let image = machine
+            .board
+            .cga
+            .ppm(machine.vram())
+            .ok_or("--ppm: the final screen is in a text mode")?;
+        fs::write(&path, image).map_err(|e| format!("{path}: {e}"))?;
+    }
     Ok(())
 }
 

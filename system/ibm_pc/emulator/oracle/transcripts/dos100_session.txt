@@ -406,3 +406,182 @@ screen
 |
 |A>
 disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type basic\r
+until contains Ok
+screen
+|41156 Bytes free
+|Ok
+|print 6*7
+| 42
+|Ok
+|system
+|
+|A>format b:
+|Insert new diskette for drive B:
+|and strike any key when ready
+|
+|
+|Formatting...Format complete
+|
+|
+|Format another (Y/N)?n
+|
+|
+|A>copy time.com b:clock.com
+|           1 File(s) copied
+|A>dir b:
+|CLOCK     COM         250  08-04-81
+|
+|A>basic
+|
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type screen 1,0\r
+until idle 20000000
+screen
+|
+| <
+| ?
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+vram sha256 3ab9f410c7538e4273e9ace7b5999cd4606231a22b6745a0da6b151f72a86b63 mode 2a palette 30
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type line (20,20)-(180,120),2,bf\r
+until idle 20000000
+screen
+|
+| <
+| ?
+|
+|?     ?? ??<   ??  ??< ?
+| ? ? <       <           <<
+|     <<  <   <     <   < <<
+|?? ?   ?  ?<   ??   ?<
+|
+| <
+| ?
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+vram sha256 b237944f3c57b258b4bff85d1cf6d1631eeb5445df89ade9a71fa56239515770 mode 2a palette 30
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type circle (160,100),70,3\r
+until idle 20000000
+screen
+|
+| <
+| ?
+|
+|?     ?? ??<   ??  ??< ?
+| ? ? <       <           <<
+|     <<  <   <     <   < <<
+|?? ?   ?  ?<   ??   ?<
+|
+| <
+| ?
+|
+|    ?     ?  ??<  ? ?
+|?? ? ? <
+|  <    <
+|?? ???   ??  ??<  ? ?
+|
+|   ? ??  <???  ?
+|   ?     < ?  <
+| ? ? ???  ?? ? ?
+|
+| <
+| ?
+|
+|
+vram sha256 dcb6d9985b52ab54acee6642e34643a29519cfe961bfe3a90d5e9623ad772473 mode 2a palette 30
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type screen 2\r
+until idle 20000000
+screen
+|8
+|
+|
+|8
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+vram sha256 cd9a699f6d6f5d545003b98e3eda2a0009a08733962a9da87664a2681ce068a4 mode 1e palette 3f
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840
+type line (0,0)-(639,199)\r
+until idle 20000000
+screen
+|
+|
+|
+|88
+|p  || 8x0x
+|0       0
+|0       0
+|x  || xp p
+|8  8
+|
+|
+|8
+|
+|     <
+|
+|
+|
+|
+|       <
+|
+|
+|
+|
+|
+|
+vram sha256 79c418f596e5e607bbe903f6bda2bf06f9befd6b457c4275a41707596868003c mode 1e palette 3f
+disk 1 sha256 0e91f7a3f2d4aad2f457a93791818068f0cd8deca10cef3443c73b3c1f07c840

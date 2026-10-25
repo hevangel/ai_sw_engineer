@@ -7,17 +7,18 @@ reimplementations and the `llvm-i8086` backend.
 
 **Status:** boots the unchanged IBM BIOS, loads PC DOS 1.00 from a 160 KiB diskette image,
 and runs typed DOS and BASIC sessions. The screens, and the written drive B image, match
-the hardware project's RTL for a 14-step session (boot, date, `DIR`, `CHKDSK`, ROM and
-disk BASIC, `FORMAT B:`, `COPY`). The CPU core passes all 566,721 physical-chip vectors
-the RTL passes. Not done: CGA graphics rendering, the speaker, a graphical front end,
-and compiled `llvm-i8086` images (the backend has no code yet). Contract and limits:
+the hardware project's RTL for a 20-step session (boot, date, `DIR`, `CHKDSK`, ROM and
+disk BASIC, `FORMAT B:`, `COPY`, and BASIC drawing in both CGA graphics modes, compared by
+video-memory hash). The CPU core passes all 566,721 physical-chip vectors
+the RTL passes. Not done: the speaker, an interactive graphical front end, character-ROM
+text rendering, and compiled `llvm-i8086` images (the backend has no code yet). Contract and limits:
 [spec/spec.md](spec/spec.md); evidence: [report/verification.md](report/verification.md).
 
 | Path | Contents |
 |---|---|
 | `src/cpu.rs` | `Cpu`: instruction-level 8088 core; `Bus` trait (byte-wide memory, I/O, NMI/INTR) |
 | `src/machine.rs` | `Machine`/`Board`: memory map, I/O decode, clock, interrupt wiring, DMA service |
-| `src/pic.rs`, `pit.rs`, `ppi.rs`, `dma.rs`, `fdc.rs`, `cga.rs` | the peripherals; `ppi.rs` also holds the keyboard |
+| `src/pic.rs`, `pit.rs`, `ppi.rs`, `dma.rs`, `fdc.rs`, `cga.rs` | the peripherals; `ppi.rs` also holds the keyboard; `cga.rs` also decodes graphics modes to pixels and PPM |
 | `src/session.rs`, `keys.rs`, `sha256.rs` | session scripts and transcripts, text to scan codes, image fingerprints |
 | `src/main.rs` | the `ibm_pc-emulator` command line |
 | `tests/` | `cpu_programs`, `devices`, `cli`, `replay` (RTL transcripts), `silicon_vectors` (physical-chip corpus) |
@@ -42,6 +43,8 @@ system/ibm_pc/emulator/target/release/ibm_pc-emulator \
   system/ibm_pc/emulator/oracle/transcripts/dos100_session.txt > /tmp/session.out
 diff <(grep -v '^#' /tmp/session.out) <(grep -v '^#' system/ibm_pc/emulator/oracle/transcripts/dos100_session.txt)
 ```
+
+Add `--ppm screen.ppm` to save the final screen as an image when it ends in a CGA graphics mode.
 
 The session file is the input (its `screen` and `disk` lines are ignored) and the output
 is a transcript in the same format; an empty diff means the Rust machine showed what the

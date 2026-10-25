@@ -7,11 +7,11 @@ This is separate from the title reimplementations and the `llvm-i8086` backend.
 Status (2026-10-25): the **8088 CPU core** and the **5150 board** (memory and I/O
 decode, interrupt controller, timer, PPI and keyboard, DMA, diskette controller,
 CGA registers and text screen) are implemented. The unchanged IBM BIOS boots PC
-DOS 1.00 from a diskette image and runs typed DOS and BASIC sessions whose screens
-and written disk images match the hardware project's RTL (see
-`report/verification.md`). Not done: CGA graphics output and a frame renderer,
-the speaker, a graphical front end, and running compiled `llvm-i8086` images
-(there are none yet).
+DOS 1.00 from a diskette image and runs typed DOS and BASIC sessions whose screens,
+CGA graphics memory and written disk images match the hardware project's RTL (see
+`report/verification.md`). Not done: the speaker, an interactive graphical front
+end, text-mode rendering with the character ROM, and running compiled `llvm-i8086`
+images (there are none yet).
 
 ## Sources
 
@@ -100,7 +100,7 @@ address bits alias:
 | 60h-63h | 8255 PPI | mode 0; port A = SW1 (PB7 set) or the keyboard latch, port B output latch (timer-2 gate, keyboard clock and acknowledge), port C input (timer-2 output) |
 | 80h-83h | DMA page latches | per IBM wiring: 81h channel 2, 82h channel 3, 83h channel 1 |
 | A0h | NMI mask | latched, no NMI source |
-| 3D0h-3DFh | CGA | 6845 index/data, mode and colour-select registers, status (retrace bits) |
+| 3D0h-3DFh | CGA | 6845 index/data, mode and colour-select registers, status (retrace bits); the 320x200 four-colour and 640x200 two-colour graphics modes decode to RGBI pixels and a PPM image |
 | 3F2h, 3F4h-3F5h | diskette adapter | DOR (drive select, reset, DMA/IRQ enable, motors), 8272 main status and data |
 
 Everything else reads FFh. Absent adapters (serial, printer, game) are absent.
@@ -129,7 +129,10 @@ settled. Transcript format:
 ```
 boot | type <text>        (\r is Enter)
 until contains|endswith|row <text>
+until idle <clocks>       (instead of a text condition: wait a fixed time)
 screen                    (output) 25 rows, each prefixed '|' and right-trimmed
+vram sha256 <hex> mode <hex> palette <hex>
+                          (output, graphics modes) video memory and CGA registers
 disk 1 sha256 <hex>       (output) SHA-256 of drive B's image
 ```
 
@@ -138,12 +141,13 @@ holds, plus 2,000,000 clocks to settle. The RTL oracle (`scripts/rtl_oracle.py`)
 the same format from the hardware project's RTL, so a replay is a text comparison.
 `ibm_pc-emulator --bios B [--basic B] [--disk-a I] [--disk-b I] [--ram KiB] session.txt`
 prints the transcript; invalid input fails with a line number, a timeout or I/O error
-exits nonzero. Drive A is mounted write-protected.
+exits nonzero. `--ppm file` saves the final screen as an image when it is in a graphics
+mode. Drive A is mounted write-protected.
 
 ## Unsupported hardware and variants
 
-More than 64 KiB of RAM on the 5150 board model, MDA, EGA and later video, CGA
-graphics-mode rendering and light pen, the speaker, hard disks, double-sided and
+More than 64 KiB of RAM on the 5150 board model, MDA, EGA and later video, the CGA
+light pen, character-ROM text rendering, the speaker, hard disks, double-sided and
 8-inch diskettes, the 5160 XT variant, serial/printer/game adapters, cassette I/O,
 NMI sources (parity, coprocessor), composite colour artifacts, sub-instruction
 timing, and undocumented NMOS behavior beyond the vector corpus.
