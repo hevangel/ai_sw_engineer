@@ -1,0 +1,28 @@
+[package]
+name = "ibm_pc-emulator"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Rust system emulator for ibm_pc"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across systems.
+name = "system_emulator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ibm_pc-emulator"
+path = "src/main.rs"
+
+# Host crate: `std` is allowed. The 8088 core is written here, with no chip-core
+# dependency (spec E1). The dev-dependencies read the physical-chip test vectors.
+[dependencies]
+
+[dev-dependencies]
+flate2 = "=1.1.2"
+serde = { version = "=1.0.219", features = ["derive"] }
+serde_json = "=1.0.140"
+
+[profile.test]
+opt-level = 3
