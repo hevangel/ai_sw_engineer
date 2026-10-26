@@ -16,6 +16,7 @@ asserts the structural contract WITHOUT a simulator:
 Run: python3 llvm-i4004/asm/tests/test_farcall.py   (exit 0 = pass)
 """
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -35,6 +36,15 @@ WORK = os.path.join(os.environ.get("KIROCREW_SCRATCH", "/tmp"), "test_farcall")
 os.makedirs(WORK, exist_ok=True)
 
 
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
+
+
 def sh(*a):
     subprocess.run(a, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -50,9 +60,8 @@ def main():
     assert P.RELOC_NAME[P.R_I4004_BANK4] == "R_I4004_BANK4"
 
     # tiny program: entry -> f1 -> f2, padded so next-fit scatters them.
-    ll = os.path.join(WORK, "t.ll")
-    with open(ll, "w", newline="\n") as f:
-        f.write('''target datalayout = "e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8"
+    ll = contained(WORK, "t.ll")
+    ll.write_text('''target datalayout = "e-m:e-p:16:8-p1:16:8-p2:16:8-i8:8-i16:8-n8-a:8"
 target triple = "i4004"
 define void @pad(i8 %x){
   store volatile i8 %x, ptr inttoptr (i16 32 to ptr)
@@ -63,9 +72,8 @@ define i8 @f2(i8 %x){ call void @pad(i8 %x) %r=add i8 %x,1 ret i8 %r }
 define i8 @f1(i8 %x){ call void @pad(i8 %x) %a=add i8 %x,1 %r=call i8 @f2(i8 %a) ret i8 %r }
 define void @entry(){ %c=call i8 @f1(i8 0) store volatile i8 %c, ptr inttoptr (i16 0 to ptr) ret void }
 ''')
-    reset = os.path.join(WORK, "reset.s")
-    with open(reset, "w", newline="\n") as f:
-        f.write('''\t.section .reset,"ax"
+    reset = contained(WORK, "reset.s")
+    reset.write_text('''\t.section .reset,"ax"
 \t.globl _start
 _start:
 \tldm 0
