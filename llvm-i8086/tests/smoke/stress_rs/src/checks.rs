@@ -4,6 +4,13 @@
 //! explicitly sized integers are used, so the results do not depend on the
 //! width of `usize`.
 
+// The patterns below are the point: they are what real code looks like.
+#![allow(
+    clippy::manual_is_multiple_of,
+    clippy::unnecessary_fold,
+    clippy::unnecessary_unwrap
+)]
+
 use core::fmt::Write;
 
 pub trait Shape {

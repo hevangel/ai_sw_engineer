@@ -29,6 +29,13 @@ echo "==> committed tests/run objects are current, and llc text == llc object"
 echo "==> committed rt/obj objects are current"
 "$BACKEND_DIR/scripts/build_rt.sh" --check
 
+if rustup toolchain list 2>/dev/null | grep -q nightly; then
+  echo "==> committed Rust smoke objects are current (rustc + llc; needs network the first time)"
+  "$BACKEND_DIR/scripts/build_smoke.sh" --check
+else
+  echo "==> skipped the Rust object check: no nightly toolchain"
+fi
+
 echo "==> linker (asm/): cargo test"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/i8086-ld-target}"
 (cd "$BACKEND_DIR/asm" && cargo test --quiet)

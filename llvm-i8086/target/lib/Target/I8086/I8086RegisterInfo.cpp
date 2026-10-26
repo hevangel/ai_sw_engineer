@@ -12,6 +12,7 @@
 #include "I8086Subtarget.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 
@@ -72,4 +73,15 @@ bool I8086RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
 Register I8086RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   return I8086::BP;
+}
+
+bool I8086RegisterInfo::shouldCoalesce(
+    MachineInstr *MI, const TargetRegisterClass *SrcRC, unsigned SubReg,
+    const TargetRegisterClass *DstRC, unsigned DstSubReg,
+    const TargetRegisterClass *NewRC, LiveIntervals &LIS) const {
+  bool Narrow = NewRC == &I8086::GR16_BASERegClass ||
+                NewRC == &I8086::GR16_INDEXRegClass ||
+                NewRC == &I8086::GR16_PTRRegClass;
+  // Joining two values already in that class is fine.
+  return !Narrow || (SrcRC == NewRC && DstRC == NewRC);
 }

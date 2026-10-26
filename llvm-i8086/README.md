@@ -6,7 +6,7 @@
 | Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
 | Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
 | Rust target | `rust/i8086-none.json` |
-| Status | **assembler, disassembler, object writer, integer code generation, runtime library, linker and image packager done** (milestones 2 to 6): `llc` compiles integer code, `rt/` supplies the rest, `i8086-ld` links and packs a bootable floppy that the original BIOS boots; all verified on the 8088 core; no Rust target yet |
+| Status | **assembler, disassembler, object writer, integer code generation, runtime library, linker, image packager and Rust programs done** (milestones 2 to 7): `llc` compiles integer code, `rt/` supplies the rest, `i8086-ld` links and packs a bootable floppy, and Rust programs (with `core`) built through the msp430 route boot on the original BIOS; all verified on the 8088 core |
 
 ## Strategy
 
@@ -22,7 +22,9 @@ In scope (done): the runtime library `rt/` (32-bit divide, remainder and shifts,
 
 In scope (done): the linker and bootable-image packager `asm/` (`i8086-ld`).
 
-In scope (next): the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (done): Rust (`core`, `no_std`) through `rust/`.
+
+In scope (next): variadic functions and `byval`, a rustc with an i8086 target, Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
 
 ## Layout
 

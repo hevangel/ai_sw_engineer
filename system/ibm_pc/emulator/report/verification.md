@@ -1,5 +1,19 @@
 # ibm_pc emulator verification
 
+## 2026-10-26 (seventh record): Rust programs
+
+`tests/i8086_rust.rs` runs Rust programs built by rustc (as msp430, `core` included), retargeted and compiled by `llvm-i8086`'s `llc`, linked with `i8086-ld`.
+
+| Command | Result |
+|---|---|
+| `cargo test --release --test i8086_rust` | `hello_rs` prints the host's text on the bare core; `stress_rs`, one source file also run natively on the host, prints identical text; the platform image (crt0, HAL, program, runtime library) fits the boot sector and the image region |
+| `cargo test --release --test i8086_rust -- --ignored` (with the original BIOS) | the BIOS boots the floppy, `crt0` loads the program with INT 13h, and the screen shows the lines `hello_rs` prints |
+| `I8086_STRESS_OBJECTS=... cargo test --release --test i8086_rust -- --ignored the_stress` | `stress_rs` at opt-level 1, 2, 3, s, z with `llc -O2` and s, z with `-O0`: all agree with the host; three `-O0` builds do not fit 64 KiB and are skipped, and said so |
+| negative control | a wrong expected value fails the bare-core and the BIOS runs |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | clean |
+
+Not compared with the RTL.
+
 ## 2026-10-25 (sixth record): a linked boot image
 
 The emulator now uses the `llvm-i8086` linker (`llvm-i8086/asm`, a dev-dependency) to

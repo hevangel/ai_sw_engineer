@@ -1,6 +1,6 @@
 # llvm-i8086 report
 
-Status (2026-10-25): milestones 2 (the machine-code layer), 3 (code generation for integer code at 8 and 16 bits), 4 (native multiply/divide, add-with-carry, block instructions), 5 (the runtime library) and 6 (the linker and image packager) are done. `llc -mtriple=i8086` compiles LLVM IR to assembly and ELF objects, `i8086-ld` links them with the runtime library and packs a bootable floppy, and the code runs on the 8088 core, including a boot through the original BIOS. There is no Rust target that builds and no title yet.
+Status (2026-10-25): milestones 2 (the machine-code layer), 3 (code generation for integer code at 8 and 16 bits), 4 (native multiply/divide, add-with-carry, block instructions), 5 (the runtime library) and 6 (the linker and image packager) are done. `llc -mtriple=i8086` compiles LLVM IR to assembly and ELF objects, `i8086-ld` links them with the runtime library and packs a bootable floppy, and the code runs on the 8088 core, including a boot through the original BIOS. Rust programs (`core` included) build and run, by way of the msp430 route. There is no rustc with an i8086 target and no title yet.
 
 | Check | Result |
 |---|---|
@@ -12,7 +12,8 @@ Status (2026-10-25): milestones 2 (the machine-code layer), 3 (code generation f
 | Physical-chip corpus (`tests/mc/vector_check.py`) | 8,370 instruction instances: all decode with MartyPC's mnemonic and no leftover bytes; 7,294 re-assemble byte for byte, 206 to an alternative encoding that disassembles identically, 870 relative branches checked for decoding only; 0 problems |
 | Linker | `asm/`: 19 tests on objects built in the test (placement, alignment, each relocation and its range, garbage collection, weak/duplicate/undefined symbols, region overflow, bss, `/DISCARD/`, the ELF output, the floppy checks, script errors with line numbers, the IBM PC script); `tests/boot/hello.o` linked with the platform script and its `llvm-objdump` disassembly checked with FileCheck |
 | Boot image | `system/ibm_pc/emulator/tests/i8086_boot.rs`: the layout of the packed disk, stage 2 run from the linked binary on the 8088 core (counter in .bss, text on the CGA screen), and the whole boot through the original BIOS (the BIOS reads the boot sector, INT 13h reads sector 2, stage 2 runs); wrong expectations fail as they should |
-| Smoke programs from Rust, the Rust target, titles | not applicable yet |
+| Rust programs | `hello_rs` (`core::fmt` with 16/32/64-bit integers, slices, iterators, sort) prints the host's text on the bare 8088 core and through the original BIOS; `stress_rs` (every integer width, `sort_unstable`, parsing, `dyn` traits, closures, 64-bit formatting) matches the same source run on the host, at opt-level 1, 2, 3, s and z with `llc -O2`, and s and z with `-O0` (opt-level 1 to 3 with `-O0` do not fit 64 KiB) |
+| A title, a rustc with an i8086 target | not applicable yet |
 
 ## What exists
 
@@ -33,7 +34,7 @@ Generated code is checked by running it. The emulator's 8088 core is itself veri
 - The 64-bit divide is a 64-step restoring loop and the 64-bit shifts are conditional constant shifts; the 32-bit divide uses `div` on the common paths. Division by zero: the unsigned 64-bit forms return all ones and the dividend (tested); the 32-bit forms reach the chip's own `div` and so raise its divide error (not tested); the signed forms are unspecified. Timing of the runtime routines is not measured.
 - No `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics, no variadic functions, no `byval`, no interrupt attribute, no floating point.
 - Code quality is first-order: a compare with a boolean result builds the value with a branch; a shift by eight of a value in a register pair does not reuse the same register; no peephole pass.
-- No Rust target (`rust/i8086-none.json`) yet: milestone 7. The linker has no archives, no `-r`, no far relocations and no linker relaxation (`asm/README.md`); the image form is the 160 KiB floppy of the 5150 only (no `.COM`/`.EXE`).
+- No rustc with an i8086 target (`rust/i8086-none.json` is for one); the msp430 route needs optimisation, no floating point and no i128; no variadic functions or `byval`. The linker has no archives, no `-r`, no far relocations and no linker relaxation (`asm/README.md`); the image form is the 160 KiB floppy of the 5150 only (no `.COM`/`.EXE`).
 - Intel manual page numbers for the table rows are still to be added; the corpus is the authority until then.
 - `esc` (coprocessor escapes) and the `0F`/80186+ and undocumented opcodes are rejected on purpose.
 - A label named `short`, `near` or `far` is read as a keyword.

@@ -158,7 +158,8 @@ bool I8086DAGToDAGISel::SelectAddr(SDValue N, SDValue &Base, SDValue &Index,
   if (AM.HasFI)
     Base = CurDAG->getTargetFrameIndex(AM.FI, MVT::i16);
   else if (AM.Base.getNode())
-    Base = Pair ? constrain(AM.Base, I8086::GR16_BASERegClassID, DL) : AM.Base;
+    Base = constrain(AM.Base,
+                     Pair ? I8086::GR16_BASERegClassID : I8086::GR16_PTRRegClassID, DL);
   else
     Base = NoReg;
   Index = AM.Index.getNode()

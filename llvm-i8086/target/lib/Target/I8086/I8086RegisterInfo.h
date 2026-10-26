@@ -31,6 +31,14 @@ public:
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
   Register getFrameRegister(const MachineFunction &MF) const override;
+  /// Never join a value into one of the address classes (BX; SI DI; BX SI DI):
+  /// the vreg would then be pinned to those registers for its whole life and an
+  /// instruction with two such operands could not be allocated. Selection
+  /// makes a short-lived copy at each address use instead.
+  bool shouldCoalesce(MachineInstr *MI, const TargetRegisterClass *SrcRC,
+                      unsigned SubReg, const TargetRegisterClass *DstRC,
+                      unsigned DstSubReg, const TargetRegisterClass *NewRC,
+                      LiveIntervals &LIS) const override;
 };
 
 } // end namespace llvm

@@ -43,7 +43,8 @@ define i16 @elem5() {
 
 ; CHECK-LABEL: elem:
 ; CHECK:      push bx
-; CHECK:      shl bx, 1
+; CHECK:      shl ax, 1
+; CHECK-NEXT: mov bx, ax
 ; CHECK-NEXT: mov ax, word ptr [bx+arr]
 ; CHECK-NEXT: pop bx
 define i16 @elem(i16 %i) {
