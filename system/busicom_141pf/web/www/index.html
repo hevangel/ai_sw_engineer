@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Busicom 141-PF — browser machine</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+<header>
+  <h1>Busicom 141-PF</h1>
+  <div class="controls">
+    <label>Backend
+      <select id="backend">
+        <option value="wasm" selected>Rust / WebAssembly (default)</option>
+        <option value="sv">SystemVerilog (Xezim)</option>
+      </select>
+    </label>
+    <span id="build" class="build-id"></span>
+  </div>
+</header>
+
+<main>
+  <section id="sv-unavailable" hidden>
+    <h2>SystemVerilog (Xezim) backend unavailable</h2>
+    <p>This mode would execute the actual ai_hw_engineer SystemVerilog machine
+    through the HDL Workbench/Xezim adapter — slower than the default, with
+    internal signal inspection and waveforms. It is not available yet:</p>
+    <ul>
+      <li>Xezim adapter qualification (ai_hw_engineer#69) is pending.</li>
+      <li>Shared Workbench/public-system adapter integration (ai_engineer#55) is pending.</li>
+      <li>Surfer waveform integration (ai_hw_engineer#68) is pending.</li>
+    </ul>
+    <p>The default Rust/WebAssembly machine does not depend on any of this.
+    Switch the selector back to use it.</p>
+  </section>
+
+  <section id="machine">
+    <div class="loader">
+      <label class="file">
+        <input type="file" id="rom-file" accept=".bin,.hex,.rom,application/octet-stream">
+        <span id="rom-label">Load firmware image (1–4,096 bytes)…</span>
+      </label>
+      <div id="rom-info" class="rom-info" hidden>
+        <div id="rom-size"></div>
+        <div id="rom-hash"></div>
+        <div id="rom-provenance"></div>
+      </div>
+      <button id="power" disabled>Power / reset</button>
+      <span id="status" class="status" role="status"></span>
+    </div>
+
+    <div class="lamps">
+      <span class="lamp" id="lamp-memory"><i></i>MEMORY</span>
+      <span class="lamp" id="lamp-overflow"><i></i>OVERFLOW</span>
+      <span class="lamp" id="lamp-negative"><i></i>NEGATIVE</span>
+    </div>
+
+    <div class="paper-frame">
+      <div id="paper" class="paper" aria-label="printer tape"></div>
+    </div>
+
+    <div class="selectors">
+      <label>Decimal
+        <select id="dp">
+          <option>0</option><option>1</option><option selected>2</option>
+          <option>3</option><option>4</option><option>5</option><option>6</option>
+          <option>8</option>
+        </select>
+      </label>
+      <label>Rounding
+        <select id="rounding">
+          <option value="0" selected>FL (float)</option>
+          <option value="1">5/4 (round)</option>
+          <option value="8">IN (truncate)</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="keypad" class="keypad"></div>
+    <p class="hint">Keyboard: digits, <kbd>.</kbd> <kbd>+</kbd> <kbd>−</kbd> <kbd>*</kbd> <kbd>/</kbd>
+    <kbd>Enter</kbd>/<kbd>=</kbd>, <kbd>Backspace</kbd>=CE, <kbd>Esc</kbd>=C,
+    <kbd>Q</kbd>=CM <kbd>W</kbd>=RM <kbd>A</kbd>=M− <kbd>S</kbd>=M+ <kbd>D</kbd>=√
+    <kbd>F</kbd>% <kbd>Z</kbd>=M=− <kbd>X</kbd>=M=+ <kbd>T</kbd>=◇(ST) <kbd>E</kbd>=EX
+    <kbd>N</kbd>=SIGN <kbd>J</kbd>=00. Hover a key for its mapping.</p>
+  </section>
+</main>
+
+<footer>
+  Static browser machine for the ai_sw_engineer Busicom 141-PF project.
+  Firmware images are user-provided and never bundled; the original firmware
+  is © Busicom/Intel (non-commercial use via the Replication Project).
+</footer>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
