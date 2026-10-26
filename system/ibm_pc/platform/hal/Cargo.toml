@@ -1,0 +1,12 @@
+[package]
+name = "ibm_pc_hal"
+version = "0.1.0"
+edition = "2021"
+description = "no_std access to the IBM PC 5150: text output, port I/O, far memory. Machine code in ../runtime/hal.s."
+license = "MIT"
+publish = false
+
+[features]
+# A #[panic_handler] that prints "panic" and halts. Turn off to supply your own.
+default = ["panic-handler"]
+panic-handler = []

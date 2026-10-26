@@ -53,4 +53,17 @@ for s in "$BACKEND_DIR"/tests/boot/*.s; do
     echo "wrote tests/boot/$name.o"
   fi
 done
+
+# The platform runtime (crt0 and the HAL's machine code) for the Rust smoke programs.
+for s in "$BACKEND_DIR"/../system/ibm_pc/platform/runtime/*.s; do
+  name="$(basename "$s" .s)"
+  "$BIN/llvm-mc" -triple=i8086 -filetype=obj "$s" -o "$TMP/$name.plat.o"
+  dst="$(dirname "$s")/$name.o"
+  if [[ $CHECK == 1 ]]; then
+    cmp -s "$TMP/$name.plat.o" "$dst" || { echo "stale: ${dst#"$BACKEND_DIR/../"}" >&2; fail=1; }
+  else
+    cp "$TMP/$name.plat.o" "$dst"
+    echo "wrote ${dst#"$BACKEND_DIR/../"}"
+  fi
+done
 exit $fail

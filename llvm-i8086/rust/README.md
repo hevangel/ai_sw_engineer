@@ -1,0 +1,7 @@
+# Rust for llvm-i8086
+
+The pinned rustc has no i8086 target, so `scripts/build_rust.sh` takes the msp430 route: rustc builds `core` and the crate for `msp430-none-elf` (`-Zbuild-std=core`, `panic=abort`, fat LTO), whose data layout equals `spec/abi.md` D1 for every alignment that matters, emits one LLVM IR module, and the script replaces its triple and data layout with ours, refuses what the backend lacks (floating point, i128, atomics, vectors), and runs `llc -mtriple=i8086`. `i8086-none.json` is for a rustc linked against our LLVM, which does not exist yet.
+
+Programs: `tests/smoke/hello_rs` and `tests/smoke/stress_rs` (one source, run on the 8088 and natively on the host, texts compared) with the HAL in `system/ibm_pc/platform/hal` and `runtime/{crt0,hal}.s`. Tests: `system/ibm_pc/emulator/tests/i8086_rust.rs` (bare core always; original BIOS with `--ignored`).
+
+Known problem: `scripts/stress_matrix.sh` shows `stress_rs` builds and agrees at `-C opt-level=z` only so far. At opt-level 1 and `s` with `llc -O2`, register allocation fails ("ran out of registers") because a value constrained to the single-register class `GR16_BASE` (BX) is coalesced with a long-lived value; opt-level 0 is rejected (unoptimised `core` keeps floating point and i128). Planned fix: constrain address registers by a local copy in `SelectAddr` and veto coalescing into `GR16_BASE`/`GR16_INDEX`/`GR16_PTR` in `I8086RegisterInfo::shouldCoalesce`.

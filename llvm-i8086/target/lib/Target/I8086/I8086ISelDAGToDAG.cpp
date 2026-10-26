@@ -172,7 +172,8 @@ bool I8086DAGToDAGISel::SelectAddr(SDValue N, SDValue &Base, SDValue &Index,
     else
       Disp = AM.Sym;
   } else {
-    Disp = CurDAG->getTargetConstant(AM.Disp, DL, MVT::i16);
+    // Addresses wrap inside the 64 KiB segment: the displacement is 16 bits.
+    Disp = CurDAG->getSignedTargetConstant(int16_t(AM.Disp), DL, MVT::i16);
   }
   Seg = NoReg;
   return true;
