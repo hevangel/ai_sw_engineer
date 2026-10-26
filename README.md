@@ -77,6 +77,7 @@ See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_templ
 | Commodore 64 | MOS 6510 | `llvm-mos6502` (llvm-mos) | planned |
 | Nintendo NES | Ricoh 2A03 | `llvm-mos6502` (llvm-mos) | planned |
 | IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | planned |
+| IBM PC AT 5170 | Intel 80286 | `llvm-i286` (new) | audit/specification stage (`llvm-i286/`, issue #66) |
 
 ## Quick start
 
