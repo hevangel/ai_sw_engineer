@@ -1,0 +1,9 @@
+[package]
+name = "mos6502-run"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+mos6502 = { path = "../../../external/mos6502" }
