@@ -5,7 +5,7 @@
 | 1 | Choose the title; record provenance of the original | [README](../README.md), [provenance](../original/provenance.md) | done |
 | 2 | FAT12 disk tool for the 160 KiB floppy | `platform/tools/pcdisk` tests pass on the real DOS disk | done |
 | 3 | Spec from the disassembly | [spec](../spec/spec.md) with an assumption ledger | done (A1 open) |
-| 4 | Oracle: run the original on the RTL | transcripts + final disk images for the disk set in the [testplan](testplan.md) | D1 (as B:), blank and work disk done; error disks D3–D10 next |
+| 4 | Oracle: run the original on the RTL | transcripts + final disk images for the disk set in the [testplan](testplan.md) | D1–D10 recorded (transcripts 001–014); replay needs the Rust core |
 | 5 | Platform: COM-under-DOS variant | link script (org 100h), crt0 with PSP, `int 21h` HAL; a Rust `hello.com` prints through DOS on the Rust emulator and on the RTL | |
 | 6 | Portable core `src/lib.rs` over a `Dos` trait; host replay | every oracle transcript replays byte-exact on the host | |
 | 7 | Build with `llvm-i8086`, run under PC DOS 1.00 | the Rust CHKDSK.COM prints the same text and leaves the same disk as the original on every test disk, on the Rust emulator and on the RTL | |

@@ -16,3 +16,4 @@ One run takes about three minutes of host time (a full RAM test and DOS boot).
 | `001_workdisk.txt` | `workdisk.img` of the hardware project (a formatted blank data disk) | `chkdsk b:` |
 | `002_blank.txt` | `pcdisk blank` | `chkdsk b:` |
 | `003_dosdisk.txt` | `pcdos100.img` | `chkdsk b:` |
+| `004`–`014` | the damaged disks of `scripts/make_disks.py` | see the table in [the spec](../spec/spec.md) |

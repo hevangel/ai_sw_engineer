@@ -13,7 +13,7 @@ Behavior of IBM PC DOS 1.00 `CHKDSK.COM` (1395 bytes, loaded at CS:0100h), deriv
 ### Command line (100h–14Ah)
 
 - `SP` is set to 782h: the program owns a stack and a work area above its image, so image, FAT and the table of directory records share one 64 KiB segment.
-- `AL` at entry is the "first FCB drive invalid" flag. Non-zero gives *Invalid drive specification*. The first byte of the second FCB (5Dh) must be a space, otherwise *Invalid parameter*.
+- `AL` at entry is the "first FCB drive invalid" flag. Non-zero gives *Invalid drive specification*. The first byte of the first FCB's name field (5Dh) must be a space, otherwise *Invalid parameter* (observed: `chkdsk b:x` fails, `chkdsk b: x` does not; a second parameter is ignored).
 - The current drive is saved (AH=19h) in 681h. If a drive was given it is selected (AH=0Eh) and compared with the drive count returned in AL; a drive at or above the count gives *Invalid drive specification*.
 - Vector 24h (critical error) is replaced by a handler at 3BBh around the checks (385h–3BAh save and restore the vector through the interrupt table at 90h). The handler runs STI and, for the checked drive on a disk error, returns "ignore"; otherwise it restores the current drive and chains to the old handler.
 
@@ -81,3 +81,23 @@ See [io.md](io.md).
 | `003_dosdisk` | the PC DOS 1.00 disk reports `40 disk files`, 160256 bytes total, 6144 available |
 | all | `65536 bytes total memory`, `53392 bytes free` on the 64 KiB machine; the report starts with the file count (no header line); the disks are unchanged afterwards (SHA-256 before = after) |
 | all | width: numbers are right-justified in 12 columns, then a space and the text |
+
+### Error and repair cases (oracle 004–014)
+
+Test disks are made by `scripts/make_disks.py`; the disk afterwards is the SHA-256 in each transcript.
+
+| Transcript | Disk | Screen text (after the command line) | Disk afterwards |
+|---|---|---|---|
+| `004_sizes` | 7 files, sizes 0, 1, 511, 512, 513, 1024, 100000 | `7 disk files`, 56320 bytes available | unchanged |
+| `005_size_error` | F5's directory size 5000 instead of 1024 | `File size error for file  F5       DAT` (two spaces before the name), then the totals | changed (entry repaired) |
+| `006_allocation_error` | F6's chain cut by a free cluster | `Allocation error for file F6       DAT`, `File size error for file  F6       DAT`, `98304 bytes disk space freed`, totals with 154624 available | changed |
+| `007_cross_linked` | F5's first cluster set into F6's chain | `File size error for file  F5       DAT`, `Files cross-linked:` newline `     F5       DAT  and  F6       DAT`, `1024 bytes disk space freed`, totals | changed |
+| `008_lost_chain` | 4 used clusters owned by nobody | `2048 bytes disk space freed`, totals | **byte-identical to the disk without the damage** (the clusters are freed again) |
+| `009_full` | one file taking all 313 clusters | `1 disk files`, `0 bytes remain available` | unchanged |
+| `010_media_byte` | FAT media byte FDh | `Diskette not initialized` and nothing else | unchanged |
+| `011_no_args` | (current drive A: is checked) | `40 disk files`, 6144 bytes available (the DOS disk) | unchanged |
+| `012_bad_drive` | `chkdsk c:` | `Invalid drive specification` | unchanged |
+| `013_bad_parameter` | `chkdsk b: x` | normal report (the extra word is ignored) | unchanged |
+| `014_bad_parameter_name` | `chkdsk b:x` | `Invalid parameter` | unchanged |
+
+Corrections to the reading above that these runs force: the *freed* count is the bytes of clusters owned by no file **after** the repairs (a cross-link or a cut chain also frees clusters), the size error is reported again for a file whose chain was cut, and a cross-link is reported *after* the size error of the first file.
