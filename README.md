@@ -84,7 +84,7 @@ See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_templ
 | Atari 2600 | MOS 6507 | `llvm-mos6502` (llvm-mos) | planned |
 | Commodore 64 | MOS 6510 | `llvm-mos6502` (llvm-mos) | planned |
 | Nintendo NES | Ricoh 2A03 | `llvm-mos6502` (llvm-mos) | planned |
-| IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | scaffolded: platform maps and backend ISA/ABI specs drafted; the emulator boots the original BIOS and PC DOS 1.00 and matches the RTL; `llvm-i8086` assembles and disassembles the 8086 integer instruction set (checked against the physical-chip corpus) and `llc` compiles integer code (native mul/div, carries, block moves) that runs on the emulator; the runtime library, a linker and a title are not yet — see `system/ibm_pc/README.md` |
+| IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | scaffolded: platform maps and backend ISA/ABI specs drafted; the emulator boots the original BIOS and PC DOS 1.00 and matches the RTL; `llvm-i8086` assembles and disassembles the 8086 integer instruction set (checked against the physical-chip corpus) and `llc` compiles integer code (native mul/div, carries, block moves) that runs on the emulator; a linker, a Rust target and a title are not yet — see `system/ibm_pc/README.md` |
 
 ## Quick start
 
