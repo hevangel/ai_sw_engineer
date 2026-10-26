@@ -55,3 +55,8 @@ Blame-free: the question is which step let a shared assumption pass as verified.
   TEST level, which external/chips and the RTL present with opposite JCN
   phase, so rows printed one sector early on the RTL; caught by the first RTL
   run (chips was 42/42).
+- `2026-10-25-busicom-141pf-random-corpus-divergences.md` — five core
+  behaviours the ROM contradicts on inputs the 42 examples never exercise
+  (FL result width, width-14 false overflow, zero-result scale, sqrt of a
+  recalled radicand, `M±` alignment); caught by the seeded random corpus
+  replayed on the original ROM.
