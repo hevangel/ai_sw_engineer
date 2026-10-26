@@ -17,6 +17,7 @@ git submodule update --init --depth 1 external/busicom external/chips   # just w
 | `martypc/` | [dbalsom/martypc](https://github.com/dbalsom/martypc) | MIT | Cycle-accurate IBM PC/XT emulator in Rust: secondary oracle for 8088 titles |
 | `busicom/` | [veniamin-ilmer/busicom](https://github.com/veniamin-ilmer/busicom) | none stated | Rust/WASM Busicom 141-PF emulator (board wiring: keyboard via 4003, printer drum timing, side panel) — secondary oracle and reference for `system/busicom_141pf` |
 | `chips/` | [veniamin-ilmer/chips](https://github.com/veniamin-ilmer/chips) | none stated | Rust chip models incl. MCS-4 (`src/mcs4/`: 4004, 4001, 4002, 4003); `busicom` depends on it at `../chips` |
+| `rea/` | [morluto/rea](https://github.com/morluto/rea) | MIT | REA, "Reverse Engineer Anything": MCP server and CLI that disassemble, decompile and trace original binaries (Ghidra, IDA or Hopper providers) and record Evidence; the reverse-engineering tool for every original-software rewrite (see `AGENTS.md`) |
 
 `busicom` and `chips` publish no license: read and run them, but do not copy their code into this repository.
 
