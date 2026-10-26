@@ -1,14 +1,15 @@
 //! Runs code produced by `llvm-i8086` (`llc` and `llvm-mc`) on the emulator.
 //!
 //! `llvm-i8086/tests/run/*.o` are ELF relocatable objects built from the `.ll`
-//! files beside them by `llvm-i8086/scripts/gen_run_objects.sh`. There is no
-//! linker yet (llvm-i8086 milestone 5), so this file carries a small one: it
-//! places the allocatable sections, resolves symbols and applies the five
-//! relocation types of `llvm-i8086/spec/abi.md`. Each function is then called
-//! with the ABI of `abi.md` D3 on the 8088 core, and its results are compared
-//! with a plain Rust function computing the same thing on the host. The
-//! expected values come from the host's integer arithmetic, not from the
-//! compiler or the core.
+//! files beside them by `llvm-i8086/scripts/gen_run_objects.sh`, and
+//! `llvm-i8086/rt/obj/*.o` is the runtime library. There is no linker yet
+//! (llvm-i8086 milestone 6), so this file carries a small one: it places the
+//! allocatable sections of every object, resolves symbols across them and
+//! applies the five relocation types of `llvm-i8086/spec/abi.md`. Each
+//! function is then called with the ABI of `abi.md` D3 on the 8088 core, and
+//! its results are compared with a plain Rust function computing the same
+//! thing on the host. The expected values come from the host's integer
+//! arithmetic, not from the compiler or the core.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,8 +21,8 @@ const LOAD: u32 = 0x1000; // first section address
 const STACK_TOP: u32 = 0xF000;
 const HALT_AT: u32 = 0x0F00; // `hlt`, the return address of every call
 
-fn run_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../llvm-i8086/tests/run")
+fn backend_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../llvm-i8086")
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ struct Section {
     addr: u32,
 }
 
-/// A linked image: bytes at their absolute addresses and the symbol table.
+/// A linked image: bytes at their absolute addresses and the global symbols.
 struct Image {
     bytes: Vec<(u32, Vec<u8>)>,
     symbols: HashMap<String, u32>,
@@ -58,7 +59,15 @@ fn cstr(b: &[u8], o: usize) -> String {
     String::from_utf8(b[o..end].to_vec()).unwrap()
 }
 
-fn link(obj: &[u8]) -> Image {
+/// One parsed object: its sections (placed), symbol addresses and names.
+struct Obj<'a> {
+    bytes: &'a [u8],
+    secs: Vec<Section>,
+    /// (name, address, defined, global) for each symbol-table entry.
+    syms: Vec<(String, u32, bool, bool)>,
+}
+
+fn parse<'a>(obj: &'a [u8], at: &mut u32) -> Obj<'a> {
     assert_eq!(&obj[..4], b"\x7fELF");
     assert_eq!(obj[4], 1, "ELF32");
     assert_eq!(u16le(obj, 18), 0x8086, "e_machine");
@@ -88,87 +97,117 @@ fn link(obj: &[u8]) -> Image {
         let h = shoff + i * shentsize;
         s.name = cstr(obj, strtab + u32le(obj, h) as usize);
     }
-
     // Place the allocatable sections one after the other.
-    let mut at = LOAD;
     for s in secs.iter_mut() {
         if s.flags & 2 != 0 && s.size > 0 {
-            at = at.div_ceil(s.align) * s.align;
-            s.addr = at;
-            at += s.size as u32;
+            *at = at.div_ceil(s.align) * s.align;
+            s.addr = *at;
+            *at += s.size as u32;
         }
     }
-
-    // Symbols.
     let symtab = secs.iter().position(|s| s.kind == 2).expect("symbol table");
     let names = secs[secs[symtab].link].offset;
     let nsyms = secs[symtab].size / 16;
-    let mut sym_addr = vec![0u32; nsyms];
-    let mut symbols = HashMap::new();
-    for (i, slot) in sym_addr.iter_mut().enumerate().skip(1) {
+    let mut syms = vec![(String::new(), 0, false, false); nsyms];
+    for (i, slot) in syms.iter_mut().enumerate().skip(1) {
         let e = secs[symtab].offset + i * 16;
         let name = cstr(obj, names + u32le(obj, e) as usize);
         let value = u32le(obj, e + 4);
+        let bind = obj[e + 12] >> 4; // 0 local, 1 global, 2 weak
         let shndx = u16le(obj, e + 14) as usize;
-        let addr = match shndx {
-            0 => 0,          // undefined: resolved below or an error if used
-            0xFFF1 => value, // absolute
-            n => secs[n].addr + value,
+        let (addr, defined) = match shndx {
+            0 => (0, false),
+            0xFFF1 => (value, true), // absolute
+            n => (secs[n].addr + value, true),
         };
-        *slot = addr;
-        if !name.is_empty() && shndx != 0 {
-            symbols.insert(name, addr);
+        *slot = (name, addr, defined, bind != 0);
+    }
+    Obj {
+        bytes: obj,
+        secs,
+        syms,
+    }
+}
+
+/// Links objects into one image. Every allocatable section is kept (a real
+/// linker would drop what nothing refers to).
+fn link(objs: &[Vec<u8>]) -> Image {
+    let mut at = LOAD;
+    let parsed: Vec<Obj> = objs.iter().map(|o| parse(o, &mut at)).collect();
+
+    let mut globals: HashMap<String, u32> = HashMap::new();
+    for o in &parsed {
+        for (name, addr, defined, global) in &o.syms {
+            if *defined && *global && !name.is_empty() {
+                let prev = globals.insert(name.clone(), *addr);
+                assert!(prev.is_none(), "duplicate definition of {name}");
+            }
         }
     }
 
-    // Section contents, then relocations.
-    let mut data: Vec<Vec<u8>> = secs
-        .iter()
-        .map(|s| {
-            if s.kind == 1 {
-                obj[s.offset..s.offset + s.size].to_vec()
-            } else {
-                vec![0; s.size]
-            }
-        })
-        .collect();
-    for r in secs.iter().filter(|s| s.kind == 4) {
-        let target = r.info;
-        if secs[target].flags & 2 == 0 {
-            continue; // relocations of a debug section
-        }
-        for k in 0..r.size / 12 {
-            let e = r.offset + k * 12;
-            let off = u32le(obj, e) as usize;
-            let info = u32le(obj, e + 4);
-            let addend = u32le(obj, e + 8) as i32;
-            let sym = (info >> 8) as usize;
-            let kind = info & 0xff;
-            let s = i64::from(sym_addr[sym]);
-            let p = i64::from(secs[target].addr) + off as i64;
-            let a = i64::from(addend);
-            let d = &mut data[target];
-            match kind {
-                0 => {}
-                1 => d[off] = (s + a) as u8,
-                2 => d[off..off + 2].copy_from_slice(&((s + a) as u16).to_le_bytes()),
-                3 => {
-                    let v = s + a - p;
-                    assert!((-128..=127).contains(&v), "PC8 out of range");
-                    d[off] = v as i8 as u8;
+    let mut bytes = Vec::new();
+    for o in &parsed {
+        let obj = o.bytes;
+        let mut data: Vec<Vec<u8>> = o
+            .secs
+            .iter()
+            .map(|s| {
+                if s.kind == 1 {
+                    obj[s.offset..s.offset + s.size].to_vec()
+                } else {
+                    vec![0; s.size]
                 }
-                4 => d[off..off + 2].copy_from_slice(&((s + a - p) as i16).to_le_bytes()),
-                t => panic!("unknown relocation type {t}"),
+            })
+            .collect();
+        for r in o.secs.iter().filter(|s| s.kind == 4) {
+            let target = r.info;
+            if o.secs[target].flags & 2 == 0 {
+                continue; // relocations of a debug section
+            }
+            for k in 0..r.size / 12 {
+                let e = r.offset + k * 12;
+                let off = u32le(obj, e) as usize;
+                let info = u32le(obj, e + 4);
+                let addend = u32le(obj, e + 8) as i32;
+                let sym = (info >> 8) as usize;
+                let kind = info & 0xff;
+                let (name, saddr, defined, _) = &o.syms[sym];
+                let s = if *defined {
+                    i64::from(*saddr)
+                } else {
+                    i64::from(
+                        *globals
+                            .get(name)
+                            .unwrap_or_else(|| panic!("undefined symbol {name}")),
+                    )
+                };
+                let p = i64::from(o.secs[target].addr) + off as i64;
+                let a = i64::from(addend);
+                let d = &mut data[target];
+                match kind {
+                    0 => {}
+                    1 => d[off] = (s + a) as u8,
+                    2 => d[off..off + 2].copy_from_slice(&((s + a) as u16).to_le_bytes()),
+                    3 => {
+                        let v = s + a - p;
+                        assert!((-128..=127).contains(&v), "PC8 out of range");
+                        d[off] = v as i8 as u8;
+                    }
+                    4 => d[off..off + 2].copy_from_slice(&((s + a - p) as i16).to_le_bytes()),
+                    t => panic!("unknown relocation type {t}"),
+                }
+            }
+        }
+        for (s, d) in o.secs.iter().zip(data) {
+            if s.flags & 2 != 0 && s.size > 0 {
+                bytes.push((s.addr, d));
             }
         }
     }
-    let bytes = secs
-        .iter()
-        .zip(data)
-        .filter(|(s, _)| s.flags & 2 != 0 && s.size > 0)
-        .map(|(s, d)| (s.addr, d))
-        .collect();
-    Image { bytes, symbols }
+    Image {
+        bytes,
+        symbols: globals,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,9 +306,20 @@ fn values() -> Vec<u16> {
 }
 
 fn load(name: &str) -> Image {
-    let p = run_dir().join(name);
-    let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
-    link(&bytes)
+    let dir = backend_dir();
+    let mut objs = vec![read(&dir.join("tests/run").join(name))];
+    let mut rt: Vec<_> = std::fs::read_dir(dir.join("rt/obj"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "o"))
+        .collect();
+    rt.sort();
+    objs.extend(rt.iter().map(|p| read(p)));
+    link(&objs)
+}
+
+fn read(p: &std::path::Path) -> Vec<u8> {
+    std::fs::read(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
 fn sym(img: &Image, name: &str) -> u32 {
@@ -937,4 +987,257 @@ fn carry_chains() {
 
 fn b2(v: bool) -> u16 {
     u16::from(v)
+}
+
+#[test]
+#[allow(clippy::manual_checked_ops)] // the guard covers several divisions
+fn runtime_32_bit() {
+    let img = load("rt.o");
+    let s = &mut Sys::new(&img);
+    let mut vals: Vec<u32> = vec![
+        0,
+        1,
+        2,
+        3,
+        0x7FFF,
+        0x8000,
+        0xFFFF,
+        0x1_0000,
+        0x1_0001,
+        0x1_FFFF,
+        0x2_0000,
+        0xFFFF_0000,
+        0x7FFF_FFFF,
+        0x8000_0000,
+        0x8000_0001,
+        0xFFFF_FFFE,
+        0xFFFF_FFFF,
+        0x1234_5678,
+        0x0001_8000,
+        0x5555_5555,
+        0xAAAA_AAAA,
+    ];
+    let mut x: u32 = 0xC0FF_EE11;
+    for _ in 0..40 {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        // a spread of magnitudes: full width and shifted right
+        vals.push(x >> (x % 28));
+    }
+    let w = |v: u32| [v as u16, (v >> 16) as u16];
+    let ret = |s: &mut Sys, name: &str, args: &[u16]| -> u32 {
+        let (ax, dx) = s.call(name, args);
+        (u32::from(dx) << 16) | u32::from(ax)
+    };
+    for &a in &vals {
+        for &d in &vals {
+            let args = [w(a)[0], w(a)[1], w(d)[0], w(d)[1]];
+            assert_eq!(
+                ret(s, "mulsi3", &args),
+                a.wrapping_mul(d),
+                "mulsi3({a:#x}, {d:#x})"
+            );
+            if d != 0 {
+                assert_eq!(ret(s, "udiv32", &args), a / d, "udiv32({a:#x}, {d:#x})");
+                assert_eq!(ret(s, "urem32", &args), a % d, "urem32({a:#x}, {d:#x})");
+                if !(a as i32 == i32::MIN && d as i32 == -1) {
+                    assert_eq!(
+                        ret(s, "sdiv32", &args),
+                        (a as i32).wrapping_div(d as i32) as u32,
+                        "sdiv32({a:#x}, {d:#x})"
+                    );
+                    assert_eq!(
+                        ret(s, "srem32", &args),
+                        (a as i32).wrapping_rem(d as i32) as u32,
+                        "srem32({a:#x}, {d:#x})"
+                    );
+                }
+            }
+        }
+        for n in 0..32u16 {
+            let args = [w(a)[0], w(a)[1], n];
+            assert_eq!(ret(s, "shl32v", &args), a << n, "shl32v({a:#x}, {n})");
+            assert_eq!(ret(s, "lshr32v", &args), a >> n, "lshr32v({a:#x}, {n})");
+            assert_eq!(
+                ret(s, "ashr32v", &args),
+                ((a as i32) >> n) as u32,
+                "ashr32v({a:#x}, {n})"
+            );
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::manual_checked_ops)]
+fn runtime_64_bit() {
+    let img = load("rt.o");
+    let s = &mut Sys::new(&img);
+    let vals: Vec<u64> = vec![
+        0,
+        1,
+        3,
+        0xFFFF,
+        0x1_0000,
+        0xFFFF_FFFF,
+        0x1_0000_0000,
+        0x1_0000_0001,
+        0x7FFF_FFFF_FFFF_FFFF,
+        0x8000_0000_0000_0000,
+        0x8000_0000_0000_0001,
+        0xFFFF_FFFF_FFFF_FFFF,
+        0x0123_4567_89AB_CDEF,
+        0xFEDC_BA98_7654_3210,
+        0x0000_0001_8000_0000,
+        0xFFFF_0000_FFFF_0000,
+    ];
+    let words = |v: u64| {
+        [
+            v as u16,
+            (v >> 16) as u16,
+            (v >> 32) as u16,
+            (v >> 48) as u16,
+        ]
+    };
+    let out: u32 = 0x2600;
+    let ret64 = |s: &mut Sys, name: &str, args: &[u64], n: Option<u16>| -> u64 {
+        let mut a = vec![out as u16];
+        for &v in args {
+            a.extend(words(v));
+        }
+        if let Some(n) = n {
+            a.push(n);
+        }
+        s.call_budget(name, &a, 20_000_000);
+        u64::from_le_bytes(s.peek(out, 8).try_into().unwrap())
+    };
+    for &a in &vals {
+        assert_eq!(
+            ret64(s, "udiv64", &[a, 0], None),
+            u64::MAX,
+            "udiv64({a:#x}, 0)"
+        );
+        assert_eq!(ret64(s, "urem64", &[a, 0], None), a, "urem64({a:#x}, 0)");
+        for &d in &vals {
+            assert_eq!(
+                ret64(s, "mul64", &[a, d], None),
+                a.wrapping_mul(d),
+                "mul64({a:#x}, {d:#x})"
+            );
+            if d != 0 {
+                assert_eq!(
+                    ret64(s, "udiv64", &[a, d], None),
+                    a / d,
+                    "udiv64({a:#x}, {d:#x})"
+                );
+                assert_eq!(
+                    ret64(s, "urem64", &[a, d], None),
+                    a % d,
+                    "urem64({a:#x}, {d:#x})"
+                );
+                if !(a as i64 == i64::MIN && d as i64 == -1) {
+                    assert_eq!(
+                        ret64(s, "sdiv64", &[a, d], None),
+                        (a as i64).wrapping_div(d as i64) as u64,
+                        "sdiv64({a:#x}, {d:#x})"
+                    );
+                    assert_eq!(
+                        ret64(s, "srem64", &[a, d], None),
+                        (a as i64).wrapping_rem(d as i64) as u64,
+                        "srem64({a:#x}, {d:#x})"
+                    );
+                }
+            }
+        }
+        for n in [0u16, 1, 2, 7, 8, 15, 16, 17, 31, 32, 33, 47, 48, 63] {
+            assert_eq!(
+                ret64(s, "shl64v", &[a], Some(n)),
+                a << n,
+                "shl64v({a:#x}, {n})"
+            );
+            assert_eq!(
+                ret64(s, "lshr64v", &[a], Some(n)),
+                a >> n,
+                "lshr64v({a:#x}, {n})"
+            );
+            assert_eq!(
+                ret64(s, "ashr64v", &[a], Some(n)),
+                ((a as i64) >> n) as u64,
+                "ashr64v({a:#x}, {n})"
+            );
+        }
+    }
+}
+
+#[test]
+fn runtime_memory_functions() {
+    let img = load("rt.o");
+    let s = &mut Sys::new(&img);
+    let base: u32 = 0x2000;
+    let pat: Vec<u8> = (0..64u32).map(|i| (i * 5 + 1) as u8).collect();
+
+    // memcpy returns dst
+    s.poke(base, &pat);
+    s.poke(base + 0x100, &[0xEE; 80]);
+    assert_eq!(
+        s.call("call_memcpy", &[(base + 0x104) as u16, base as u16, 40])
+            .0,
+        (base + 0x104) as u16
+    );
+    let mut want = vec![0xEEu8; 80];
+    want[4..44].copy_from_slice(&pat[..40]);
+    assert_eq!(s.peek(base + 0x100, 80), want);
+
+    // memmove: every overlap of a 20-byte move inside a 64-byte buffer, both directions
+    for shift in -20i32..=20 {
+        for n in [0u16, 1, 2, 19, 20] {
+            s.poke(base, &pat);
+            let src = base + 20;
+            let dst = (src as i32 + shift) as u32;
+            let r = s.call("call_memmove", &[dst as u16, src as u16, n]).0;
+            assert_eq!(r, dst as u16, "memmove returns dst");
+            let mut want = pat.clone();
+            let from: Vec<u8> = pat[20..20 + n as usize].to_vec();
+            let at = (dst - base) as usize;
+            want[at..at + n as usize].copy_from_slice(&from);
+            assert_eq!(s.peek(base, 64), want, "memmove shift={shift} n={n}");
+        }
+    }
+
+    // memset returns dst and fills with the low byte only
+    for c in [0u16, 0x41, 0xFF, 0x1234] {
+        s.poke(base, &[0xEE; 20]);
+        assert_eq!(
+            s.call("call_memset", &[(base + 2) as u16, c, 9]).0,
+            (base + 2) as u16
+        );
+        let mut want = vec![0xEEu8; 20];
+        for w in want.iter_mut().skip(2).take(9) {
+            *w = c as u8;
+        }
+        assert_eq!(s.peek(base, 20), want, "memset c={c:#x}");
+    }
+
+    // memcmp: the difference of the first unequal bytes, or 0 (bcmp the same)
+    let a: Vec<u8> = b"hello, world\0\xff\x80".to_vec();
+    for k in 0..a.len() {
+        let mut bb = a.clone();
+        s.poke(base, &a);
+        for v in [bb[k].wrapping_add(1), bb[k].wrapping_sub(1), bb[k]] {
+            bb[k] = v;
+            s.poke(base + 0x40, &bb);
+            let want = i16::from(a[k]) - i16::from(v);
+            for f in ["call_memcmp", "call_bcmp"] {
+                let got = s
+                    .call(f, &[base as u16, (base + 0x40) as u16, a.len() as u16])
+                    .0 as i16;
+                assert_eq!(got, want, "{f} byte {k}: {} vs {v}", a[k]);
+            }
+        }
+    }
+    assert_eq!(
+        s.call("call_memcmp", &[base as u16, (base + 0x40) as u16, 0])
+            .0,
+        0
+    );
 }

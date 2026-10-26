@@ -9,6 +9,7 @@
   - `vector_check.py` — every instruction form against the physical-chip corpus (below)
 - `codegen/` — `llc` output checked with FileCheck: instruction choice, addressing modes, frames, calls, branches (milestone 3)
 - `run/` — `.ll` programs compiled to ELF objects (`scripts/gen_run_objects.sh`, committed as `*.o`), linked by a small linker in `system/ibm_pc/emulator/tests/i8086_codegen.rs`, called with the ABI of `spec/abi.md` on the 8088 core, and compared with the same computation on the host (not lit tests)
+- `../rt/` — the runtime library; `run/rt.ll` calls every routine and the emulator test links it with `rt/obj/*.o`
 - `smoke/` — small programs run on the simulator with expected final state (milestone 7)
 
 `vector_check.py` is the independent opcode table: SingleStepTests/8086 lists the

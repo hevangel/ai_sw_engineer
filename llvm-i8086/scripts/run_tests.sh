@@ -26,6 +26,9 @@ I8086_TEST_TMP="${I8086_TEST_TMP:-/tmp/i8086-lit}" PATH="$BIN:$PATH" \
 echo "==> committed tests/run objects are current, and llc text == llc object"
 "$BACKEND_DIR/scripts/gen_run_objects.sh" --check
 
+echo "==> committed rt/obj objects are current"
+"$BACKEND_DIR/scripts/build_rt.sh" --check
+
 VECTORS="${I8086_VECTORS:-/hw/design/intel_8086/work/reference/v1}"
 if [[ -f $VECTORS/metadata.json ]]; then
   echo "==> physical-chip vector corpus check ($VECTORS)"

@@ -6,7 +6,7 @@
 | Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
 | Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
 | Rust target | `rust/i8086-none.json` |
-| Status | **assembler, disassembler, object writer and integer code generation done** (milestones 2 and 3): `llc` compiles i8/i16 code, calls and frames, verified on the 8088 core; no runtime library, linker or Rust target yet |
+| Status | **assembler, disassembler, object writer, integer code generation and the runtime library done** (milestones 2 to 5): `llc` compiles integer code with calls and frames, native mul/div, carries and block moves, and `rt/` supplies the rest; all verified on the 8088 core; no linker or Rust target yet |
 
 ## Strategy
 
@@ -18,7 +18,9 @@ In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and d
 
 In scope (done): `llc -mtriple=i8086` selects integer code at 8 and 16 bits (32/64-bit by the generic legalizer with add/adc chains), native 16-bit multiply and divide, `rep movs`/`stos`, calls and stack frames (`spec/codegen.md`, `spec/abi.md`).
 
-In scope (next): the runtime library (32/64-bit divide and shifts, 64-bit multiply, `memmove`), a linker and image packager, and the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (done): the runtime library `rt/` (32-bit divide, remainder and shifts, the 64-bit operations, `mem*`).
+
+In scope (next): a linker and image packager, and the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
 
 ## Layout
 
@@ -32,6 +34,7 @@ In scope (next): the runtime library (32/64-bit divide and shifts, 64-bit multip
 | `target/` | LLVM `lib/Target/I8086` sources or patches applied onto `external/llvm-project` |
 | `rust/` | Rust target JSON, build-std notes, linker wrapper |
 | `asm/` | assembler/linker (LLVM MC or standalone) |
-| `tests/` | `codegen/` lit+FileCheck, `mc/` encode tests, `smoke/` simulator programs |
+| [rt/](rt/README.md) | the runtime library: 32-bit divide and shifts, 64-bit operations, `mem*` |
+| `tests/` | `codegen/` lit+FileCheck, `mc/` encode tests, `run/` programs run on the emulator, `smoke/` simulator programs |
 | `scripts/` | `build_llvm.sh`, `build_rustc.sh`, `build_image.sh`, `run_tests.sh` |
 | [report/](report/final_report.md) | final report |

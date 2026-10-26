@@ -8,6 +8,7 @@
 | MC vs the chip | `tests/mc/vector_check.py` | SingleStepTests/8086 (physical Intel P80C86A-2): bytes and MartyPC disassembly of random instances of every opcode | `tests/mc/` |
 | Codegen shape | `llc` + FileCheck | hand-checked expected asm | `tests/codegen/` |
 | Codegen semantics | `llc -filetype=obj`, a small linker, the `system/ibm_pc` emulator | the same computation on the host (wrapping integer arithmetic), over edge values and a fixed pseudo-random sequence | `tests/run/*.ll`, `system/ibm_pc/emulator/tests/i8086_codegen.rs` |
+| Runtime library | `tests/run/rt.o` linked with `rt/obj/*.o`, run on the `system/ibm_pc` emulator | host arithmetic and `memmove`/`memcmp` semantics, over edge values and magnitude spreads | `rt/`, `system/ibm_pc/emulator/tests/i8086_codegen.rs` |
 | Text vs object | `llc` then `llvm-mc`, against `llc -filetype=obj` | the two routes must agree section by section | `scripts/gen_run_objects.sh` |
 | Smoke programs | the `system/ibm_pc` emulator, then the RTL | expected register/memory state | `tests/smoke/` (milestone 7) |
 | Rust end-to-end | `rustc` → image → emulator | known output | `tests/smoke/` |

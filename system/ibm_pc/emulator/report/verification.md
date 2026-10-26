@@ -1,5 +1,21 @@
 # ibm_pc emulator verification
 
+## 2026-10-25 (fifth record): the `llvm-i8086` runtime library
+
+`tests/i8086_codegen.rs` now links several objects (the test linker resolves symbols
+across them) and runs the runtime library of `llvm-i8086/rt/` on the core.
+
+| Command | Result |
+|---|---|
+| `cargo test --test i8086_codegen` | 13 of 13: the earlier 10 programs plus 32-bit divide/remainder/shifts/product (3,721 operand pairs each for the divides, every shift count 0..31), the 64-bit multiply/divide/remainder/shifts (256 pairs each, 14 shift counts), and `memcpy`/`memmove`/`memset`/`memcmp`/`bcmp` (every overlap of a 20-byte move, every byte position for `memcmp`) |
+| negative controls | a deliberately wrong expectation fails for the 32-bit and the 64-bit divide |
+| `cargo fmt -- --check`, `cargo clippy --all-targets` | clean |
+
+Again a use of the core, not a change to it. It exercises `div`, `mul`, `rcl`/`rcr`,
+`loop`, `jcxz`, `cwd`, `std` with `rep movsb` backward, and `repe cmpsb`; the results
+are the host's. No timing is checked.
+
+
 ## 2026-10-25 (fourth record): compiled `llvm-i8086` code
 
 The emulator now serves as the execution oracle for the `llvm-i8086` backend:
