@@ -874,7 +874,7 @@ fn carry_chains() {
         ]
     };
     let out: u32 = 0x2600;
-    let mut ret64 = |s: &mut Sys, name: &str, args: &[u64]| -> u64 {
+    let ret64 = |s: &mut Sys, name: &str, args: &[u64]| -> u64 {
         let mut a = vec![out as u16];
         for &v in args {
             a.extend(words(v));
