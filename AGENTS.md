@@ -132,13 +132,13 @@ Fill `spec/` and `plans/` before writing Rust or TableGen.
 Each title in the website's software view has one issue in this repository, labelled `software`, `layer:*` (`os`, `driver`, `firmware`, `software`), `category:*` and `system:*`. Work the steps in order and tick them in the issue; each needs committed evidence:
 
 1. **Original binary**: download the original binary/ROM/disk image; record URL, SHA-256 and license in `original/provenance.md` (the binary itself stays gitignored unless freely redistributable).
-2. **Run the original** on the system's Rust emulator (`system/<system>/emulator/`) and capture the oracle (transcripts, traces, screens, audio) under `oracle/`. Until our emulator runs it, use an independent third-party emulator and record which.
+2. **Run the original** on both an independent open-source emulator (MAME, VICE, Stella, AppleWin, MartyPC, SIMH, ...; record name, version, configuration) and our Rust emulator (`system/<system>/emulator/`). Capture the oracle from the open-source run under `oracle/`; any disagreement between the two emulators is a finding.
 3. **Source**: if source code exists, download it with provenance and license.
 4. **Documents**: download every manual, datasheet, listing and article you can find; clean each into Markdown under `reference/` or `<software>/spec/docs/` with the source URL and SHA-256.
 5. **Reverse engineer** the original with REA (above) and write `spec/spec.md` and `spec/io.md`.
 6. **Rewrite in Rust** (`no_std` core + HAL, see Conventions).
-7. **Run the Rust version on the Rust emulator** and compare it with the original.
-8. **Loop until identical.** Behavioral equivalence is proven by committed test cases that drive both versions with the same timed, keyboard, mouse, joystick, paddle, disk or other inputs and compare the observable outputs (text, framebuffer hashes, audio samples, disk writes, cycle-timed events). A title is not done until the whole suite passes on both versions; list any deliberate difference in the report.
+7. **Run the Rust rewrite** on both the open-source emulator and our Rust emulator, completing the four-way matrix: original or rewrite × open-source emulator or Rust emulator.
+8. **Loop until all four combinations are identical.** Behavioral equivalence is proven by committed test cases that drive all four runs with the same timed, keyboard, mouse, joystick, paddle, disk or other inputs and compare the observable outputs (text, framebuffer hashes, audio samples, disk writes, cycle-timed events). Fix the rewrite, or our emulator when it is the outlier, until the matrix agrees. A title is not done until the whole suite passes in all four combinations; list any deliberate difference in the report.
 
 The issue keeps `Status`, `Agent`, `Path` and `Start date` current per `../ai_engineer/spec/github_issues.md`. Dependencies between titles (OS before application, predecessor before successor) are native blocked-by edges; do not start a title whose runtime prerequisite has no working oracle run yet unless the issue records why.
 
