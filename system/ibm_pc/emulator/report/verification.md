@@ -1,5 +1,19 @@
 # ibm_pc emulator verification
 
+## 2026-10-26 (eighth record): llvm-i8086 floppy images against the RTL
+
+The two images `llvm-i8086` builds, an assembly boot program and the Rust `hello_rs`, were booted on the hardware project's RTL (`scripts/rtl_boot_images.sh`, about five minutes) and on the Rust emulator.
+
+| Command | Result |
+|---|---|
+| `scripts/rtl_boot_images.sh` | the RTL (unchanged BIOS, the image as drive A) boots both: the boot sector reads the rest with INT 13h and the program runs; the screen and the CPU state when it halted are in `oracle/boot/*.txt` (85 and 93 million clocks) |
+| `cargo test --release --test boot_oracle` | the images linked now are byte for byte the ones the RTL booted (SHA-256) |
+| `cargo test --release --test boot_oracle -- --ignored` | the Rust emulator shows **the same 25 screen rows as the RTL for both images and ends in the same state: AX CX DX BX SP BP SI DI, ES CS SS DS and the halt, identical** (for `hello_rs` the registers hold leftovers of `core::fmt` and the runtime's 64-bit division, so this is a strong check of the 8088 core under compiled code) |
+| negative controls | a changed final register and a changed screen row each fail |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | clean |
+
+What this does not show: the program does not read the timer or the keyboard, so it says nothing about those devices under compiled code; the clock counts differ (E-A2).
+
 ## 2026-10-26 (seventh record): Rust programs
 
 `tests/i8086_rust.rs` runs Rust programs built by rustc (as msp430, `core` included), retargeted and compiled by `llvm-i8086`'s `llc`, linked with `i8086-ld`.
@@ -12,7 +26,7 @@
 | negative control | a wrong expected value fails the bare-core and the BIOS runs |
 | `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | clean |
 
-Not compared with the RTL.
+Compared with the RTL in the eighth record (`boot_oracle.rs`).
 
 ## 2026-10-25 (sixth record): a linked boot image
 
