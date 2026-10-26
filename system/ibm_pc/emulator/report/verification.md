@@ -193,3 +193,13 @@ three defects, all fixed, all caught by the silicon test (so not escaped defects
 
 The core's interrupt handling (NMI/INTR priority, the STI shadow, REP interruption,
 single-step) is tested by hand-worked programs, not by silicon vectors.
+
+## Ninth record: a Rust .COM program under PC DOS 1.00 (2026-10-26)
+
+| Command | Result |
+|---|---|
+| `cargo test --release --test i8086_dos` | `hello_com.com` links at 0100h with the `crt0_com` entry and fits a segment |
+| `cargo test --release --test i8086_dos -- --ignored` | the DOS disk with `HELLO.COM` (added by `pcdisk`) is byte for byte the one the RTL ran (SHA-256), and the Rust emulator shows **the same 25 screen rows as the RTL**: `Rust under DOS`, `drive A of 2`, `12! = 479001600` |
+| negative control | changing one digit in the recorded RTL screen makes the test fail |
+
+The program exercises `dos_call` (a register block loaded and stored around INT 21h), `core::fmt` with a 32-bit product, and the exit through INT 20h under the unchanged DOS. The first attempt of the test hung because its script held a real carriage return instead of the two characters `\r` the session format expects (a test bug, not an emulator difference).

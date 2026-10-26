@@ -25,6 +25,8 @@ serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = "=1.0.140"
 # The linker the execution tests link compiled code with (llvm-i8086/asm).
 i8086-ld = { path = "../../../llvm-i8086/asm" }
+# FAT12 disks of PC DOS 1.x: puts the .COM programs on the DOS disk (platform/tools/pcdisk).
+pcdisk = { path = "../platform/tools/pcdisk" }
 
 [profile.test]
 opt-level = 3
