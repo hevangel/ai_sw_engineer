@@ -1,7 +1,8 @@
 /* ibm_pc target image linker script (decision P1 in memory_map.md: bootable floppy).
  * Real mode, tiny model: code, data and stack share segment 0, so every
  * address below is both the offset and the physical address.
- * The syntax follows the linker used by llvm-i8086 (ld.lld, LLVM MC). */
+ * Linked by llvm-i8086/asm (i8086-ld), which reads this subset of the GNU/LLD script
+ * language; `i8086-ld --sign --floppy x.img` packs the result into a bootable disk. */
 
 MEMORY {
   /* The BIOS loads the first 512 bytes of the boot drive here and jumps to it. */

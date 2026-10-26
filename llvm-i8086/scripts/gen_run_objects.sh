@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the object files that system/ibm_pc/emulator/tests/i8086_codegen.rs
+# Build the object files that system/ibm_pc/emulator/tests/i8086_codegen.rs and i8086_boot.rs
 # runs: one ELF relocatable per tests/run/*.ll, by `llc -filetype=obj`.
 #
 #   gen_run_objects.sh          write tests/run/*.o
@@ -39,6 +39,18 @@ for ll in "$RUN"/*.ll; do
   else
     cp "$TMP/$name.o" "$RUN/$name.o"
     echo "wrote tests/run/$name.o"
+  fi
+done
+
+# Boot programs for the linker and packager tests: assembly, one object each.
+for s in "$BACKEND_DIR"/tests/boot/*.s; do
+  name="$(basename "$s" .s)"
+  "$BIN/llvm-mc" -triple=i8086 -filetype=obj "$s" -o "$TMP/$name.boot.o"
+  if [[ $CHECK == 1 ]]; then
+    cmp -s "$TMP/$name.boot.o" "$BACKEND_DIR/tests/boot/$name.o" || { echo "stale: tests/boot/$name.o" >&2; fail=1; }
+  else
+    cp "$TMP/$name.boot.o" "$BACKEND_DIR/tests/boot/$name.o"
+    echo "wrote tests/boot/$name.o"
   fi
 done
 exit $fail

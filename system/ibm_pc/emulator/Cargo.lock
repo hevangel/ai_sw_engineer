@@ -34,10 +34,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "i8086-ld"
+version = "0.1.0"
+
+[[package]]
 name = "ibm_pc-emulator"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "i8086-ld",
  "serde",
  "serde_json",
 ]

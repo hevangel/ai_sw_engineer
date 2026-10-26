@@ -1,5 +1,22 @@
 # ibm_pc emulator verification
 
+## 2026-10-25 (sixth record): a linked boot image
+
+The emulator now uses the `llvm-i8086` linker (`llvm-i8086/asm`, a dev-dependency) to
+link the execution tests, and boots a floppy image the linker packed.
+
+| Command | Result |
+|---|---|
+| `cargo test --test i8086_codegen` | 13 of 13, now linked by `i8086-ld` with section garbage collection (the test also asserts that the runtime routines an object does not use are dropped) |
+| `cargo test --test i8086_boot` | 3 of 3 always: the layout of the packed disk (160 KiB, `55 AA`, `_start` at 7C00, stage 2 at 7E00, `.bss` at 0500, the unused section dropped), stage 2 run straight from the linked binary (the counter in `.bss` is 3 and the CGA screen shows the string), the ELF header |
+| `cargo test --release --test i8086_boot -- --ignored` | the original BIOS (SHA-256 checked) boots the packed floppy: it reads the boot sector, the boot sector reads sector 2 with INT 13h, stage 2 runs; the counter is 3 and row 0 of the screen is `llvm-i8086: stage 2 ok` |
+| negative control | a deliberately wrong expected string fails all three screen checks |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | clean |
+
+This boots a program, built by our own toolchain, through the unmodified BIOS on the
+Rust machine. It is not compared with the RTL (that run, and a Rust-compiled boot
+program, belong to llvm-i8086 milestone 7).
+
 ## 2026-10-25 (fifth record): the `llvm-i8086` runtime library
 
 `tests/i8086_codegen.rs` now links several objects (the test linker resolves symbols

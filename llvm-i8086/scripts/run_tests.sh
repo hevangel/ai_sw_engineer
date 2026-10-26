@@ -29,6 +29,15 @@ echo "==> committed tests/run objects are current, and llc text == llc object"
 echo "==> committed rt/obj objects are current"
 "$BACKEND_DIR/scripts/build_rt.sh" --check
 
+echo "==> linker (asm/): cargo test"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/i8086-ld-target}"
+(cd "$BACKEND_DIR/asm" && cargo test --quiet)
+
+echo "==> link tests/boot/hello.o with the platform script; disassemble the result with llvm-objdump"
+OUT="$(mktemp -d)"
+"$BACKEND_DIR/scripts/link_image.sh" "$BACKEND_DIR/../system/ibm_pc/platform/link.ld" "$OUT/hello" "$BACKEND_DIR/tests/boot/hello.o"
+"$BIN/llvm-objdump" -d "$OUT/hello.elf" | "$BIN/FileCheck" "$BACKEND_DIR/tests/boot/hello.check"
+
 VECTORS="${I8086_VECTORS:-/hw/design/intel_8086/work/reference/v1}"
 if [[ -f $VECTORS/metadata.json ]]; then
   echo "==> physical-chip vector corpus check ($VECTORS)"

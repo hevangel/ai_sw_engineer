@@ -2,14 +2,14 @@
 //!
 //! `llvm-i8086/tests/run/*.o` are ELF relocatable objects built from the `.ll`
 //! files beside them by `llvm-i8086/scripts/gen_run_objects.sh`, and
-//! `llvm-i8086/rt/obj/*.o` is the runtime library. There is no linker yet
-//! (llvm-i8086 milestone 6), so this file carries a small one: it places the
-//! allocatable sections of every object, resolves symbols across them and
-//! applies the five relocation types of `llvm-i8086/spec/abi.md`. Each
-//! function is then called with the ABI of `abi.md` D3 on the 8088 core, and
-//! its results are compared with a plain Rust function computing the same
-//! thing on the host. The expected values come from the host's integer
-//! arithmetic, not from the compiler or the core.
+//! `llvm-i8086/rt/obj/*.o` is the runtime library. They are linked by the
+//! real linker, `llvm-i8086/asm` (`i8086-ld`), with the script
+//! `llvm-i8086/tests/run/run.ld`: section garbage collection keeps the
+//! functions the test calls and what they use. Each function is then called
+//! with the ABI of `llvm-i8086/spec/abi.md` D3 on the 8088 core, and its
+//! results are compared with a plain Rust function computing the same thing
+//! on the host. The expected values come from the host's integer arithmetic,
+//! not from the compiler, the linker or the core.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use system_emulator::cpu::Step;
 use system_emulator::machine::Machine;
 
-const LOAD: u32 = 0x1000; // first section address
 const STACK_TOP: u32 = 0xF000;
 const HALT_AT: u32 = 0x0F00; // `hlt`, the return address of every call
 
@@ -26,187 +25,58 @@ fn backend_dir() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// A minimal ELF32 relocatable linker
+// Linking with i8086-ld
 // ---------------------------------------------------------------------------
-
-fn u16le(b: &[u8], o: usize) -> u32 {
-    u32::from(u16::from_le_bytes([b[o], b[o + 1]]))
-}
-fn u32le(b: &[u8], o: usize) -> u32 {
-    u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
-}
-
-struct Section {
-    name: String,
-    kind: u32,
-    flags: u32,
-    offset: usize,
-    size: usize,
-    link: usize,
-    info: usize,
-    align: u32,
-    addr: u32,
-}
 
 /// A linked image: bytes at their absolute addresses and the global symbols.
 struct Image {
     bytes: Vec<(u32, Vec<u8>)>,
     symbols: HashMap<String, u32>,
+    /// What the collector dropped (for the tests that look at it).
+    discarded: Vec<String>,
 }
 
-fn cstr(b: &[u8], o: usize) -> String {
-    let end = b[o..].iter().position(|&c| c == 0).unwrap() + o;
-    String::from_utf8(b[o..end].to_vec()).unwrap()
-}
-
-/// One parsed object: its sections (placed), symbol addresses and names.
-struct Obj<'a> {
-    bytes: &'a [u8],
-    secs: Vec<Section>,
-    /// (name, address, defined, global) for each symbol-table entry.
-    syms: Vec<(String, u32, bool, bool)>,
-}
-
-fn parse<'a>(obj: &'a [u8], at: &mut u32) -> Obj<'a> {
-    assert_eq!(&obj[..4], b"\x7fELF");
-    assert_eq!(obj[4], 1, "ELF32");
-    assert_eq!(u16le(obj, 18), 0x8086, "e_machine");
-    let shoff = u32le(obj, 32) as usize;
-    let shentsize = u16le(obj, 46) as usize;
-    let shnum = u16le(obj, 48) as usize;
-    let shstrndx = u16le(obj, 50) as usize;
-
-    let mut secs: Vec<Section> = (0..shnum)
-        .map(|i| {
-            let h = shoff + i * shentsize;
-            Section {
-                name: String::new(),
-                kind: u32le(obj, h + 4),
-                flags: u32le(obj, h + 8),
-                offset: u32le(obj, h + 16) as usize,
-                size: u32le(obj, h + 20) as usize,
-                link: u32le(obj, h + 24) as usize,
-                info: u32le(obj, h + 28) as usize,
-                align: u32le(obj, h + 32).max(1),
-                addr: 0,
-            }
-        })
+/// Links the test object with the runtime library. Every global the test
+/// object defines is a root, so all its functions stay.
+fn link_objects(test_object: &[u8], name: &str) -> Image {
+    let dir = backend_dir();
+    let mut objects = vec![i8086_ld::parse_object(name, test_object).unwrap()];
+    let roots: Vec<String> = objects[0]
+        .symbols
+        .iter()
+        .skip(1)
+        .filter(|s| s.bind != 0 && s.shndx != 0 && !s.name.is_empty())
+        .map(|s| s.name.clone())
         .collect();
-    let strtab = secs[shstrndx].offset;
-    for (i, s) in secs.iter_mut().enumerate() {
-        let h = shoff + i * shentsize;
-        s.name = cstr(obj, strtab + u32le(obj, h) as usize);
+    let mut rt: Vec<_> = std::fs::read_dir(dir.join("rt/obj"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "o"))
+        .collect();
+    rt.sort();
+    for p in rt {
+        objects.push(i8086_ld::parse_object(&p.to_string_lossy(), &read(&p)).unwrap());
     }
-    // Place the allocatable sections one after the other.
-    for s in secs.iter_mut() {
-        if s.flags & 2 != 0 && s.size > 0 {
-            *at = at.div_ceil(s.align) * s.align;
-            s.addr = *at;
-            *at += s.size as u32;
-        }
-    }
-    let symtab = secs.iter().position(|s| s.kind == 2).expect("symbol table");
-    let names = secs[secs[symtab].link].offset;
-    let nsyms = secs[symtab].size / 16;
-    let mut syms = vec![(String::new(), 0, false, false); nsyms];
-    for (i, slot) in syms.iter_mut().enumerate().skip(1) {
-        let e = secs[symtab].offset + i * 16;
-        let name = cstr(obj, names + u32le(obj, e) as usize);
-        let value = u32le(obj, e + 4);
-        let bind = obj[e + 12] >> 4; // 0 local, 1 global, 2 weak
-        let shndx = u16le(obj, e + 14) as usize;
-        let (addr, defined) = match shndx {
-            0 => (0, false),
-            0xFFF1 => (value, true), // absolute
-            n => (secs[n].addr + value, true),
-        };
-        *slot = (name, addr, defined, bind != 0);
-    }
-    Obj {
-        bytes: obj,
-        secs,
-        syms,
-    }
-}
-
-/// Links objects into one image. Every allocatable section is kept (a real
-/// linker would drop what nothing refers to).
-fn link(objs: &[Vec<u8>]) -> Image {
-    let mut at = LOAD;
-    let parsed: Vec<Obj> = objs.iter().map(|o| parse(o, &mut at)).collect();
-
-    let mut globals: HashMap<String, u32> = HashMap::new();
-    for o in &parsed {
-        for (name, addr, defined, global) in &o.syms {
-            if *defined && *global && !name.is_empty() {
-                let prev = globals.insert(name.clone(), *addr);
-                assert!(prev.is_none(), "duplicate definition of {name}");
-            }
-        }
-    }
-
-    let mut bytes = Vec::new();
-    for o in &parsed {
-        let obj = o.bytes;
-        let mut data: Vec<Vec<u8>> = o
-            .secs
-            .iter()
-            .map(|s| {
-                if s.kind == 1 {
-                    obj[s.offset..s.offset + s.size].to_vec()
-                } else {
-                    vec![0; s.size]
-                }
-            })
-            .collect();
-        for r in o.secs.iter().filter(|s| s.kind == 4) {
-            let target = r.info;
-            if o.secs[target].flags & 2 == 0 {
-                continue; // relocations of a debug section
-            }
-            for k in 0..r.size / 12 {
-                let e = r.offset + k * 12;
-                let off = u32le(obj, e) as usize;
-                let info = u32le(obj, e + 4);
-                let addend = u32le(obj, e + 8) as i32;
-                let sym = (info >> 8) as usize;
-                let kind = info & 0xff;
-                let (name, saddr, defined, _) = &o.syms[sym];
-                let s = if *defined {
-                    i64::from(*saddr)
-                } else {
-                    i64::from(
-                        *globals
-                            .get(name)
-                            .unwrap_or_else(|| panic!("undefined symbol {name}")),
-                    )
-                };
-                let p = i64::from(o.secs[target].addr) + off as i64;
-                let a = i64::from(addend);
-                let d = &mut data[target];
-                match kind {
-                    0 => {}
-                    1 => d[off] = (s + a) as u8,
-                    2 => d[off..off + 2].copy_from_slice(&((s + a) as u16).to_le_bytes()),
-                    3 => {
-                        let v = s + a - p;
-                        assert!((-128..=127).contains(&v), "PC8 out of range");
-                        d[off] = v as i8 as u8;
-                    }
-                    4 => d[off..off + 2].copy_from_slice(&((s + a - p) as i16).to_le_bytes()),
-                    t => panic!("unknown relocation type {t}"),
-                }
-            }
-        }
-        for (s, d) in o.secs.iter().zip(data) {
-            if s.flags & 2 != 0 && s.size > 0 {
-                bytes.push((s.addr, d));
-            }
-        }
-    }
+    let script_path = dir.join("tests/run/run.ld");
+    let script = i8086_ld::parse_script(&String::from_utf8(read(&script_path)).unwrap()).unwrap();
+    let opts = i8086_ld::Options {
+        undefined: roots,
+        ..Default::default()
+    };
+    let linked = i8086_ld::link(&objects, &script, &opts).unwrap_or_else(|e| panic!("{name}: {e}"));
     Image {
-        bytes,
-        symbols: globals,
+        bytes: linked
+            .sections
+            .iter()
+            .filter(|s| !s.noload && s.size > 0)
+            .map(|s| (s.addr, s.data.clone()))
+            .collect(),
+        symbols: linked
+            .symbols
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
+        discarded: linked.discarded.clone(),
     }
 }
 
@@ -306,16 +176,7 @@ fn values() -> Vec<u16> {
 }
 
 fn load(name: &str) -> Image {
-    let dir = backend_dir();
-    let mut objs = vec![read(&dir.join("tests/run").join(name))];
-    let mut rt: Vec<_> = std::fs::read_dir(dir.join("rt/obj"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "o"))
-        .collect();
-    rt.sort();
-    objs.extend(rt.iter().map(|p| read(p)));
-    link(&objs)
+    link_objects(&read(&backend_dir().join("tests/run").join(name)), name)
 }
 
 fn read(p: &std::path::Path) -> Vec<u8> {
@@ -379,6 +240,14 @@ fn b(v: bool) -> u16 {
 #[test]
 fn arithmetic() {
     let img = load("arith.o");
+    // arith.o uses nothing from the runtime library: the linker drops all of it
+    assert!(
+        img.discarded.iter().any(|d| d.contains(".text.__udivsi3"))
+            && img.discarded.iter().any(|d| d.contains(".text.memcpy")),
+        "unused runtime routines are collected: {:?}",
+        img.discarded
+    );
+    assert!(!img.symbols.contains_key("__udivsi3"));
     let s = &mut Sys::new(&img);
     check2(s, "add16", |a, b| a.wrapping_add(b));
     check2(s, "sub16", |a, b| a.wrapping_sub(b));

@@ -60,7 +60,13 @@ ELF32 little-endian relocatable objects (RELA) with `e_machine` = **0x8086** (`E
 | `R_I8086_PC8` | 3 | 1 byte, signed | S + A - P, A includes -1 for the field bias (short `jmp`, `jcc`, `loop`, `jcxz`) |
 | `R_I8086_PC16` | 4 | 2 bytes, signed | S + A - P, A includes -2 (near `jmp`, `call`, and the `jmp` of a relaxed `jcc`) |
 
-The assembler relaxes a bare short branch to the near form when its target is an external symbol (the linker cannot make a long displacement fit a byte). The linker writes a flat binary at the platform load address (see `system/ibm_pc/platform/link.ld`); `.EXE`/`.COM` headers are a later packager. Far (segment:offset) references are not relocated: segments are constants in the first model.
+The assembler relaxes a bare short branch to the near form when its target is an external symbol (the linker cannot make a long displacement fit a byte); a branch to another section of the same file is relaxed the same way, because section placement is not known when the file is assembled.
+
+## Linking and images (implemented 2026-10-25)
+
+`i8086-ld` ([../asm/README.md](../asm/README.md)) applies the relocations above with these checks: `R_I8086_8` fits -128..255, `R_I8086_16` fits -32768..65535, `R_I8086_PC8` fits -128..127 (an error otherwise, naming the place), `R_I8086_PC16` is taken modulo 2^16 because a near jump or call reaches anywhere in the segment. Far (segment:offset) references are not relocated: segments are constants in the first model.
+
+Section names the platform scripts rely on: `.boot` (the boot sector, `KEEP`), `.text`, `.text.*`, `.rodata*`, `.data*`, `.bss*` (NOLOAD). The compiler's `-ffunction-sections`/`-fdata-sections` behaviour (the backend sets it) gives every function and global its own section, so the linker's garbage collection removes what a program does not use. `system/ibm_pc/platform/link.ld` is the layout: the boot sector at 0000:7C00 (512 bytes, ends with `55 AA`), the rest of the image from 7E00 (loaded by the boot sector's own INT 13h read), `.bss` and data below the boot sector from 0500, the stack growing down from 7C00 (`_stack_top`). The flat binary is the loaded sections from 7C00 up; the floppy image is that binary padded to 163,840 bytes. `.EXE`/`.COM` headers are a later packager.
 
 ## Runtime library
 
