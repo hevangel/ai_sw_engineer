@@ -10,7 +10,7 @@ computation on the host.
 
 | Command | Result |
 |---|---|
-| `cargo test --test i8086_codegen` | 7 of 7 programs, 108 functions (arithmetic, comparisons, loops, shifts, extensions, globals and pointers, stack objects, calls with stack arguments, recursion, 32-bit arithmetic); BX, SI, DI, BP and SP checked after every call |
+| `cargo test --test i8086_codegen` | 10 of 10 programs, 150 functions (arithmetic, comparisons, loops, shifts, extensions, globals and pointers, stack objects, calls with stack arguments, recursion, 32- and 64-bit arithmetic with carries, multiply and divide, block copies and fills); BX, SI, DI, BP and SP checked after every call |
 | `cargo fmt -- --check`, `cargo clippy --all-targets` | clean |
 | all other tests | unchanged and passing |
 
@@ -18,7 +18,7 @@ This is a use of the core, not a change to it. What it shows about the core: the
 compiler's output executes with the results
 the host computes, including `cbw`, `lea` into SP, shifts by CL and `[bp+si+disp]`
 addressing. It does not verify timing or any device, and the linker is test code: the
-backend's own linker (llvm-i8086 milestone 5) is not written.
+backend's own linker (llvm-i8086 milestone 6) is not written.
 
 
 ## 2026-10-25 (third record): CGA graphics

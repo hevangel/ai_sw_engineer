@@ -16,10 +16,26 @@
 
 namespace llvm {
 
+/// memcpy and memset of a size too large to unroll are `rep movs` and
+/// `rep stos` (CX = count, DI/SI = addresses; the direction flag is clear).
+/// memmove stays a call: its overlap rule needs a direction decision.
 class I8086SelectionDAGInfo : public SelectionDAGGenTargetInfo {
 public:
   I8086SelectionDAGInfo();
   ~I8086SelectionDAGInfo() override;
+
+  SDValue EmitTargetCodeForMemcpy(SelectionDAG &DAG, const SDLoc &dl,
+                                  SDValue Chain, SDValue Dst, SDValue Src,
+                                  SDValue Size, Align DstAlign, Align SrcAlign,
+                                  bool isVolatile, bool AlwaysInline,
+                                  MachinePointerInfo DstPtrInfo,
+                                  MachinePointerInfo SrcPtrInfo) const override;
+
+  SDValue EmitTargetCodeForMemset(SelectionDAG &DAG, const SDLoc &dl,
+                                  SDValue Chain, SDValue Dst, SDValue Value,
+                                  SDValue Size, Align Alignment,
+                                  bool isVolatile, bool AlwaysInline,
+                                  MachinePointerInfo DstPtrInfo) const override;
 };
 
 } // namespace llvm

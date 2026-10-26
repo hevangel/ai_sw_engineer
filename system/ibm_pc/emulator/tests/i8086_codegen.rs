@@ -693,3 +693,248 @@ fn wide_integers() {
         assert_eq!(ret(s, "sum32", &[n]), sv, "sum32({n})");
     }
 }
+
+#[test]
+fn multiply_and_divide() {
+    let img = load("muldiv.o");
+    let s = &mut Sys::new(&img);
+    check2(s, "mul16", |a, b| a.wrapping_mul(b));
+    check1(s, "mul10", |a| a.wrapping_mul(10));
+    check1(s, "mul_big", |a| a.wrapping_mul(4661));
+    check2(s, "umulhi", |a, b| {
+        ((u32::from(a) * u32::from(b)) >> 16) as u16
+    });
+    check2(s, "smulhi", |a, b| {
+        (((i32::from(a as i16) * i32::from(b as i16)) as u32) >> 16) as u16
+    });
+    check2b(s, "mul8", |a, b| a.wrapping_mul(b));
+
+    let vs = values();
+    for &x in &vs {
+        for &y in vs.iter().step_by(3) {
+            if y != 0 {
+                assert_eq!(s.call("udiv16", &[x, y]).0, x / y, "udiv16({x:#x}, {y:#x})");
+                assert_eq!(s.call("urem16", &[x, y]).0, x % y, "urem16({x:#x}, {y:#x})");
+                assert_eq!(
+                    s.call("divmod", &[x, y]).0,
+                    (x / y).wrapping_add((x % y).wrapping_mul(3)),
+                    "divmod({x:#x}, {y:#x})"
+                );
+                // INT_MIN / -1 overflows (undefined in LLVM IR, a trap on the chip)
+                if !(x == 0x8000 && y == 0xFFFF) {
+                    let (a, b) = (x as i16, y as i16);
+                    assert_eq!(
+                        s.call("sdiv16", &[x, y]).0,
+                        a.wrapping_div(b) as u16,
+                        "sdiv16({x:#x}, {y:#x})"
+                    );
+                    assert_eq!(
+                        s.call("srem16", &[x, y]).0,
+                        a.wrapping_rem(b) as u16,
+                        "srem16({x:#x}, {y:#x})"
+                    );
+                }
+            }
+            let (p, q) = (x & 0xFF, y & 0xFF);
+            if q != 0 {
+                assert_eq!(s.call("udiv8", &[p, q]).0, p / q, "udiv8({p:#x}, {q:#x})");
+                if !(p == 0x80 && q == 0xFF) {
+                    let r = i16::from(p as u8 as i8) / i16::from(q as u8 as i8);
+                    assert_eq!(s.call("sdiv8", &[p, q]).0, (r as u16) & 0xFF, "sdiv8");
+                }
+            }
+        }
+    }
+    check1(s, "udiv10", |a| a / 10);
+    check1(s, "urem10", |a| a % 10);
+    check1(s, "sdiv3", |a| ((a as i16) / 3) as u16);
+    check1(s, "sdivm7", |a| ((a as i16) / -7) as u16);
+    check1(s, "udiv8c", |a| a / 8);
+    check1(s, "srem16c", |a| ((a as i16) % 16) as u16);
+
+    let wide: Vec<u32> = vec![
+        0,
+        1,
+        2,
+        0xFFFF,
+        0x1_0000,
+        0x1_0001,
+        0x7FFF_FFFF,
+        0x8000_0000,
+        0xFFFF_FFFF,
+        0x1234_5678,
+        0xDEAD_BEEF,
+        0x0000_FFFF,
+        0xFFFF_0000,
+        123_456_789,
+    ];
+    for &a in &wide {
+        for &b in &wide {
+            let (ax, dx) = s.call(
+                "mul32",
+                &[a as u16, (a >> 16) as u16, b as u16, (b >> 16) as u16],
+            );
+            assert_eq!(
+                (u32::from(dx) << 16) | u32::from(ax),
+                a.wrapping_mul(b),
+                "mul32({a:#x}, {b:#x})"
+            );
+        }
+    }
+}
+
+#[test]
+fn block_operations() {
+    let img = load("memops.o");
+    let s = &mut Sys::new(&img);
+    let src: u32 = 0x2000;
+    let dst: u32 = 0x2400;
+    let pattern: Vec<u8> = (0..200u32).map(|i| (i * 7 + 13) as u8).collect();
+
+    for n in [0u16, 1, 2, 3, 5, 64, 100, 199] {
+        s.poke(src, &pattern);
+        s.poke(dst - 4, &[0xEE; 220]);
+        s.call("copy", &[dst as u16, src as u16, n]);
+        let mut want = vec![0xEEu8; 220];
+        want[4..4 + n as usize].copy_from_slice(&pattern[..n as usize]);
+        assert_eq!(s.peek(dst - 4, 220), want, "copy n={n}");
+    }
+    for (name, n, aligned) in [
+        ("copy64", 64usize, true),
+        ("copy33", 33, false),
+        ("copy6", 6, true),
+    ] {
+        s.poke(src, &pattern);
+        s.poke(dst - 4, &[0xEE; 100]);
+        s.call(name, &[dst as u16, src as u16]);
+        let mut want = vec![0xEEu8; 100];
+        want[4..4 + n].copy_from_slice(&pattern[..n]);
+        assert_eq!(s.peek(dst - 4, 100), want, "{name} (aligned: {aligned})");
+    }
+
+    for n in [0u16, 1, 2, 7, 80] {
+        s.poke(dst - 4, &[0xEE; 100]);
+        s.call("fill", &[dst as u16, 0x5A, n]);
+        let mut want = vec![0xEEu8; 100];
+        for w in want.iter_mut().skip(4).take(n as usize) {
+            *w = 0x5A;
+        }
+        assert_eq!(s.peek(dst - 4, 100), want, "fill n={n}");
+    }
+    for v in [0u16, 1, 0x80, 0xA5, 0xFF] {
+        s.poke(dst - 4, &[0xEE; 100]);
+        s.call("fill40", &[dst as u16, v]);
+        let mut want = vec![0xEEu8; 100];
+        for w in want.iter_mut().skip(4).take(40) {
+            *w = v as u8;
+        }
+        assert_eq!(s.peek(dst - 4, 100), want, "fill40({v:#x})");
+    }
+    s.poke(dst - 4, &[0xEE; 140]);
+    s.call("zero128", &[dst as u16]);
+    let mut want = vec![0xEEu8; 140];
+    for w in want.iter_mut().skip(4).take(128) {
+        *w = 0;
+    }
+    assert_eq!(s.peek(dst - 4, 140), want, "zero128");
+    s.poke(dst - 4, &[0xEE; 60]);
+    s.call("pattern50", &[dst as u16]);
+    let mut want = vec![0xEEu8; 60];
+    for w in want.iter_mut().skip(4).take(50) {
+        *w = 0xA5;
+    }
+    assert_eq!(s.peek(dst - 4, 60), want, "pattern50");
+}
+
+#[test]
+fn carry_chains() {
+    let img = load("carry.o");
+    let s = &mut Sys::new(&img);
+    let vals: Vec<u64> = vec![
+        0,
+        1,
+        0xFFFF,
+        0x1_0000,
+        0xFFFF_FFFF,
+        0x1_0000_0000,
+        0x7FFF_FFFF_FFFF_FFFF,
+        0x8000_0000_0000_0000,
+        0xFFFF_FFFF_FFFF_FFFF,
+        0x0123_4567_89AB_CDEF,
+        0xFEDC_BA98_7654_3210,
+        0x0000_FFFF_0000_FFFF,
+        0xFFFF_0000_FFFF_0000,
+    ];
+    let words = |v: u64| {
+        [
+            v as u16,
+            (v >> 16) as u16,
+            (v >> 32) as u16,
+            (v >> 48) as u16,
+        ]
+    };
+    let out: u32 = 0x2600;
+    let mut ret64 = |s: &mut Sys, name: &str, args: &[u64]| -> u64 {
+        let mut a = vec![out as u16];
+        for &v in args {
+            a.extend(words(v));
+        }
+        s.call(name, &a);
+        let b = s.peek(out, 8);
+        u64::from_le_bytes(b.try_into().unwrap())
+    };
+    for &a in &vals {
+        for &b in &vals {
+            assert_eq!(
+                ret64(s, "add64", &[a, b]),
+                a.wrapping_add(b),
+                "add64({a:#x}, {b:#x})"
+            );
+            assert_eq!(
+                ret64(s, "sub64", &[a, b]),
+                a.wrapping_sub(b),
+                "sub64({a:#x}, {b:#x})"
+            );
+            assert_eq!(ret64(s, "and64", &[a, b]), a & b, "and64");
+            assert_eq!(ret64(s, "xor64", &[a, b]), a ^ b, "xor64");
+            let mut args = Vec::new();
+            for &v in &[a, b] {
+                args.extend(words(v));
+            }
+            assert_eq!(s.call("ult64", &args).0, b2(a < b), "ult64({a:#x}, {b:#x})");
+            assert_eq!(
+                s.call("slt64", &args).0,
+                b2((a as i64) < (b as i64)),
+                "slt64({a:#x}, {b:#x})"
+            );
+            assert_eq!(s.call("eq64", &args).0, b2(a == b), "eq64");
+        }
+        assert_eq!(ret64(s, "neg64", &[a]), a.wrapping_neg(), "neg64({a:#x})");
+        assert_eq!(ret64(s, "shl64_16", &[a]), a << 16, "shl64_16");
+        assert_eq!(ret64(s, "lshr64_48", &[a]), a >> 48, "lshr64_48");
+        assert_eq!(
+            ret64(s, "add_imm64", &[a]),
+            a.wrapping_add(4_294_967_297),
+            "add_imm64({a:#x})"
+        );
+    }
+    for &x in &values() {
+        for &y in values().iter().step_by(2) {
+            assert_eq!(
+                s.call("uadd_carry", &[x, y]).0,
+                b2(x.checked_add(y).is_none()),
+                "uadd_carry"
+            );
+            assert_eq!(s.call("usub_borrow", &[x, y]).0, b2(x < y), "usub_borrow");
+            assert_eq!(
+                s.call("sat_add", &[x, y]).0,
+                x.saturating_add(y),
+                "sat_add({x:#x}, {y:#x})"
+            );
+        }
+    }
+}
+
+fn b2(v: bool) -> u16 {
+    u16::from(v)
+}

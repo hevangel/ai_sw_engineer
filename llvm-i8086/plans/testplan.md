@@ -9,7 +9,7 @@
 | Codegen shape | `llc` + FileCheck | hand-checked expected asm | `tests/codegen/` |
 | Codegen semantics | `llc -filetype=obj`, a small linker, the `system/ibm_pc` emulator | the same computation on the host (wrapping integer arithmetic), over edge values and a fixed pseudo-random sequence | `tests/run/*.ll`, `system/ibm_pc/emulator/tests/i8086_codegen.rs` |
 | Text vs object | `llc` then `llvm-mc`, against `llc -filetype=obj` | the two routes must agree section by section | `scripts/gen_run_objects.sh` |
-| Smoke programs | the `system/ibm_pc` emulator, then the RTL | expected register/memory state | `tests/smoke/` (milestone 6) |
+| Smoke programs | the `system/ibm_pc` emulator, then the RTL | expected register/memory state | `tests/smoke/` (milestone 7) |
 | Rust end-to-end | `rustc` → image → emulator | known output | `tests/smoke/` |
 
 Execution tests run on `system/ibm_pc/emulator` (itself verified against the physical-chip vectors and the RTL) and on the ai_hw_engineer RTL.

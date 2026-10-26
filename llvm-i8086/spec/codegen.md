@@ -36,10 +36,16 @@ There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`,
 
 - add, sub, and, or, xor, neg, not at 8 and 16 bits; `inc`/`dec` for a 16-bit increment of one; folded loads (`add ax, [mem]`).
 - Shifts: a count of one is `shl r, 1`; a count of two is two such shifts; any other count goes through CL (the count is moved to CL first). A count of zero is dropped. A logical shift of a word by eight is two byte moves (`mov al, ah; mov ah, 0`).
-- Multiply, divide and remainder at 16 and 32 bits, and 32-bit shifts, are calls to the runtime helpers (`__mulhi3`, `__divhi3`, ..., `__ashlsi3`). The runtime library is not written yet, so a program using them does not link (milestone 4). Native `mul`/`div` are a later optimisation.
-- 32-bit and 64-bit add and subtract are expanded by the generic legalizer with compare-and-select carries; the add-with-carry instructions are not used yet.
+- Multiply: a 16-bit product is `mul` (`imul` for the signed high half): the first operand is copied to AX, the other is a register, the product is DX:AX; the low half is the same for both. An 8-bit multiply is promoted to 16 bits. A 32-bit product is built from three 16-bit full products (no call). Constant multiplies are shifts and adds where the generic combiner finds them cheap, otherwise `mov cx, imm; mul cx`.
+- Divide and remainder at 16 bits: `div` (DX cleared first) and `idiv` (after `cwd`) on DX:AX; one instruction gives the quotient (AX) and the remainder (DX), and the combiner merges a divide and a remainder of the same operands. 8-bit forms are promoted. A divide by a constant is a multiply by a reciprocal and shifts, or a shift for a power of two. As in LLVM IR, a divide by zero or `INT_MIN / -1` is undefined here; on the chip it raises interrupt 0.
+- 32-bit and 64-bit divide and remainder, variable shifts of 32 and 64 bits, and 64-bit multiply are calls to the runtime helpers (`__divsi3`, `__udivsi3`, `__modsi3`, `__umodsi3`, `__ashlsi3`, `__lshrsi3`, `__ashrsi3`, and the `di` versions, `__muldi3`). The runtime library is not written yet, so a program using them does not link (milestone 5).
+- Add and subtract with carry: the 16-bit pieces of a wider value are `add`/`adc` and `sub`/`sbb`, with the carry kept in the flags between them (a 32-bit add is `add ax, cx` then `adc dx, ...`, a 64-bit add is one `add` and three `adc`). A carry that is used as a value (the overflow intrinsics, a saturating add) is a boolean built with a branch; a boolean turned back into a carry is `add r8, 0xFF`, and a DAG combine removes that round trip when the boolean was just made from the previous piece's flags.
 - i8 to i16: zero-extend writes the high byte of the same register (`mov ah, 0`, also for `and x, 255`), sign-extend uses `cbw` (the byte is moved to AL), truncate reads the low half of a `GR16_ABCD` register.
 - Absolute addresses with AL or AX use the short `mov al/ax, [addr]` forms, the same choice the assembler makes, so `llc -filetype=obj` and `llc | llvm-mc` produce identical objects (checked by `scripts/gen_run_objects.sh`).
+
+## Memory operations
+
+A `memcpy` or `memset` that is too large to unroll as loads and stores (more than four of them) is a block instruction: `rep movsb`/`rep movsw` (CX = count, DI = destination, SI = source) and `rep stosb`/`rep stosw` (CX, DI, and AL or AX). Words are used when the size is a known even number and both ends are known to be 2-byte aligned; a word fill of a variable byte builds the byte in both halves of AX. The direction flag is clear (the ABI), so the copies go forward; `memmove` stays a call, because its overlap rule needs the direction decided at run time. No segment override is used, which also avoids the 8086/8088 erratum in which an interrupt during a `rep` with a segment override resumes without the override.
 
 ## Verification
 
@@ -47,4 +53,4 @@ There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`,
 
 ## What is not done
 
-Variadic functions and `byval` arguments are rejected with a diagnostic. There is no 32-bit add-with-carry, no native multiply/divide, no `rep movs`/`stos` for memory operations (small constant copies are loads and stores, larger ones call `memcpy`), no `loop`/`jcxz` selection, no `in`/`out` intrinsics, and no interrupt-handler attribute.
+Variadic functions and `byval` arguments are rejected with a diagnostic. There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics, no interrupt-handler attribute, and no floating point. Multiply and divide of 32 and 64 bits, and variable shifts of those, wait for the runtime library.

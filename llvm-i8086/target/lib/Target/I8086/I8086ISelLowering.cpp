@@ -61,23 +61,43 @@ I8086TargetLowering::I8086TargetLowering(const TargetMachine &TM,
           ISD::MULHU, ISD::MULHS, ISD::UMUL_LOHI, ISD::SMUL_LOHI,
           ISD::SDIVREM, ISD::UDIVREM, ISD::UADDO, ISD::USUBO, ISD::SADDO,
           ISD::SSUBO, ISD::UADDO_CARRY, ISD::USUBO_CARRY, ISD::ABS,
-          ISD::UMULO, ISD::SMULO,
-          ISD::SHL_PARTS, ISD::SRL_PARTS, ISD::SRA_PARTS})
+          ISD::UMULO, ISD::SMULO, ISD::SHL_PARTS, ISD::SRL_PARTS,
+          ISD::SRA_PARTS})
       setOperationAction(Op, VT, Expand);
   }
   for (unsigned Op : {ISD::GlobalAddress, ISD::ExternalSymbol,
                       ISD::BlockAddress})
     setOperationAction(Op, MVT::i16, Custom);
 
-  // Multiply and divide are runtime calls for now (abi.md, Runtime library);
-  // the 8-bit forms are promoted to 16 bits.
-  for (unsigned Op : {ISD::MUL, ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM}) {
+  // 16-bit multiply and divide are the native mul/imul/div/idiv on AX and DX
+  // (selected in I8086DAGToDAGISel::Select); the 8-bit forms are promoted to
+  // 16 bits. A 32-bit multiply is built from the 16-bit full products; 32-bit
+  // divide and remainder and variable 32-bit shifts are runtime calls
+  // (abi.md, Runtime library).
+  for (unsigned Op : {ISD::MUL, ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i8, Promote);
-    setOperationAction(Op, MVT::i16, LibCall);
+  setOperationAction(ISD::MUL, MVT::i16, Legal);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i16, Legal);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i16, Legal);
+  setOperationAction(ISD::UDIVREM, MVT::i16, Legal);
+  setOperationAction(ISD::SDIVREM, MVT::i16, Legal);
+  for (unsigned Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
+    setOperationAction(Op, MVT::i16, Expand);
+  setOperationAction(ISD::MUL, MVT::i32, Expand);
+  for (unsigned Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i32, LibCall);
+  for (unsigned Op : {ISD::MUL, ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
+    setOperationAction(Op, MVT::i64, LibCall);
+  for (unsigned Op : {ISD::SHL, ISD::SRL, ISD::SRA}) {
+    setOperationAction(Op, MVT::i32, LibCall);
+    setOperationAction(Op, MVT::i64, LibCall);
   }
-  for (unsigned Op : {ISD::SHL, ISD::SRL, ISD::SRA})
-    setOperationAction(Op, MVT::i32, LibCall);
+
+  // Add and subtract with carry: the carry travels in the flags between the
+  // 16-bit pieces of a wider value.
+  for (unsigned Op : {ISD::UADDO, ISD::USUBO, ISD::UADDO_CARRY,
+                      ISD::USUBO_CARRY})
+    setOperationAction(Op, MVT::i16, Custom);
 
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
@@ -113,6 +133,14 @@ const char *I8086TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case I8086ISD::CALL: return "I8086ISD::CALL";
   case I8086ISD::WRAPPER: return "I8086ISD::WRAPPER";
   case I8086ISD::PUSH: return "I8086ISD::PUSH";
+  case I8086ISD::ADDC: return "I8086ISD::ADDC";
+  case I8086ISD::ADDE: return "I8086ISD::ADDE";
+  case I8086ISD::SUBC: return "I8086ISD::SUBC";
+  case I8086ISD::SUBE: return "I8086ISD::SUBE";
+  case I8086ISD::REP_MOVSB: return "I8086ISD::REP_MOVSB";
+  case I8086ISD::REP_MOVSW: return "I8086ISD::REP_MOVSW";
+  case I8086ISD::REP_STOSB: return "I8086ISD::REP_STOSB";
+  case I8086ISD::REP_STOSW: return "I8086ISD::REP_STOSW";
   case I8086ISD::CMP: return "I8086ISD::CMP";
   case I8086ISD::BRCC: return "I8086ISD::BRCC";
   case I8086ISD::SELECT_CC: return "I8086ISD::SELECT_CC";
@@ -135,6 +163,11 @@ SDValue I8086TargetLowering::LowerOperation(SDValue Op,
     return LowerSETCC(Op, DAG);
   case ISD::SIGN_EXTEND_INREG:
     return LowerSIGN_EXTEND_INREG(Op, DAG);
+  case ISD::UADDO:
+  case ISD::USUBO:
+  case ISD::UADDO_CARRY:
+  case ISD::USUBO_CARRY:
+    return LowerAddSubCarry(Op, DAG);
   default:
     llvm_unreachable("unexpected custom lowering");
   }
@@ -219,6 +252,53 @@ SDValue I8086TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
       ISD::SELECT_CC, DL, VT, Op.getOperand(0), Op.getOperand(1),
       DAG.getConstant(1, DL, VT), DAG.getConstant(0, DL, VT), Op.getOperand(2));
   return LowerSELECT_CC(Sel, DAG);
+}
+
+// Add / subtract with a carry (borrow) in and out, for the pieces of a wider
+// value. The carry out is a boolean made from the flags; a carry in is turned
+// back into the flag, unless it is the boolean just made from the previous
+// piece's flags (nothing else uses it), in which case those flags are used
+// as they are, so a 32-bit add is `add` then `adc`.
+SDValue I8086TargetLowering::LowerAddSubCarry(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  unsigned Opc = Op.getOpcode();
+  bool IsAdd = Opc == ISD::UADDO || Opc == ISD::UADDO_CARRY;
+  bool HasIn = Opc == ISD::UADDO_CARRY || Opc == ISD::USUBO_CARRY;
+  SDValue A = Op.getOperand(0), B = Op.getOperand(1);
+
+  SDValue Flags;
+  if (HasIn) {
+    SDValue Carry = Op.getOperand(2);
+    auto IsConst = [](SDValue V, uint64_t K) {
+      auto *C = dyn_cast<ConstantSDNode>(V);
+      return C && C->getZExtValue() == K;
+    };
+    if (Carry.getOpcode() == I8086ISD::SELECT_CC && Carry.hasOneUse() &&
+        IsConst(Carry.getOperand(0), 1) && IsConst(Carry.getOperand(1), 0) &&
+        cast<ConstantSDNode>(Carry.getOperand(2))->getZExtValue() ==
+            I8086CC::B) {
+      Flags = Carry.getOperand(3);
+    } else {
+      // CF = (carry != 0): adding 0xFF to a 0/1 byte carries exactly when it
+      // is 1.
+      SDValue Bool = DAG.getZExtOrTrunc(Carry, DL, MVT::i8);
+      Flags = DAG.getNode(I8086ISD::ADDC, DL, DAG.getVTList(MVT::i8, MVT::Glue),
+                          Bool, DAG.getConstant(0xFF, DL, MVT::i8))
+                  .getValue(1);
+    }
+  }
+  unsigned NodeOpc = HasIn ? (IsAdd ? I8086ISD::ADDE : I8086ISD::SUBE)
+                           : (IsAdd ? I8086ISD::ADDC : I8086ISD::SUBC);
+  SDVTList VTs = DAG.getVTList(MVT::i16, MVT::Glue);
+  SDValue Res = HasIn ? DAG.getNode(NodeOpc, DL, VTs, A, B, Flags)
+                      : DAG.getNode(NodeOpc, DL, VTs, A, B);
+  SDValue CarryOut =
+      DAG.getNode(I8086ISD::SELECT_CC, DL, MVT::i8, DAG.getConstant(1, DL, MVT::i8),
+                  DAG.getConstant(0, DL, MVT::i8),
+                  DAG.getTargetConstant(I8086CC::B, DL, MVT::i8),
+                  Res.getValue(1));
+  return DAG.getMergeValues({Res.getValue(0), CarryOut}, DL);
 }
 
 // Sign-extending the low byte of a word is `cbw` on the byte.
@@ -451,4 +531,28 @@ I8086TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
       .addMBB(CopyMBB);
   MI.eraseFromParent();
   return SinkMBB;
+}
+
+// `add boolean, -1` turns a 0/1 boolean back into the carry flag. When the
+// boolean was just made from the flags of the previous add or subtract
+// (`SELECT_CC 1, 0, B, flags`) and nothing else uses it, the flags are the
+// carry: use them directly, so a wide add is `add` then `adc` with no branch
+// in between.
+SDValue I8086TargetLowering::PerformDAGCombine(SDNode *N,
+                                               DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != I8086ISD::ADDC)
+    return SDValue();
+  SDValue Bool = N->getOperand(0);
+  auto *K = dyn_cast<ConstantSDNode>(N->getOperand(1));
+  if (!K || K->getZExtValue() != 0xFF || Bool.getOpcode() != I8086ISD::SELECT_CC ||
+      !Bool.hasOneUse() || !SDValue(N, 0).use_empty())
+    return SDValue();
+  auto IsConst = [](SDValue V, uint64_t Val) {
+    auto *C = dyn_cast<ConstantSDNode>(V);
+    return C && C->getZExtValue() == Val;
+  };
+  if (!IsConst(Bool.getOperand(0), 1) || !IsConst(Bool.getOperand(1), 0) ||
+      !IsConst(Bool.getOperand(2), I8086CC::B))
+    return SDValue();
+  return DCI.CombineTo(N, DCI.DAG.getUNDEF(MVT::i8), Bool.getOperand(3));
 }

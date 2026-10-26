@@ -16,9 +16,9 @@ The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS),
 
 In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and disassembles the whole 8086 integer instruction set in Intel syntax, relaxes branches, and writes ELF objects with the relocations of `spec/abi.md`; `llvm-objdump` and `llvm-readobj` read them. Verified against a hand-written opcode table and the physical-chip instruction corpus (`tests/`).
 
-In scope (done): `llc -mtriple=i8086` selects integer code at 8 and 16 bits (32/64-bit by the generic legalizer), calls and stack frames (`spec/codegen.md`, `spec/abi.md`).
+In scope (done): `llc -mtriple=i8086` selects integer code at 8 and 16 bits (32/64-bit by the generic legalizer with add/adc chains), native 16-bit multiply and divide, `rep movs`/`stos`, calls and stack frames (`spec/codegen.md`, `spec/abi.md`).
 
-In scope (next): the runtime library (multiply, divide, 32-bit shifts, memory operations), native `mul`/`div`, add-with-carry, `REP` string instructions, a linker and image packager, and the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (next): the runtime library (32/64-bit divide and shifts, 64-bit multiply, `memmove`), a linker and image packager, and the `rustc` target through `-Zbuild-std=core`. Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
 
 ## Layout
 

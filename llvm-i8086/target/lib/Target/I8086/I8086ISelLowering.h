@@ -21,6 +21,7 @@ public:
                                const I8086Subtarget &STI);
 
   const char *getTargetNodeName(unsigned Opcode) const override;
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
@@ -65,6 +66,7 @@ private:
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerAddSubCarry(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // end namespace llvm

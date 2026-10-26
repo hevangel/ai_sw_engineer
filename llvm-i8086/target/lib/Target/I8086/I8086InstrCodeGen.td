@@ -46,6 +46,28 @@ def i8086_wrapper  : SDNode<"I8086ISD::WRAPPER", SDT_I8086Wrap>;
 def i8086_push     : SDNode<"I8086ISD::PUSH", SDT_I8086Push,
                             [SDNPHasChain, SDNPMayStore, SDNPSideEffect]>;
 
+// Add and subtract that leave the carry in the flags (glue) for the next
+// add-with-carry / subtract-with-borrow of a wider value.
+def i8086_addc : SDNode<"I8086ISD::ADDC", SDTIntBinOp,
+                        [SDNPCommutative, SDNPOutGlue]>;
+def i8086_adde : SDNode<"I8086ISD::ADDE", SDTIntBinOp,
+                        [SDNPCommutative, SDNPInGlue, SDNPOutGlue]>;
+def i8086_subc : SDNode<"I8086ISD::SUBC", SDTIntBinOp, [SDNPOutGlue]>;
+def i8086_sube : SDNode<"I8086ISD::SUBE", SDTIntBinOp,
+                        [SDNPInGlue, SDNPOutGlue]>;
+
+// rep movs / rep stos: CX, SI/DI (and AL/AX) are set by copies; the glue
+// orders them before the instruction.
+def SDT_I8086Rep : SDTypeProfile<0, 0, []>;
+def i8086_rep_movsb : SDNode<"I8086ISD::REP_MOVSB", SDT_I8086Rep,
+    [SDNPHasChain, SDNPInGlue, SDNPOutGlue, SDNPMayLoad, SDNPMayStore]>;
+def i8086_rep_movsw : SDNode<"I8086ISD::REP_MOVSW", SDT_I8086Rep,
+    [SDNPHasChain, SDNPInGlue, SDNPOutGlue, SDNPMayLoad, SDNPMayStore]>;
+def i8086_rep_stosb : SDNode<"I8086ISD::REP_STOSB", SDT_I8086Rep,
+    [SDNPHasChain, SDNPInGlue, SDNPOutGlue, SDNPMayStore]>;
+def i8086_rep_stosw : SDNode<"I8086ISD::REP_STOSW", SDT_I8086Rep,
+    [SDNPHasChain, SDNPInGlue, SDNPOutGlue, SDNPMayStore]>;
+
 def SDT_I8086CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_I8086CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def i8086_callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_I8086CallSeqStart,
@@ -155,6 +177,56 @@ defm P_SUB : CGAlu<sub, 0>;
 defm P_AND : CGAlu<and, 1>;
 defm P_OR  : CGAlu<or,  1>;
 defm P_XOR : CGAlu<xor, 1>;
+
+// Add and subtract with the carry left in the flags: the same instructions.
+def : Pat<(i8086_addc GR16:$a, GR16:$b), (P_ADD16rr GR16:$a, GR16:$b)>;
+def : Pat<(i8086_addc GR16:$a, (i16 imm:$i)), (P_ADD16ri GR16:$a, imm:$i)>;
+def : Pat<(i8086_addc GR16:$a, (load addr:$b)), (P_ADD16rm GR16:$a, addr:$b)>;
+def : Pat<(i8086_addc GR8:$a, (i8 imm:$i)), (P_ADD8ri GR8:$a, imm:$i)>;
+def : Pat<(i8086_subc GR16:$a, GR16:$b), (P_SUB16rr GR16:$a, GR16:$b)>;
+def : Pat<(i8086_subc GR16:$a, (i16 imm:$i)), (P_SUB16ri GR16:$a, imm:$i)>;
+def : Pat<(i8086_subc GR16:$a, (load addr:$b)), (P_SUB16rm GR16:$a, addr:$b)>;
+
+// adc / sbb: the carry (or borrow) in is the flag the previous add left.
+multiclass CGAluC<SDNode node> {
+  let Defs = [FLAGS], Uses = [FLAGS], Constraints = "$dst = $src1" in {
+    def NAME # "8rr"  : CGInst<(outs GR8:$dst), (ins GR8:$src1, GR8:$src2)>;
+    def NAME # "8ri"  : CGInst<(outs GR8:$dst), (ins GR8:$src1, i8imm:$imm)>;
+    def NAME # "16rr" : CGInst<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+        [(set GR16:$dst, (node GR16:$src1, GR16:$src2))]>;
+    def NAME # "16ri" : CGInst<(outs GR16:$dst), (ins GR16:$src1, i16imm:$imm),
+        [(set GR16:$dst, (node GR16:$src1, (i16 imm:$imm)))]>;
+    let mayLoad = 1 in
+    def NAME # "16rm" : CGInst<(outs GR16:$dst), (ins GR16:$src1, cgmem:$src2),
+        [(set GR16:$dst, (node GR16:$src1, (load addr:$src2)))]>;
+  }
+}
+defm P_ADC : CGAluC<i8086_adde>;
+defm P_SBB : CGAluC<i8086_sube>;
+
+// Multiply and divide use AX and DX. mul and imul give the same low half;
+// the one-operand forms put the high half in DX. div and idiv take DX:AX.
+let Defs = [AX, DX, FLAGS], Uses = [AX], hasSideEffects = 0 in {
+  def P_MUL16r  : CGInst<(outs), (ins GR16:$src)>;
+  def P_IMUL16r : CGInst<(outs), (ins GR16:$src)>;
+}
+let Defs = [AX, DX, FLAGS], Uses = [AX, DX], hasSideEffects = 1 in {
+  def P_DIV16r  : CGInst<(outs), (ins GR16:$src)>;
+  def P_IDIV16r : CGInst<(outs), (ins GR16:$src)>;
+}
+// cwd: DX = sign extension of AX.
+let Defs = [DX], Uses = [AX], hasSideEffects = 0 in
+def P_CWD : CGInst<(outs), (ins)>;
+
+// rep movsb/movsw and rep stosb/stosw (the direction flag is clear: abi.md).
+let Defs = [CX, SI, DI], Uses = [CX, SI, DI], mayLoad = 1, mayStore = 1 in {
+  def P_REP_MOVSB : CGInst<(outs), (ins), [(i8086_rep_movsb)]>;
+  def P_REP_MOVSW : CGInst<(outs), (ins), [(i8086_rep_movsw)]>;
+}
+let Defs = [CX, DI], Uses = [CX, DI, AL], mayStore = 1 in
+def P_REP_STOSB : CGInst<(outs), (ins), [(i8086_rep_stosb)]>;
+let Defs = [CX, DI], Uses = [CX, DI, AX], mayStore = 1 in
+def P_REP_STOSW : CGInst<(outs), (ins), [(i8086_rep_stosw)]>;
 
 // Compare: the flags of a - b, no result.
 let Defs = [FLAGS] in {

@@ -54,6 +54,8 @@ private:
   SDValue constrain(SDValue V, unsigned RegClassID, const SDLoc &DL);
   void selectCBW(SDNode *N);
   bool selectShift(SDNode *N);
+  void selectMul(SDNode *N);
+  void selectDivRem(SDNode *N);
 
 #include "I8086GenDAGISel.inc"
 };
@@ -249,6 +251,57 @@ bool I8086DAGToDAGISel::selectShift(SDNode *N) {
   return true;
 }
 
+// 16-bit multiply: AX times the operand, the product in DX:AX. mul and imul
+// give the same low half; the full product is signed or unsigned as the node
+// says.
+void I8086DAGToDAGISel::selectMul(SDNode *N) {
+  SDLoc DL(N);
+  unsigned Opc = N->getOpcode();
+  SDValue Chain = CurDAG->getCopyToReg(CurDAG->getEntryNode(), DL, I8086::AX,
+                                       N->getOperand(0), SDValue());
+  SDNode *M = CurDAG->getMachineNode(
+      Opc == ISD::SMUL_LOHI ? I8086::P_IMUL16r : I8086::P_MUL16r, DL,
+      MVT::Glue, N->getOperand(1), Chain.getValue(1));
+  SDValue Lo = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), DL, I8086::AX,
+                                      MVT::i16, SDValue(M, 0));
+  ReplaceUses(SDValue(N, 0), Lo);
+  if (Opc != ISD::MUL) {
+    SDValue Hi = CurDAG->getCopyFromReg(Lo.getValue(1), DL, I8086::DX,
+                                        MVT::i16, Lo.getValue(2));
+    ReplaceUses(SDValue(N, 1), Hi);
+  }
+  CurDAG->RemoveDeadNode(N);
+}
+
+// 16-bit divide: DX:AX divided by the operand, quotient in AX, remainder in
+// DX. The dividend is extended into DX by `cwd` (signed) or by zero.
+void I8086DAGToDAGISel::selectDivRem(SDNode *N) {
+  SDLoc DL(N);
+  bool Signed = N->getOpcode() == ISD::SDIVREM;
+  SDValue Chain = CurDAG->getCopyToReg(CurDAG->getEntryNode(), DL, I8086::AX,
+                                       N->getOperand(0), SDValue());
+  SDValue Glue = Chain.getValue(1);
+  if (Signed) {
+    Glue = SDValue(CurDAG->getMachineNode(I8086::P_CWD, DL, MVT::Glue, Glue), 0);
+  } else {
+    SDValue Zero = SDValue(CurDAG->getMachineNode(
+                               I8086::P_MOV16ri, DL, MVT::i16,
+                               CurDAG->getTargetConstant(0, DL, MVT::i16)),
+                           0);
+    Chain = CurDAG->getCopyToReg(Chain, DL, I8086::DX, Zero, Glue);
+    Glue = Chain.getValue(1);
+  }
+  SDNode *D = CurDAG->getMachineNode(Signed ? I8086::P_IDIV16r : I8086::P_DIV16r,
+                                     DL, MVT::Glue, N->getOperand(1), Glue);
+  SDValue Q = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), DL, I8086::AX,
+                                     MVT::i16, SDValue(D, 0));
+  SDValue R = CurDAG->getCopyFromReg(Q.getValue(1), DL, I8086::DX, MVT::i16,
+                                     Q.getValue(2));
+  ReplaceUses(SDValue(N, 0), Q);
+  ReplaceUses(SDValue(N, 1), R);
+  CurDAG->RemoveDeadNode(N);
+}
+
 void I8086DAGToDAGISel::Select(SDNode *N) {
   if (N->isMachineOpcode()) {
     N->setNodeId(-1);
@@ -264,6 +317,21 @@ void I8086DAGToDAGISel::Select(SDNode *N) {
     CurDAG->SelectNodeTo(N, I8086::P_LEA16r, MVT::i16, Ops);
     return;
   }
+  case ISD::MUL:
+  case ISD::UMUL_LOHI:
+  case ISD::SMUL_LOHI:
+    if (N->getValueType(0) == MVT::i16) {
+      selectMul(N);
+      return;
+    }
+    break;
+  case ISD::UDIVREM:
+  case ISD::SDIVREM:
+    if (N->getValueType(0) == MVT::i16) {
+      selectDivRem(N);
+      return;
+    }
+    break;
   case ISD::SIGN_EXTEND:
     if (N->getValueType(0) == MVT::i16 &&
         N->getOperand(0).getValueType() == MVT::i8) {

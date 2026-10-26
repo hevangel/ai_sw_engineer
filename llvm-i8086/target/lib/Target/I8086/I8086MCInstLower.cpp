@@ -54,11 +54,18 @@ struct AluImm {
 #define ALU_IMM(N)                                                             \
   {I8086::P_##N##8ri, I8086::P_##N##16ri, I8086::N##8ri, I8086::N##8ai,       \
    I8086::N##16ri,    I8086::N##16ri8,    I8086::N##16ai}
-const AluImm AluImms[] = {ALU_IMM(ADD), ALU_IMM(OR),  ALU_IMM(AND),
+const AluImm AluImms[] = {ALU_IMM(ADD), ALU_IMM(OR),  ALU_IMM(AND), ALU_IMM(ADC), ALU_IMM(SBB),
                           ALU_IMM(SUB), ALU_IMM(XOR), ALU_IMM(CMP)};
 #undef ALU_IMM
 
 } // namespace
+
+// An 8-bit immediate is the byte, whatever the sign of the value the DAG held.
+static MCOperand byteImm(MCOperand MO) {
+  if (MO.isImm())
+    return MCOperand::createImm(MO.getImm() & 0xFF);
+  return MO;
+}
 
 MCOperand I8086MCInstLower::lowerOperand(const MachineOperand &MO) const {
   auto Sym = [&](MCSymbol *S) {
@@ -160,7 +167,7 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
       Op = Reg == I8086::AX ? A.R16ai : A.R16ri;
     OutMI.setOpcode(Op);
     OutMI.addOperand(MCOperand::createReg(Reg));
-    OutMI.addOperand(lowerOperand(Imm));
+    OutMI.addOperand(Opc == A.P8 ? byteImm(lowerOperand(Imm)) : lowerOperand(Imm));
     return;
   }
 
@@ -202,7 +209,10 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
     }
     if (Mem >= 0 && I > unsigned(Mem) && I < unsigned(Mem) + 4)
       continue; // part of the memory reference
-    OutMI.addOperand(lowerOperand(MI->getOperand(I)));
+    MCOperand MO = lowerOperand(MI->getOperand(I));
+    if (Name.ends_with("8ri") || Name.ends_with("8mi"))
+      MO = byteImm(MO);
+    OutMI.addOperand(MO);
   }
   // Shifts name their count: one, or CL.
   if (Name.ends_with("r1"))

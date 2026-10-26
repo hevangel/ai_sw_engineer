@@ -7,11 +7,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "I8086AsmPrinter.h"
+#include "I8086InstrInfo.h"
 #include "I8086MCInstLower.h"
 #include "TargetInfo/I8086TargetInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
@@ -22,7 +24,24 @@ using namespace llvm;
 
 char I8086AsmPrinter::ID = 0;
 
+// `rep movsb` is a prefix instruction and a string instruction.
+static bool repForm(unsigned Opc, unsigned &Op) {
+  switch (Opc) {
+  case I8086::P_REP_MOVSB: Op = I8086::MOVSB; return true;
+  case I8086::P_REP_MOVSW: Op = I8086::MOVSW; return true;
+  case I8086::P_REP_STOSB: Op = I8086::STOSB; return true;
+  case I8086::P_REP_STOSW: Op = I8086::STOSW; return true;
+  default: return false;
+  }
+}
+
 void I8086AsmPrinter::emitInstruction(const MachineInstr *MI) {
+  unsigned StringOp;
+  if (repForm(MI->getOpcode(), StringOp)) {
+    EmitToStreamer(*OutStreamer, MCInstBuilder(I8086::REP));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(StringOp));
+    return;
+  }
   I8086MCInstLower Lower(OutContext, *this);
   MCInst TmpInst;
   Lower.lower(MI, TmpInst);

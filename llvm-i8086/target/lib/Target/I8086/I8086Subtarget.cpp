@@ -60,6 +60,14 @@ void I8086Subtarget::initLibcallLoweringInfo(LibcallLoweringInfo &Info) const {
   Info.setLibcallImpl(RTLIB::SHL_I32, RTLIB::impl___ashlsi3);
   Info.setLibcallImpl(RTLIB::SRL_I32, RTLIB::impl___lshrsi3);
   Info.setLibcallImpl(RTLIB::SRA_I32, RTLIB::impl___ashrsi3);
+  Info.setLibcallImpl(RTLIB::MUL_I64, RTLIB::impl___muldi3);
+  Info.setLibcallImpl(RTLIB::SDIV_I64, RTLIB::impl___divdi3);
+  Info.setLibcallImpl(RTLIB::UDIV_I64, RTLIB::impl___udivdi3);
+  Info.setLibcallImpl(RTLIB::SREM_I64, RTLIB::impl___moddi3);
+  Info.setLibcallImpl(RTLIB::UREM_I64, RTLIB::impl___umoddi3);
+  Info.setLibcallImpl(RTLIB::SHL_I64, RTLIB::impl___ashldi3);
+  Info.setLibcallImpl(RTLIB::SRL_I64, RTLIB::impl___lshrdi3);
+  Info.setLibcallImpl(RTLIB::SRA_I64, RTLIB::impl___ashrdi3);
   Info.setLibcallImpl(RTLIB::MEMCPY, RTLIB::impl_memcpy);
   Info.setLibcallImpl(RTLIB::MEMSET, RTLIB::impl_memset);
   Info.setLibcallImpl(RTLIB::MEMMOVE, RTLIB::impl_memmove);
