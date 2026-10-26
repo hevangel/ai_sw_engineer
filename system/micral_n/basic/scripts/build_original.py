@@ -10,6 +10,7 @@ and the page-0 serial routines CINP and CPRINT. Only the bytes that file
 assembles are replaced. Assembled by platform/scripts/as8008.py.
 """
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -18,6 +19,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TITLE = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(TITLE, "..", "platform", "scripts"))
 from as8008 import Asm  # noqa: E402
+
+
+def safe_out(path):
+    """CLI output path: relative paths must stay inside the working
+    directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"build_original: refusing relative output outside the "
+                         f"working directory: {path}")
+    return p
 
 
 def listing_bytes(path):
@@ -47,7 +58,7 @@ def main():
     mem.update(patch)
     img = bytes(mem.get(i, 0) for i in range(max(mem) + 1))
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    open(out, "wb").write(img)
+    safe_out(out).write_bytes(img)
     print(f"build_original: {out}: {len(img)} B, {len(patch)} B patched")
 
 

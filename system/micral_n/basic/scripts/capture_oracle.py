@@ -14,6 +14,7 @@ pointer zero until the first SCR (spec BAS-2).
 """
 import hashlib
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,15 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TITLE = os.path.dirname(HERE)
 RTL = os.environ.get("MICRAL_SIM", os.path.join(TITLE, "..", "platform", "sim", "build", "micral_rtl"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 
 def lines(*ls):
@@ -266,12 +276,12 @@ def main():
         if only and name not in only:
             continue
         with tempfile.TemporaryDirectory() as d:
-            tin, tout = os.path.join(d, "in"), os.path.join(d, "out")
-            open(tin, "wb").write(keys.encode("latin-1"))
+            tin, tout = contained(d, "in"), contained(d, "out")
+            tin.write_bytes(keys.encode("latin-1"))
             r = subprocess.run([RTL, "--ram", f"{orig}@0", "--tty-in", tin, "--tty-out", tout,
                                 "--idle", "20000", "--max-cycles", "2000000000", "--regs"],
                                capture_output=True, text=True)
-            out = open(tout, "rb").read()
+            out = tout.read_bytes()
         if "idle" not in r.stderr:
             raise SystemExit(f"{name}: the original did not finish waiting for a key: {r.stderr}")
         text = [f"# Captured from the original (build/original.bin, SHA-256 {sha}) on the",
@@ -285,8 +295,8 @@ def main():
                 cur = bytearray()
         if cur:
             text.append("> " + esc(cur))
-        p = os.path.join(TITLE, "oracle", "transcripts", name + ".txt")
-        open(p, "w", newline="\n").write("\n".join(text) + "\n")
+        p = contained(TITLE, "oracle", "transcripts", name + ".txt")
+        p.write_text("\n".join(text) + "\n", newline="\n")
         print(f"{name}: {len(out)} bytes, {r.stderr.strip()}")
 
 

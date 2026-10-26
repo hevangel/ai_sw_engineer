@@ -32,8 +32,19 @@ are the costly part of a 4-bit target and belong in the codegen work list.
 """
 from __future__ import annotations
 
+import pathlib
 import re
 import sys
+
+
+def safe_out(path):
+    """CLI output path: relative paths must stay inside the working
+    directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"retarget_ir: refusing relative output outside the "
+                         f"working directory: {path}")
+    return p
 
 I4004_TRIPLE = "i4004-none"
 # Must match llvm-i4004/spec/abi.md §1 and rust/i4004-none.json character-for-character.
@@ -97,7 +108,7 @@ def main() -> int:
     if leftover:
         fail(f"unexpected surviving addrspace {leftover} after rewrite")
 
-    open(sys.argv[2], "w", encoding="utf-8").write(src)
+    safe_out(sys.argv[2]).write_text(src, encoding="utf-8")
 
     # --- report (stderr) ------------------------------------------------------
     i32 = len(re.findall(r"\bi32\b", src))

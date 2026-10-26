@@ -19,6 +19,7 @@ Transcripts whose name starts with `h` are host-only (the mock's `G` returns
 to the command loop, a real one does not); `t` transcripts run only here.
 """
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -29,6 +30,15 @@ TITLE = os.path.dirname(HERE)
 ROOT = os.path.abspath(os.path.join(TITLE, "..", "..", ".."))
 RTL = os.environ.get("MICRAL_SIM", os.path.join(ROOT, "system", "micral_n", "platform", "sim",
                                                 "build", "micral_rtl"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 
 def unescape(s):
@@ -89,11 +99,11 @@ def run_one(image, syms, path):
         if regs:
             pre.append((syms["mon_regs"], regs))
         for k, (a, data) in enumerate(pre):
-            f = os.path.join(d, f"pre{k}.bin")
-            open(f, "wb").write(data)
+            f = contained(d, f"pre{k}.bin")
+            f.write_bytes(data)
             args += ["--ram", f"{f}@{a}"]
-        tin = os.path.join(d, "in.txt")
-        open(tin, "wb").write(bytes(inp))
+        tin = contained(d, "in.txt")
+        tin.write_bytes(bytes(inp))
         out = os.path.join(d, "out.txt")
         dump = os.path.join(d, "mem.bin")
         args += ["--tty-in", tin, "--tty-out", out, "--dump", f"{dump}@0:16384"]

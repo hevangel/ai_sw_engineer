@@ -17,6 +17,7 @@ binary needs; llc/llvm-mc come from install/bin):
     python3 llvm-i8008/scripts/exec_tests.py [cases-per-op]
 """
 import os
+import pathlib
 import random
 import subprocess
 import sys
@@ -28,6 +29,15 @@ ROOT = os.path.dirname(BACKEND)
 BIN = os.path.join(BACKEND, "install", "bin")
 LINK = os.path.join(BACKEND, "asm", "i8008_link.py")
 RTL = os.path.join(ROOT, "system", "micral_n", "platform", "sim", "build", "micral_rtl")
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 RT = [os.path.join(BACKEND, "rt", f) for f in ("arith.s", "shift.s", "mem.s")]
 OUT = 0x3000
 DL = 'target datalayout = "e-m:e-p:16:8-i8:8-i16:8-i32:8-i64:8-n8-a:8"\ntarget triple = "i8008"\n'
@@ -116,20 +126,20 @@ def run_chunk(name, cases, ll, extra_asm):
             drv += store_result(k, wret)
         drv.append("\thlt")
         drv.append(extra_asm)
-        open(os.path.join(d, "drv.s"), "w").write("\n".join(drv) + "\n")
+        contained(d, "drv.s").write_text("\n".join(drv) + "\n")
         objs = []
         for i, s in enumerate([os.path.join(d, "drv.s")] + RT):
             o = os.path.join(d, f"a{i}.o")
             run([os.path.join(BIN, "llvm-mc"), "-triple", "i8008", "-filetype=obj", s, "-o", o])
             objs.append(o)
         if ll:
-            open(os.path.join(d, "f.ll"), "w").write(DL + ll)
+            contained(d, "f.ll").write_text(DL + ll)
             o = os.path.join(d, "f.o")
             run([os.path.join(BIN, "llc"), "-mtriple=i8008", "-O2", "-filetype=obj",
                  "-function-sections", os.path.join(d, "f.ll"), "-o", o])
             objs.append(o)
-        lay = os.path.join(d, "lay.ld")
-        open(lay, "w").write("CODE 0x0000 0x2800\nDATA follow 0x0400\nENTRY start\n")
+        lay = contained(d, "lay.ld")
+        lay.write_text("CODE 0x0000 0x2800\nDATA follow 0x0400\nENTRY start\n")
         img = os.path.join(d, "img.bin")
         run([sys.executable, LINK, *objs, "-T", lay, "-o", img])
         dump = os.path.join(d, "out.bin")
