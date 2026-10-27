@@ -17,5 +17,6 @@ These are repository-level rules. They are not the per-title or per-backend `spe
 | [escaped-defects.md](escaped-defects.md) | a bug surfaced outside the title's own tests; planning verification |
 | [git-workflow.md](git-workflow.md) | committing, branching, adding a worktree, writing a PR description |
 | [github-issues.md](github-issues.md) | starting, pausing, handing off or finishing work that has a GitHub issue; claiming an issue; updating the `ai_engineer` project with `gh` |
+| [software-lifecycle.md](software-lifecycle.md) | reverse engineering originals with REA (`external/rea`); the eight-step lifecycle of a `[Software]` issue and its four-way original/rewrite x open-source/Rust-emulator matrix |
 
 Keep each file to one topic and short enough to read in full. When a rule moves or a file is added, update this table and the index in `AGENTS.md` in the same change.

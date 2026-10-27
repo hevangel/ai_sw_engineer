@@ -27,6 +27,7 @@ Open the file when the task matches. Do not read the whole `spec/` folder up fro
 | A bug escaped the title's own tests; plan verification | [spec/escaped-defects.md](spec/escaped-defects.md) |
 | Commit, branch, add a worktree, write a PR description | [spec/git-workflow.md](spec/git-workflow.md) |
 | Start, pause, hand off or finish work that has a GitHub issue; claim an issue; update the `ai_engineer` project | [spec/github-issues.md](spec/github-issues.md) |
+| Reverse engineer an original binary (REA); work through a `[Software]` issue step by step; the four-way original/rewrite x emulator matrix | [spec/software-lifecycle.md](spec/software-lifecycle.md) |
 
 ## Rules that always apply
 
