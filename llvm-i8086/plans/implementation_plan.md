@@ -24,7 +24,7 @@ Milestones (each ends with passing tests):
 
 18. A rustc with an i8086 target. **Done 2026-10-27** (`rust/README.md`): rust-lang/rust at the pinned nightly plus `rust/patches/apply_i8086_target.py`, built against this LLVM (`scripts/build_llvm_for_rust.sh`, `scripts/rust_build.sh`); `build_rust.sh` and `build_compiler_builtins.sh` use it; the programs it builds are byte-identical to the msp430 route's (CHKDSK.COM has the same SHA-256).
 
-Not planned, with the reason in the README: running on a real 5150 (no hardware here).
+Out of scope by the repository's definition of done (`spec/mission.md`: the oracle and the target run are on a chip simulator, here the RTL of the hardware project, with the Rust emulator and MartyPC as further models): running on a physical 5150. It needs the machine and a floppy writer, neither reachable from the development host (`rust/REAL_HARDWARE.md` has the disks and expected screens for anyone who has them).
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 
