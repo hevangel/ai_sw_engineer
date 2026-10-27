@@ -126,10 +126,18 @@ impl<'a> Sys<'a> {
     }
 
     fn call_budget(&mut self, name: &str, args: &[u16], budget: u64) -> (u16, u16) {
+        self.call_with(name, args, budget, args.len().min(3))
+    }
+
+    /// A call to a variadic function: every argument is on the stack (abi.md D3a).
+    fn call_stack(&mut self, name: &str, args: &[u16]) -> (u16, u16) {
+        self.call_with(name, args, 200_000, 0)
+    }
+
+    fn call_with(&mut self, name: &str, args: &[u16], budget: u64, reg_args: usize) -> (u16, u16) {
         let addr = self.sym(name);
         let m = &mut self.m;
         let mut sp = STACK_TOP as u16;
-        let reg_args = args.len().min(3);
         for &a in args[reg_args..].iter().rev() {
             sp -= 2;
             m.load_ram(u32::from(sp), &a.to_le_bytes()).unwrap();
@@ -527,6 +535,83 @@ fn calls() {
             sv = i.wrapping_add(sv).wrapping_add(1);
         }
         assert_eq!(s.call("loop_calls", &[n]).0, sv, "loop_calls({n})");
+    }
+}
+
+#[test]
+fn variadic_functions_and_byval_arguments() {
+    let img = load("vararg.o");
+    let s = &mut Sys::new(&img);
+    let vs = values();
+    for &x in &vs {
+        for &y in vs.iter().step_by(4) {
+            // the callee reads its arguments from the stack
+            let z = x ^ y;
+            assert_eq!(
+                s.call_stack("sum16", &[3, x, y, z]).0,
+                x.wrapping_add(y).wrapping_add(z),
+                "sum16"
+            );
+            assert_eq!(s.call_stack("sum16", &[0]).0, 0);
+            assert_eq!(
+                s.call_stack("sum_twice", &[2, x, y]).0,
+                2u16.wrapping_mul(x.wrapping_add(y)),
+                "sum_twice"
+            );
+            // 32-bit arguments are two stack words, low first
+            let (lo, hi) = s.call_stack("sum32", &[2, x, y, y, x]);
+            let want =
+                (u32::from(y) << 16 | u32::from(x)).wrapping_add(u32::from(x) << 16 | u32::from(y));
+            assert_eq!((u32::from(hi) << 16) | u32::from(lo), want, "sum32");
+            // a byte, a 32-bit and a 64-bit argument, each in 2-byte slots
+            let (w, q) = (
+                u32::from(x) << 16 | u32::from(y),
+                0x0123_4567_89AB_CDEFu64 ^ u64::from(x) << 20,
+            );
+            let args = [
+                7,
+                x & 0xFF,
+                w as u16,
+                (w >> 16) as u16,
+                q as u16,
+                (q >> 16) as u16,
+                (q >> 32) as u16,
+                (q >> 48) as u16,
+            ];
+            let want = 7u16.wrapping_add(x & 0xFF).wrapping_add(w as u16) ^ (w >> 16) as u16;
+            let want = want.wrapping_add(q as u16) ^ (q >> 48) as u16;
+            assert_eq!(s.call_stack("mix", &args).0, want, "mix");
+
+            // callers: the same through compiled calls
+            assert_eq!(
+                s.call("call_sum16", &[x, y, z, x.wrapping_add(1)]).0,
+                x.wrapping_add(y)
+                    .wrapping_add(z)
+                    .wrapping_add(x.wrapping_add(1)),
+                "call_sum16"
+            );
+            let (lo, hi) = s.call("call_sum32", &[x, y]);
+            let a = u32::from(x) << 16 | 7;
+            let want = a.wrapping_add(u32::from(y)).wrapping_add(305_419_896);
+            assert_eq!((u32::from(hi) << 16) | u32::from(lo), want, "call_sum32");
+            assert_eq!(
+                s.call("call_sum_twice", &[x, y]).0,
+                2u16.wrapping_mul(x.wrapping_add(y)),
+                "call_sum_twice"
+            );
+            let w = u32::from(x) << 16 | u32::from(y);
+            let q = u64::from(w) << 24 | 255;
+            let want = 9u16.wrapping_add(x & 0xFF).wrapping_add(w as u16) ^ (w >> 16) as u16;
+            let want = want.wrapping_add(q as u16) ^ (q >> 48) as u16;
+            assert_eq!(s.call("call_mix", &[x, y]).0, want, "call_mix");
+
+            // byval: the callee's changes stay in its copy
+            let (a, b_, c) = (x, y, (x ^ y) & 0xFF);
+            let r = a.wrapping_add(b_ << 1).wrapping_add(c.wrapping_mul(3));
+            assert_eq!(s.call("call_byval_odd", &[x, y]).0, r ^ x, "call_byval_odd");
+            let want = (x.wrapping_sub(y).wrapping_add(2)) ^ y;
+            assert_eq!(s.call("call_byval_mid", &[x, y]).0, want, "call_byval_mid");
+        }
     }
 }
 

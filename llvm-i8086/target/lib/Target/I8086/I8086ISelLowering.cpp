@@ -110,6 +110,13 @@ I8086TargetLowering::I8086TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Expand);
 
+  // Variadic arguments are in 2-byte stack slots (abi.md D3a): va_list is a
+  // pointer to the next slot.
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Custom);
+  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
+
   // Only i8 and i16 memory accesses; wider and narrower ones go through them.
   for (MVT VT : MVT::integer_valuetypes()) {
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::i1, Promote);
@@ -168,6 +175,10 @@ SDValue I8086TargetLowering::LowerOperation(SDValue Op,
   case ISD::UADDO_CARRY:
   case ISD::USUBO_CARRY:
     return LowerAddSubCarry(Op, DAG);
+  case ISD::VASTART:
+    return LowerVASTART(Op, DAG);
+  case ISD::VAARG:
+    return LowerVAARG(Op, DAG);
   default:
     llvm_unreachable("unexpected custom lowering");
   }
@@ -327,15 +338,19 @@ SDValue I8086TargetLowering::LowerFormalArguments(
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  if (IsVarArg)
-    report_fatal_error("I8086: variadic functions are not supported yet");
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeFormalArguments(Ins, CC_I8086);
+  CCInfo.AnalyzeFormalArguments(Ins, IsVarArg ? CC_I8086_Stack : CC_I8086);
 
   for (CCValAssign &VA : ArgLocs) {
-    if (Ins[VA.getValNo()].Flags.isByVal())
-      report_fatal_error("I8086: byval arguments are not supported yet");
+    const ISD::ArgFlagsTy &Flags = Ins[VA.getValNo()].Flags;
+    if (Flags.isByVal()) {
+      // The caller copied the object into the argument area: use it there.
+      int FI = MFI.CreateFixedObject(Flags.getByValSize(),
+                                     VA.getLocMemOffset() + 2, true);
+      InVals.push_back(DAG.getFrameIndex(FI, MVT::i16));
+      continue;
+    }
     SDValue V;
     if (VA.isRegLoc()) {
       Register VReg = MF.getRegInfo().createVirtualRegister(&I8086::GR16RegClass);
@@ -357,6 +372,12 @@ SDValue I8086TargetLowering::LowerFormalArguments(
       V = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), V);
     }
     InVals.push_back(V);
+  }
+  if (IsVarArg) {
+    // The variadic arguments follow the named ones on the stack.
+    I8086MachineFunctionInfo *FuncInfo = MF.getInfo<I8086MachineFunctionInfo>();
+    FuncInfo->VarArgsFrameIndex =
+        MFI.CreateFixedObject(2, CCInfo.getStackSize() + 2, true);
   }
   return Chain;
 }
@@ -397,6 +418,35 @@ SDValue I8086TargetLowering::LowerReturn(
   return DAG.getNode(I8086ISD::RET, DL, MVT::Other, RetOps);
 }
 
+SDValue I8086TargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  auto *FuncInfo = MF.getInfo<I8086MachineFunctionInfo>();
+  SDLoc DL(Op);
+  SDValue Addr = DAG.getFrameIndex(FuncInfo->VarArgsFrameIndex, MVT::i16);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, Addr, Op.getOperand(1),
+                      MachinePointerInfo(SV));
+}
+
+SDValue I8086TargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
+  SDNode *Node = Op.getNode();
+  EVT VT = Node->getValueType(0);
+  SDValue Chain = Node->getOperand(0);
+  SDValue ListPtr = Node->getOperand(1);
+  const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
+  SDLoc DL(Op);
+  SDValue List = DAG.getLoad(MVT::i16, DL, Chain, ListPtr,
+                             MachinePointerInfo(SV));
+  SDValue Value = DAG.getLoad(VT, DL, List.getValue(1), List,
+                              MachinePointerInfo());
+  unsigned Slot = alignTo(VT.getStoreSize(), 2);
+  SDValue Next = DAG.getNode(ISD::ADD, DL, MVT::i16, List,
+                             DAG.getConstant(Slot, DL, MVT::i16));
+  SDValue Store = DAG.getStore(Value.getValue(1), DL, Next, ListPtr,
+                               MachinePointerInfo(SV));
+  return DAG.getMergeValues({Value, Store}, DL);
+}
+
 SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                        SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
@@ -404,12 +454,11 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SDValue Chain = CLI.Chain, Callee = CLI.Callee;
   CLI.IsTailCall = false;
   MachineFunction &MF = DAG.getMachineFunction();
-  if (CLI.IsVarArg)
-    report_fatal_error("I8086: variadic calls are not supported yet");
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CLI.CallConv, CLI.IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_I8086);
+  CCInfo.AnalyzeCallOperands(CLI.Outs,
+                             CLI.IsVarArg ? CC_I8086_Stack : CC_I8086);
   unsigned NumBytes = CCInfo.getStackSize();
 
   Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
@@ -417,8 +466,6 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   auto Promote = [&](unsigned I) {
     CCValAssign &VA = ArgLocs[I];
     SDValue Arg = CLI.OutVals[I];
-    if (CLI.Outs[I].Flags.isByVal())
-      report_fatal_error("I8086: byval arguments are not supported yet");
     if (VA.getLocVT() != VA.getValVT())
       Arg = DAG.getNode(extendFor(CLI.Outs[VA.getValNo()].Flags), DL,
                         VA.getLocVT(), Arg);
@@ -427,9 +474,33 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Memory arguments are pushed right to left, so the first is at the lowest
   // address.
-  for (unsigned I = ArgLocs.size(); I-- > 0;)
-    if (ArgLocs[I].isMemLoc())
-      Chain = DAG.getNode(I8086ISD::PUSH, DL, MVT::Other, Chain, Promote(I));
+  for (unsigned I = ArgLocs.size(); I-- > 0;) {
+    if (!ArgLocs[I].isMemLoc())
+      continue;
+    const ISD::ArgFlagsTy &Flags = CLI.Outs[I].Flags;
+    if (Flags.isByVal()) {
+      // The object is copied onto the stack a word at a time, highest first
+      // (a trailing odd byte is the low byte of the last word).
+      unsigned Size = Flags.getByValSize();
+      if (Size > 128)
+        report_fatal_error("I8086: byval arguments over 128 bytes are not supported");
+      SDValue Src = CLI.OutVals[I];
+      for (unsigned Off = alignTo(Size, 2); Off > 0; Off -= 2) {
+        unsigned At = Off - 2;
+        SDValue Addr = DAG.getNode(ISD::ADD, DL, MVT::i16, Src,
+                                   DAG.getConstant(At, DL, MVT::i16));
+        SDValue Word =
+            At + 1 < Size
+                ? DAG.getLoad(MVT::i16, DL, Chain, Addr, MachinePointerInfo())
+                : DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i16, Chain, Addr,
+                                 MachinePointerInfo(), MVT::i8);
+        Chain = DAG.getNode(I8086ISD::PUSH, DL, MVT::Other, Word.getValue(1),
+                            Word);
+      }
+      continue;
+    }
+    Chain = DAG.getNode(I8086ISD::PUSH, DL, MVT::Other, Chain, Promote(I));
+  }
 
   SmallVector<std::pair<Register, SDValue>, 4> RegsToPass;
   for (unsigned I = 0; I < ArgLocs.size(); ++I)

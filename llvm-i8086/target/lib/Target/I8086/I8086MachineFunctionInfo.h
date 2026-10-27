@@ -26,6 +26,8 @@ public:
   int HasFP = -1;
   /// Callee-saved registers the prologue pushes after BP (BX, SI, DI).
   unsigned NumPushed = 0;
+  /// Fixed stack object at the first variadic argument (va_start).
+  int VarArgsFrameIndex = 0;
 
   MachineFunctionInfo *
   clone(BumpPtrAllocator &Allocator, MachineFunction &DestMF,

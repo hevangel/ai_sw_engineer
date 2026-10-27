@@ -53,4 +53,4 @@ A `memcpy` or `memset` that is too large to unroll as loads and stores (more tha
 
 ## What is not done
 
-Variadic functions and `byval` arguments are rejected with a diagnostic. There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics, no interrupt-handler attribute, and no floating point. Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.
+`byval` objects above 128 bytes are rejected with a diagnostic. There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics, no interrupt-handler attribute, and no floating point. Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.

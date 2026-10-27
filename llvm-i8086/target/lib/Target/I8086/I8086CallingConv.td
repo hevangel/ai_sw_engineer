@@ -14,8 +14,17 @@
 //===----------------------------------------------------------------------===//
 
 def CC_I8086 : CallingConv<[
+  CCIfByVal<CCPassByVal<2, 2>>,
   CCIfType<[i1, i8], CCPromoteToType<i16>>,
   CCIfType<[i16], CCAssignToReg<[AX, DX, CX]>>,
+  CCIfType<[i16], CCAssignToStack<2, 2>>
+]>;
+
+// A call through a variadic function type passes every argument on the stack,
+// named or not (abi.md D3a): the callee cannot tell which registers were meant.
+def CC_I8086_Stack : CallingConv<[
+  CCIfByVal<CCPassByVal<2, 2>>,
+  CCIfType<[i1, i8], CCPromoteToType<i16>>,
   CCIfType<[i16], CCAssignToStack<2, 2>>
 ]>;
 
