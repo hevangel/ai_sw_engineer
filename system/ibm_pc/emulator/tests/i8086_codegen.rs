@@ -609,6 +609,13 @@ fn variadic_functions_and_byval_arguments() {
             let (a, b_, c) = (x, y, (x ^ y) & 0xFF);
             let r = a.wrapping_add(b_ << 1).wrapping_add(c.wrapping_mul(3));
             assert_eq!(s.call("call_byval_odd", &[x, y]).0, r ^ x, "call_byval_odd");
+            // 200 bytes by value: the callee zeroes its copy; the caller's element 5 is intact
+            let sum = (0..100u16).fold(0u16, |t, i| t.wrapping_add(x.wrapping_add(i)));
+            assert_eq!(
+                s.call("call_byval_big", &[x]).0,
+                sum.wrapping_add(7) ^ x.wrapping_add(5),
+                "call_byval_big"
+            );
             let want = (x.wrapping_sub(y).wrapping_add(2)) ^ y;
             assert_eq!(s.call("call_byval_mid", &[x, y]).0, want, "call_byval_mid");
         }

@@ -15,7 +15,8 @@
 #    module;
 # 2. the module's triple and data layout are replaced with ours, and the IR is
 #    checked for what the backend does not implement (floating point, i128,
-#    atomics, vectors, other address spaces, msp430 intrinsics);
+#    atomics, vectors, other address spaces, msp430 intrinsics; the msp430_intrcc
+#    calling convention of `extern "msp430-interrupt"` is an interrupt handler, D5);
 # 3. llc -mtriple=i8086 makes <out_dir>/<bin_name>.o (one section per function)
 #    and .s for reading.
 set -euo pipefail
@@ -49,7 +50,7 @@ check "i128 integers" '\bi128\b'
 check "atomic operations" '\b(atomicrmw|cmpxchg|fence)\b|load atomic|store atomic'
 check "vector types" '<[0-9]+ x '
 check "address spaces other than 0" 'addrspace\([1-9]'
-check "msp430 intrinsics or interrupt calling conventions" 'llvm\.msp430|msp430_intrcc'
+check "msp430 intrinsics" 'llvm\.msp430'
 [[ $fail == 0 ]] || exit 1
 sed -e "s|^target datalayout = .*|target datalayout = \"$DATA_LAYOUT\"|" \
     -e 's|^target triple = .*|target triple = "i8086-unknown-none"|' \

@@ -24,7 +24,9 @@ In scope (done): the linker and bootable-image packager `asm/` (`i8086-ld`).
 
 In scope (done): Rust (`core`, `no_std`) through `rust/`.
 
-In scope (next): variadic functions and `byval`, a rustc with an i8086 target, Out of scope for now: 80186+ instructions, x87, interrupts handlers written in Rust, segmented memory models, DOS `.EXE` relocation format.
+In scope (done): variadic functions and `byval` (`spec/abi.md` D3a), interrupt handlers in C-like IR and in Rust (D5), static archives and `.COM` output in `i8086-ld`, a first real title (`system/ibm_pc/chkdsk`).
+
+Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), floating point and `i128` (no soft-float library; `core` is built without them), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none), segmented memory models and `.EXE` relocation (tiny model only).
 
 ## Layout
 

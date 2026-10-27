@@ -188,3 +188,44 @@ define i16 @call_byval_mid(i16 %x, i16 %y) {
   %r = call i16 @byval_mid(i16 %x, ptr byval(%Q) align 2 %s, i16 %y)
   ret i16 %r
 }
+
+; byval of a big object (200 bytes): room on the stack and a block copy.
+%Big = type { [100 x i16] }
+
+define i16 @byval_big(i16 %k, ptr byval(%Big) align 2 %b) {
+entry:
+  br label %loop
+loop:
+  %i = phi i16 [ 0, %entry ], [ %i2, %loop ]
+  %acc = phi i16 [ 0, %entry ], [ %acc2, %loop ]
+  %p = getelementptr inbounds %Big, ptr %b, i16 0, i32 0, i16 %i
+  %v = load i16, ptr %p
+  store i16 0, ptr %p
+  %acc2 = add i16 %acc, %v
+  %i2 = add i16 %i, 1
+  %c = icmp ult i16 %i2, 100
+  br i1 %c, label %loop, label %out
+out:
+  %r = add i16 %acc2, %k
+  ret i16 %r
+}
+
+define i16 @call_byval_big(i16 %x) {
+entry:
+  %s = alloca %Big, align 2
+  br label %fill
+fill:
+  %i = phi i16 [ 0, %entry ], [ %i2, %fill ]
+  %p = getelementptr inbounds %Big, ptr %s, i16 0, i32 0, i16 %i
+  %v = add i16 %x, %i
+  store i16 %v, ptr %p
+  %i2 = add i16 %i, 1
+  %c = icmp ult i16 %i2, 100
+  br i1 %c, label %fill, label %call
+call:
+  %r = call i16 @byval_big(i16 7, ptr byval(%Big) align 2 %s)
+  %p5 = getelementptr inbounds %Big, ptr %s, i16 0, i32 0, i16 5
+  %after = load i16, ptr %p5
+  %res = xor i16 %r, %after
+  ret i16 %res
+}

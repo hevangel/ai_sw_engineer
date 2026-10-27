@@ -73,3 +73,18 @@ define i16 @read_byval(ptr byval(%S) align 2 %p) {
   %v = load i16, ptr %q
   ret i16 %v
 }
+
+; A big byval object (over 32 bytes) gets room on the stack and a block copy.
+%Big = type { [40 x i16] }
+declare void @take_big(ptr byval(%Big) align 2)
+
+; CHECK-LABEL: pass_big:
+; CHECK:      add {{[a-z]+}}, -0x50
+; CHECK:      rep
+; CHECK-NEXT: movsw
+; CHECK:      call take_big
+; CHECK-NEXT: add sp, 0x50
+define void @pass_big(ptr %p) {
+  call void @take_big(ptr byval(%Big) align 2 %p)
+  ret void
+}

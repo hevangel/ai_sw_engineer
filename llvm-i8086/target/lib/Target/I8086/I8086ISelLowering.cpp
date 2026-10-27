@@ -482,9 +482,20 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       // The object is copied onto the stack a word at a time, highest first
       // (a trailing odd byte is the low byte of the last word).
       unsigned Size = Flags.getByValSize();
-      if (Size > 128)
-        report_fatal_error("I8086: byval arguments over 128 bytes are not supported");
       SDValue Src = CLI.OutVals[I];
+      if (Size > 32) {
+        // A big object: make room on the stack and copy it with a block move.
+        SDValue SP = DAG.getCopyFromReg(Chain, DL, I8086::SP, MVT::i16);
+        SDValue NewSP = DAG.getNode(ISD::SUB, DL, MVT::i16, SP,
+                                    DAG.getConstant(alignTo(Size, 2), DL, MVT::i16));
+        Chain = DAG.getCopyToReg(SP.getValue(1), DL, I8086::SP, NewSP);
+        Chain = DAG.getMemcpy(Chain, DL, NewSP, Src,
+                              DAG.getConstant(Size, DL, MVT::i16), Align(2),
+                              Flags.getNonZeroByValAlign(), /*isVol=*/false, /*AlwaysInline=*/false,
+                              /*CI=*/nullptr, std::nullopt, MachinePointerInfo(),
+                              MachinePointerInfo());
+        continue;
+      }
       for (unsigned Off = alignTo(Size, 2); Off > 0; Off -= 2) {
         unsigned At = Off - 2;
         SDValue Addr = DAG.getNode(ISD::ADD, DL, MVT::i16, Src,

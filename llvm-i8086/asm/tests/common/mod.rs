@@ -310,3 +310,43 @@ impl Obj {
         out
     }
 }
+
+/// A GNU-format `ar` archive of the members (name, bytes). Names over 15
+/// characters go to the "//" long-name table, as GNU `ar` does.
+pub fn archive(members: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut long = Vec::new();
+    let mut body = Vec::new();
+    let header = |name: &str, size: usize| -> Vec<u8> {
+        format!(
+            "{name:<16}{:<12}{:<6}{:<6}{:<8}{size:<10}`\n",
+            0, 0, 0, "100644"
+        )
+        .into_bytes()
+    };
+    let pad = |v: &mut Vec<u8>| {
+        if v.len() % 2 == 1 {
+            v.push(b'\n');
+        }
+    };
+    for (name, data) in members {
+        let field = if name.len() > 15 {
+            let at = long.len();
+            long.extend_from_slice(name.as_bytes());
+            long.extend_from_slice(b"/\n");
+            format!("/{at}")
+        } else {
+            format!("{name}/")
+        };
+        body.extend(header(&field, data.len()));
+        body.extend_from_slice(data);
+        pad(&mut body);
+    }
+    let mut out = b"!<arch>\n".to_vec();
+    if !long.is_empty() {
+        out.extend(header("//", long.len()));
+        out.extend_from_slice(&long);
+        pad(&mut out);
+    }
+    out.extend(body);
+    out
+}

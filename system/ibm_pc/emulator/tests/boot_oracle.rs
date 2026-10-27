@@ -71,11 +71,25 @@ fn image(name: &str) -> Vec<u8> {
             objects.extend(runtime_objects());
             floppy(objects)
         }
+        "irq_rs" => {
+            let mut objects = vec![
+                object(&platform().join("runtime/crt0.o")),
+                object(&platform().join("runtime/hal.o")),
+                object(&backend().join("tests/smoke/irq_rs/irq_rs.o")),
+            ];
+            objects.extend(runtime_objects());
+            floppy(objects)
+        }
         other => panic!("unknown image {other}"),
     }
 }
 
-const NAMES: [&str; 2] = ["boot_hello", "hello_rs"];
+const NAMES: [&str; 3] = ["boot_hello", "hello_rs", "irq_rs"];
+
+/// Programs whose final registers depend on where the timer interrupt fell in a
+/// loop (the RTL and the emulator do not tick on the same instruction), so only
+/// their screens are compared.
+const SCREEN_ONLY: [&str; 1] = ["irq_rs"];
 
 fn transcript(name: &str) -> String {
     let p = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -166,6 +180,10 @@ fn the_rust_emulator_boots_the_images_like_the_rtl() {
             session::strip_comments(&expected),
             "{name}: the screen differs from the RTL's"
         );
+        if SCREEN_ONLY.contains(&name) {
+            println!("{name}: screens identical to the RTL's (final registers not compared)");
+            continue;
+        }
         let want = header(&expected, "final");
         let have = final_state(&m);
         println!("{name}: screen identical to the RTL\n  RTL  {want}\n  Rust {have}");

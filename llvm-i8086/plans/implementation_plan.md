@@ -11,10 +11,14 @@ Milestones (each ends with passing tests):
 7. `core` builds and Rust programs run. **Done 2026-10-26** (`rust/README.md`): rustc builds `core` and a crate as msp430 (same data layout as D1), `scripts/build_rust.sh` retargets the IR and runs our `llc`; `tests/smoke/hello_rs` boots through the original BIOS and prints what the host computes, `tests/smoke/stress_rs` (one source, run on both) agrees with the host at five optimisation levels. The RTL boot comparison is done (`system/ibm_pc/emulator/tests/boot_oracle.rs`: same screen and same final CPU state on both images). The real title (milestone 8) and variadic/`byval` (milestone 9) followed; a rustc with an i8086 target is still to do.
 8. First real title compiled and run. **Done 2026-10-26**: the Rust `CHKDSK.COM` of `system/ibm_pc/chkdsk` is identical to PC DOS 1.00's original on 24 disks, on the Rust emulator and on the RTL.
 9. Variadic functions and `byval` arguments. **Done 2026-10-27** (`spec/abi.md` D3a): all arguments of a variadic call on the stack, `va_list` a slot pointer, `byval` copied by pushes; FileCheck in `tests/codegen/vararg.ll` and execution tests against host arithmetic in `tests/run/vararg.ll`.
+10. Interrupt handlers and a program that uses the timer and keyboard. **Done 2026-10-27** (`spec/abi.md` D5): the `interrupt` attribute and the `msp430_intrcc` convention compile to a handler that saves everything, uses CS for DS and ES, and ends in `iret`; `tests/codegen/interrupt.ll`, execution test `interrupt_handlers` on the 8088 core, and the Rust program `tests/smoke/irq_rs` (handlers in Rust for IRQ0 and IRQ1) shows the same screen on the RTL and on the Rust emulator.
+11. Linker: static archives and `.COM` output. **Done 2026-10-27** (`asm/README.md`): `rt/librt.a`, members taken for undefined symbols only, `--com`; the CHKDSK build links the runtime from the archive.
+
+Not planned, with the reason in the README: a rustc with an i8086 target, floating point and i128, `.EXE` and segmented models, linker relaxation, `-r`.
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 
-## First title: open decision
+## First title (decided 2026-10-25: CHKDSK; done, see milestone 8; the text below is the record of the choice)
 
 The title is not chosen. Candidates, to be checked for license and provenance before any is committed to:
 

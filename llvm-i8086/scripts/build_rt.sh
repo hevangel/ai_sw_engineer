@@ -36,4 +36,15 @@ for ll in "$RT"/ir/*.ll; do
   "$BIN/llc" -mtriple=i8086 -O2 -filetype=obj "$ll" -o "$TMP/$name.o"
   build "$name"
 done
+
+# The same objects as one archive, for `i8086-ld ... rt/librt.a` (deterministic: no dates or owners).
+if command -v llvm-ar >/dev/null; then
+  (cd "$RT/obj" && llvm-ar rcsD "$TMP/librt.a" $(ls *.o | LC_ALL=C sort))
+  if [[ $CHECK == 1 ]]; then
+    cmp -s "$TMP/librt.a" "$RT/librt.a" || { echo "stale: rt/librt.a" >&2; fail=1; }
+  else
+    cp "$TMP/librt.a" "$RT/librt.a"
+    echo "wrote rt/librt.a"
+  fi
+fi
 exit $fail

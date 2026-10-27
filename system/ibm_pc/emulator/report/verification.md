@@ -214,3 +214,11 @@ The program exercises `dos_call` (a register block loaded and stored around INT 
 | seven wrong variants of the core | all fail the replay (three survived the first 18 recordings; the boundary disks 019-024 were added) |
 
 Findings: the Rust program, checking the write-protected drive A:, ended in DOS's `Write protect error` prompt on this emulator; the original avoids it with a critical-error handler around its disk reset, which the Rust runtime now has (`dos_flush_guarded`). No difference between this emulator and the RTL appeared in any of the 24 cases.
+
+## Eleventh record: interrupt handlers written in Rust (2026-10-27)
+
+| Command | Result |
+|---|---|
+| `cargo test --release --test i8086_codegen interrupt_handlers` | a compiled handler (`"interrupt"` attribute and `msp430_intrcc`) taken six times on the 8088 core: every register, DS and ES (set to other values than the handler's) and SP identical afterwards, the handler worked with DS = CS, IF restored by IRET |
+| `cargo test --release --test boot_oracle -- --ignored` | `irq_rs` (Rust handlers for the timer and keyboard interrupts, installed with `set_vector`; five ticks, then six scan codes typed `abc`): **the Rust emulator shows the same two screens as the RTL** after booting through the original BIOS. The final registers are not compared for this program: the tick falls on a different instruction in each |
+| `cargo test --release --test i8086_codegen variadic_functions_and_byval_arguments` | variadic callees and callers (16, 32 and 64-bit and byte arguments, `va_copy`), `byval` objects of 5, 8 and 200 bytes, against the host's arithmetic |

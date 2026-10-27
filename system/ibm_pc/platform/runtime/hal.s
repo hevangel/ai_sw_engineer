@@ -70,3 +70,16 @@ hal_far_write16:
 	pop	es
 	pop	bx
 	ret
+
+; void hal_cli(void), void hal_sti(void): the interrupt flag
+	.section	.text.hal_cli,"ax",@progbits
+	.globl	hal_cli
+hal_cli:
+	cli
+	ret
+
+	.section	.text.hal_sti,"ax",@progbits
+	.globl	hal_sti
+hal_sti:
+	sti
+	ret

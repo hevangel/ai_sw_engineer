@@ -16,6 +16,8 @@ extern "C" {
     fn hal_inb(port: u16) -> u8;
     fn hal_far_read16(segment: u16, offset: u16) -> u16;
     fn hal_far_write16(segment: u16, offset: u16, value: u16);
+    fn hal_cli();
+    fn hal_sti();
 }
 
 /// Writes one byte to the screen through the BIOS teletype (INT 10h).
@@ -58,6 +60,32 @@ pub unsafe fn far_read16(segment: u16, offset: u16) -> u16 {
 /// The address must be writable memory the program may change.
 pub unsafe fn far_write16(segment: u16, offset: u16, value: u16) {
     hal_far_write16(segment, offset, value)
+}
+
+/// Clears the interrupt flag: no maskable interrupt is taken until `sti`.
+pub fn cli() {
+    unsafe { hal_cli() }
+}
+
+/// Sets the interrupt flag.
+pub fn sti() {
+    unsafe { hal_sti() }
+}
+
+/// Points interrupt vector `vector` at `handler` (an `extern "msp430-interrupt"`
+/// function, or any function that ends with IRET) in the code segment 0 of the
+/// tiny model. The vector table is at 0000:0000, four bytes a vector. Interrupts
+/// are left off (`cli`): the caller turns them on with `sti` when all vectors it
+/// needs are set.
+///
+/// # Safety
+/// `handler` must be an interrupt handler (it returns with IRET and preserves
+/// every register); the vector must be one the program means to take over.
+pub unsafe fn set_vector(vector: u8, handler: usize) {
+    let at = u16::from(vector) * 4;
+    cli();
+    far_write16(0, at, handler as u16);
+    far_write16(0, at + 2, 0);
 }
 
 /// The text screen: `core::fmt::Write` over the BIOS teletype, `\n` as CR LF.

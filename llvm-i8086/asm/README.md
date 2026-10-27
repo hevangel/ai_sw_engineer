@@ -31,7 +31,13 @@ i8086-ld -T system/ibm_pc/platform/link.ld --sign \
 
 ## Not supported
 
-Archives (`.a`), shared objects, `-r` partial links, common symbols, linker relaxation (the assembler already relaxes branches within a section, so a branch to another section is the long form), far (segment:offset) relocations, overlays and several segments (tiny model only), debug-section processing (non-allocatable sections are ignored).
+Shared objects, `-r` partial links, common symbols, linker relaxation (the assembler already relaxes branches within a section, so a branch to another section is the long form), far (segment:offset) relocations, overlays and several segments (tiny model only: so no `.EXE` with a relocation table either), debug-section processing (non-allocatable sections are ignored).
+
+## Archives and `.COM` files (2026-10-27)
+
+- A `.a` file on the command line is a static archive (GNU or BSD `ar` format, as `llvm-ar rcsD` writes). Its members are taken only if they define a symbol that is still undefined (or an entry/`-u` root), transitively and whatever the order of the members or of the command line; the sections the members bring are then garbage collected like any other. `rt/librt.a` is the runtime library in this form. The log line says how many members were taken.
+- `--com <file>` writes the flat binary as a PC DOS `.COM` file and checks that it starts at 0100h (`system/ibm_pc/platform/link_com.ld`) and fits the segment.
+- Tests: `tests/archive.rs` (members taken, transitive and out-of-order members, long names, two archives, an unresolved symbol still an error, truncated and non-archive input, the command line with `--com`).
 
 ## Tests
 

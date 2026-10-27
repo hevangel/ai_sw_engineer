@@ -8,11 +8,15 @@ usage: i8086-ld -T script.ld [options] object.o...
   -T <file>          linker script (required)
   -o <file>          write an ELF executable
   --bin <file>       write the loaded sections as a flat binary
+  --com <file>       write a PC DOS .COM file: the flat binary, which must start
+                     at offset 0100h and fit in the segment (link_com.ld)
   --floppy <file>    write a bootable 160 KiB floppy image (needs --boot-addr)
   --boot-addr <n>    where the BIOS loads the boot sector (default 0x7C00)
   --sign             write the 55 AA boot signature if the sector has zeros there
   -Map <file>        write a link map
   -e <symbol>        entry symbol (default: the script's ENTRY, else _start)
+  <file>.a           a static archive: members are taken only for symbols still
+                     undefined (order does not matter)
   -u <symbol>        keep <symbol> (a root for section garbage collection)
   --no-gc-sections   keep every section
 ";
@@ -41,6 +45,7 @@ fn parse_addr(s: &str) -> Result<u32, String> {
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let (mut script, mut elf, mut bin, mut floppy, mut map) = (None, None, None, None, None);
+    let mut com: Option<String> = None;
     let mut opts = i8086_ld::Options::default();
     let mut boot_addr = 0x7C00u32;
     let mut sign = false;
@@ -51,6 +56,7 @@ fn run() -> Result<(), String> {
             "-T" => script = Some(value("a file")?),
             "-o" => elf = Some(value("a file")?),
             "--bin" => bin = Some(value("a file")?),
+            "--com" => com = Some(value("a file")?),
             "--floppy" => floppy = Some(value("a file")?),
             "-Map" | "--map" => map = Some(value("a file")?),
             "-e" => opts.entry = Some(value("a symbol")?),
@@ -74,9 +80,27 @@ fn run() -> Result<(), String> {
         std::fs::read_to_string(&script_path).map_err(|e| format!("{script_path}: {e}"))?;
     let script = i8086_ld::parse_script(&script_text).map_err(|e| format!("{script_path}: {e}"))?;
     let mut objects = Vec::new();
+    let mut archives = Vec::new();
     for path in &inputs {
         let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-        objects.push(i8086_ld::parse_object(path, &bytes)?);
+        if bytes.starts_with(b"!<arch>\n") {
+            archives.push(i8086_ld::parse_archive(path, &bytes)?);
+        } else {
+            objects.push(i8086_ld::parse_object(path, &bytes)?);
+        }
+    }
+    if !archives.is_empty() {
+        let mut roots = opts.undefined.clone();
+        if let Some(e) = &opts.entry {
+            roots.push(e.clone());
+        } else if let Some(e) = &script.entry {
+            roots.push(e.clone());
+        } else {
+            roots.push("_start".to_string());
+        }
+        let (all, taken) = i8086_ld::select_members(objects, archives, &roots);
+        objects = all;
+        eprintln!("i8086-ld: {} archive members taken", taken.len());
     }
     let linked = i8086_ld::link(&objects, &script, &opts)?;
 
@@ -90,6 +114,20 @@ fn run() -> Result<(), String> {
     }
     let (load, flat) = linked.flat_binary();
     if let Some(p) = &bin {
+        write(p, &flat)?;
+    }
+    if let Some(p) = &com {
+        if load != 0x100 {
+            return Err(format!(
+                "--com: the image starts at {load:#06x}, a .COM file starts at 0x0100"
+            ));
+        }
+        if flat.len() > 0xFF00 {
+            return Err(format!(
+                "--com: {} bytes do not fit in a segment",
+                flat.len()
+            ));
+        }
         write(p, &flat)?;
     }
     if let Some(p) = &floppy {

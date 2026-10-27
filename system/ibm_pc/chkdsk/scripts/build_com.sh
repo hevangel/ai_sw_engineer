@@ -15,6 +15,6 @@ if [[ -z $LD ]]; then
 fi
 RT="$PLATFORM_DIR/runtime"
 "$LD" -T "$PLATFORM_DIR/link_com.ld" --bin "$OUT/chkdsk.com" -Map "$OUT/chkdsk.map" \
-    "$RT/crt0_com.o" "$RT/dos.o" "$OUT/chkdsk.o" "$BACKEND_DIR"/rt/obj/*.o
+    "$RT/crt0_com.o" "$RT/dos.o" "$OUT/chkdsk.o" "$BACKEND_DIR/rt/librt.a"
 size=$(wc -c < "$OUT/chkdsk.com" | tr -d ' ')
 status "chkdsk.com: $size bytes (the original: 1395)"
