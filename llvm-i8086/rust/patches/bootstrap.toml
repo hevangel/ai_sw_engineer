@@ -1,0 +1,27 @@
+# Config for building a rustc with the i8086 target (rust/README.md):
+#   cp bootstrap.toml <rust source>/bootstrap.toml
+# LLVM comes from scripts/build_llvm_for_rust.sh (X86 for the host, I8086 for the target).
+change-id = "ignore"
+
+[build]
+build-dir = "/build/rust-obj"
+docs = false
+extended = false
+tools = []
+host = ["x86_64-unknown-linux-gnu"]
+target = ["x86_64-unknown-linux-gnu", "i8086-unknown-none"]
+verbose = 0
+
+[llvm]
+download-ci-llvm = false
+
+[rust]
+channel = "nightly"
+debug = false
+debug-assertions = false
+llvm-tools = false
+deny-warnings = false
+
+[target.x86_64-unknown-linux-gnu]
+llvm-config = "/build/llvm-rust-install/bin/llvm-config"
+llvm-has-rust-patches = false

@@ -245,3 +245,12 @@ Findings: the Rust program, checking the write-protected drive A:, ended in DOS'
 | `scripts/rtl_dos_programs.sh` with `ONLY=seg_exe`, then `cargo test --release --test i8086_dos -- --include-ignored` | `SEGX.EXE`, a two-segment `.EXE` (`tests/smoke_ir/seg_exe.ll`, 3 segment relocations), run by the original PC DOS 1.00 on the RTL (it prints the far segment's message, a `*` computed by the far function, and the near message) and on the Rust emulator: the same 25 rows; the disk built here is the one the RTL ran (SHA-256 in `oracle/dos/seg_exe.txt`) |
 | `I8086_STRESS_OBJECTS=... cargo test --release --test i8086_rust -- --ignored` | the stress matrix again: the stress program's stack pointer was at the top of the linked region, so a build that nearly filled the region (opt-level 2 with `llc -O0`) overflowed its own `.bss`; the test now starts SP above the region, and **eight** of the twelve builds fit and print the host's text (the other four do not fit 64 KiB) |
 | `scripts/rtl_boot_images.sh`, `build_smoke.sh --check`, `gen_run_objects.sh --check`, `build_rt.sh --check` | the Rust objects and the boot images are unchanged by these changes (no far pointer in them), so their RTL recordings stand: re-recording gave identical transcripts |
+
+## Fourteenth record: a rustc with an i8086 target (2026-10-27)
+
+| Command | Result |
+|---|---|
+| `llvm-i8086/scripts/build_llvm_for_rust.sh`, `llvm-i8086/scripts/rust_build.sh` | LLVM 23.1.3 (the version the pinned nightly links) with X86 and I8086, and rust-lang/rust 7df81381d plus `rust/patches/apply_i8086_target.py`: a stage 1 rustc whose sysroot has `core`, `alloc` and `compiler_builtins` for `i8086-unknown-none` |
+| `scripts/build_smoke.sh`, `build_rt.sh`, `build_compiler_builtins.sh`, `stress_matrix.sh` with that rustc | all Rust smoke programs, the runtime library and the twelve stress builds compile (the first attempt failed in `llc` on the libm calls, now named in the backend); `core` is rebuilt with `-Z build-std` at the crate's opt-level |
+| `system/ibm_pc/chkdsk/scripts/build_com.sh` | **`chkdsk.com` is byte for byte the one the msp430 route built** (SHA-256 de17827a...): the recorded RTL comparisons (24 disks, `rtl_target` 8 of 8) stand |
+| `I8086_STRESS_OBJECTS=... cargo test --release -- --include-ignored` (the whole emulator suite) | passes with the new objects: `boot_oracle` and `i8086_dos` (the images are the ones the RTL ran, by SHA-256), `float_rs` and the stress matrix equal the host's text, `i8086_codegen` 20 of 20 |

@@ -1,6 +1,24 @@
 # Rust for llvm-i8086
 
-The pinned rustc has no i8086 target, so `scripts/build_rust.sh` takes the msp430 route: rustc builds `core` and the crate for `msp430-none-elf` (`-Zbuild-std=core`, `panic=abort`, fat LTO), whose data layout equals `spec/abi.md` D1 for every alignment that matters, emits one LLVM IR module, and the script replaces its triple and data layout with ours, refuses what the backend lacks (floating point, i128, atomics, vectors), and runs `llc -mtriple=i8086`. `i8086-none.json` is for a rustc linked against our LLVM, which does not exist yet.
+## The rustc with an i8086 target
+
+`rustc` has a target `i8086-unknown-none` (tier 3 in rustc's terms, our fork): the nightly source the repository pins (rust-lang/rust 7df81381d, nightly-2026-10-15) plus `rust/patches/apply_i8086_target.py`, built against **our** LLVM. The patch adds the architecture (`Arch::I8086`, the target `i8086_unknown_none` with D1's data layout, 16-bit `c_int`, no atomics, `panic=abort`), the LLVM target initialisation (`LLVMInitializeI8086*`), the msp430-style calling convention for aggregates, `extern "msp430-interrupt"` as the interrupt ABI (the LLVM calling convention that `llvm-i8086` compiles as an interrupt handler, D5), LLVM's own `va_arg` for C-variadic functions, and no reliable `f128` (the backend has no fp128 soft-float). Nothing else of rustc changes.
+
+Build, in the `ai-sw-engineer` image with the volume `ai-sw-llvm-build` (about 10 minutes for LLVM, about 15 for rustc and the libraries on 32 cores):
+
+```bash
+llvm-i8086/scripts/build_llvm.sh            # puts the overlay sources in the volume (once)
+llvm-i8086/scripts/build_llvm_for_rust.sh   # LLVM libraries with X86 + I8086 and llvm-config
+llvm-i8086/scripts/rust_build.sh            # fetches the pinned rust-lang/rust commit once, patches it, builds stage 1
+```
+
+The result is `/build/rust-obj/x86_64-unknown-linux-gnu/stage1/bin/rustc` with `core`, `alloc` and `compiler_builtins` built for `i8086-unknown-none` in its sysroot. `scripts/build_rust.sh` and `scripts/build_compiler_builtins.sh` use it when it exists (`$I8086_RUSTC`): `cargo +nightly rustc --target i8086-unknown-none -Z build-std=core`, `--emit=llvm-ir`, then `llc -mtriple=i8086` (the IR already has our triple and data layout; nothing is retargeted). `core` is rebuilt at the crate's opt-level, so the code sizes are the ones of the earlier route. The same sources through the new rustc give **byte-identical programs**: the Rust CHKDSK.COM has the same SHA-256 as the one built by the msp430 route, so every RTL recording of the repository still applies.
+
+Finding this took two backend changes: the libm library calls (`fma`, `floor`, `fmin`, ... for `f32` and `f64`; `compiler_builtins` defines them) had no names in `initLibcallLoweringInfo`, which crashed the optimised compiler (`unsupported library call operation`), and rustc's tests of `bfloat`/`f128` support are answered "not reliable" for this target.
+
+## The earlier route (no i8086 rustc)
+
+Without `$I8086_RUSTC` the scripts take the msp430 route: rustc builds `core` and the crate for `msp430-none-elf` (`-Zbuild-std=core`, `panic=abort`, fat LTO), whose data layout equals `spec/abi.md` D1 for every alignment that matters, emits one LLVM IR module, and the script replaces its triple and data layout with ours, refuses what the backend lacks (atomics, vectors), and runs `llc -mtriple=i8086`.
 
 Programs: `tests/smoke/hello_rs` and `tests/smoke/stress_rs` (one source, run on the 8088 and natively on the host, texts compared) with the HAL in `system/ibm_pc/platform/hal` and `runtime/{crt0,hal}.s`. Tests: `system/ibm_pc/emulator/tests/i8086_rust.rs` (bare core always; original BIOS with `--ignored`).
 

@@ -47,6 +47,39 @@ const SelectionDAGTargetInfo *I8086Subtarget::getSelectionDAGInfo() const {
 void I8086Subtarget::initLibcallLoweringInfo(LibcallLoweringInfo &Info) const {
   // libgcc-style names of the runtime helpers (abi.md, Runtime library).
   // Without these, libcall legalization emits a null symbol name.
+  // The libm functions LLVM falls back to for operations the chip cannot do
+  // (`fma`, `floor`, ...). Rust's compiler_builtins defines them (its `math`
+  // module), so a program that needs one links it from the runtime library.
+  Info.setLibcallImpl(RTLIB::FMA_F32, RTLIB::impl_fmaf);
+  Info.setLibcallImpl(RTLIB::FMA_F64, RTLIB::impl_fma);
+  Info.setLibcallImpl(RTLIB::SQRT_F32, RTLIB::impl_sqrtf);
+  Info.setLibcallImpl(RTLIB::SQRT_F64, RTLIB::impl_sqrt);
+  Info.setLibcallImpl(RTLIB::CEIL_F32, RTLIB::impl_ceilf);
+  Info.setLibcallImpl(RTLIB::CEIL_F64, RTLIB::impl_ceil);
+  Info.setLibcallImpl(RTLIB::FLOOR_F32, RTLIB::impl_floorf);
+  Info.setLibcallImpl(RTLIB::FLOOR_F64, RTLIB::impl_floor);
+  Info.setLibcallImpl(RTLIB::TRUNC_F32, RTLIB::impl_truncf);
+  Info.setLibcallImpl(RTLIB::TRUNC_F64, RTLIB::impl_trunc);
+  Info.setLibcallImpl(RTLIB::RINT_F32, RTLIB::impl_rintf);
+  Info.setLibcallImpl(RTLIB::RINT_F64, RTLIB::impl_rint);
+  Info.setLibcallImpl(RTLIB::NEARBYINT_F32, RTLIB::impl_nearbyintf);
+  Info.setLibcallImpl(RTLIB::NEARBYINT_F64, RTLIB::impl_nearbyint);
+  Info.setLibcallImpl(RTLIB::ROUND_F32, RTLIB::impl_roundf);
+  Info.setLibcallImpl(RTLIB::ROUND_F64, RTLIB::impl_round);
+  Info.setLibcallImpl(RTLIB::FMIN_F32, RTLIB::impl_fminf);
+  Info.setLibcallImpl(RTLIB::FMIN_F64, RTLIB::impl_fmin);
+  Info.setLibcallImpl(RTLIB::FMAX_F32, RTLIB::impl_fmaxf);
+  Info.setLibcallImpl(RTLIB::FMAX_F64, RTLIB::impl_fmax);
+  Info.setLibcallImpl(RTLIB::FMINIMUM_F32, RTLIB::impl_fminimumf);
+  Info.setLibcallImpl(RTLIB::FMINIMUM_F64, RTLIB::impl_fminimum);
+  Info.setLibcallImpl(RTLIB::FMAXIMUM_F32, RTLIB::impl_fmaximumf);
+  Info.setLibcallImpl(RTLIB::FMAXIMUM_F64, RTLIB::impl_fmaximum);
+  Info.setLibcallImpl(RTLIB::FMINIMUM_NUM_F32, RTLIB::impl_fminimum_numf);
+  Info.setLibcallImpl(RTLIB::FMINIMUM_NUM_F64, RTLIB::impl_fminimum_num);
+  Info.setLibcallImpl(RTLIB::FMAXIMUM_NUM_F32, RTLIB::impl_fmaximum_numf);
+  Info.setLibcallImpl(RTLIB::FMAXIMUM_NUM_F64, RTLIB::impl_fmaximum_num);
+  Info.setLibcallImpl(RTLIB::REM_F32, RTLIB::impl_fmodf);
+  Info.setLibcallImpl(RTLIB::REM_F64, RTLIB::impl_fmod);
   Info.setLibcallImpl(RTLIB::MUL_I16, RTLIB::impl___mulhi3);
   Info.setLibcallImpl(RTLIB::SDIV_I16, RTLIB::impl___divhi3);
   Info.setLibcallImpl(RTLIB::UDIV_I16, RTLIB::impl___udivhi3);

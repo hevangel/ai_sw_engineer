@@ -23,12 +23,19 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export CARGO_TARGET_DIR="$tmp/target"
 export RUSTFLAGS="-C linker=/bin/true -C embed-bitcode=yes --emit=llvm-ir,link"
-( cd "$backend/rt/cb" && cargo "+$NIGHTLY" rustc --release --lib --target msp430-none-elf \
-    -Z build-std=core -- -o "$tmp/cb" ) >&2
-ll="$(ls "$tmp"/target/msp430-none-elf/release/build/compiler_builtins/*/out/compiler_builtins-*.ll)"
-sed -e "s|^target datalayout = .*|target datalayout = \"$DATA_LAYOUT\"|" \
-    -e 's|^target triple = .*|target triple = "i8086-unknown-none"|' "$ll" > "$tmp/cb0.ll"
-# libm and the half/fp128 routines are neither needed nor compilable here
+I8086_RUSTC="${I8086_RUSTC:-/build/rust-obj/x86_64-unknown-linux-gnu/stage1/bin/rustc}"
+if [[ -x $I8086_RUSTC ]]; then
+  # a rustc with the i8086 target (scripts/rust_build.sh): compiler_builtins is built for it
+  # from source (-Z build-std), without the C routines of compiler-rt
+  target=i8086-unknown-none
+  ( cd "$backend/rt/cb" && RUSTC="$I8086_RUSTC" cargo "+$NIGHTLY" rustc --release --lib --target $target       -Z build-std=core -- -o "$tmp/cb" ) >&2
+else
+  target=msp430-none-elf
+  ( cd "$backend/rt/cb" && cargo "+$NIGHTLY" rustc --release --lib --target $target       -Z build-std=core -- -o "$tmp/cb" ) >&2
+fi
+ll="$(ls "$tmp"/target/$target/release/build/compiler_builtins/*/out/compiler_builtins-*.ll)"
+sed -e "s|^target datalayout = .*|target datalayout = \"$DATA_LAYOUT\"|"     -e 's|^target triple = .*|target triple = "i8086-unknown-none"|' "$ll" > "$tmp/cb0.ll"
+# the half/fp128 routines are neither needed nor compilable here
 python3 "$here/ir_drop_functions.py" "$tmp/cb0.ll" "$tmp/cb.ll"
 "$llc" -mtriple=i8086 -O2 -function-sections -data-sections -filetype=obj "$tmp/cb.ll" -o "$tmp/compiler_builtins.o"
 dst="$backend/rt/obj/compiler_builtins.o"

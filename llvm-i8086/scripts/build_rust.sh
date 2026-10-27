@@ -5,8 +5,9 @@
 #   (env EXTRA_RUSTFLAGS: extra rustc flags; LLC_FLAGS: extra llc options;
 #    RUST_NIGHTLY: the toolchain, default below)
 #
-# The pinned rustc has no i8086 target, so the build takes the msp430 route
-# (rust/README.md): msp430 has the same data layout as spec/abi.md D1 (16-bit
+# With a rustc built against our LLVM (scripts/rust_build.sh, $I8086_RUSTC) the crate is
+# built for i8086-unknown-none and its IR goes straight to llc. Without one the build takes
+# the msp430 route (rust/README.md): msp430 has the same data layout as spec/abi.md D1 (16-bit
 # pointers, a 16-bit largest alignment, 32- and 64-bit integers aligned to 2),
 # so every layout rustc computes is the one our backend uses.
 #
@@ -31,27 +32,39 @@ DATA_LAYOUT="e-m:e-p:16:16-p1:32:16:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:1
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
-echo "==> rustc msp430-none-elf IR: $crate ($bin)"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/i8086-rust-build/$(basename "$crate")}"
-# A stub linker lets rustc finish codegen (where --emit=llvm-ir happens).
-export RUSTFLAGS="-C linker=/bin/true -C embed-bitcode=yes ${EXTRA_RUSTFLAGS:-}"
-( cd "$crate" && cargo "+$NIGHTLY" rustc --release --bin "$bin" --target msp430-none-elf \
-    -Z build-std=core "$@" -- --emit=llvm-ir -o "$out/${bin}_msp430.ll" )
+I8086_RUSTC="${I8086_RUSTC:-/build/rust-obj/x86_64-unknown-linux-gnu/stage1/bin/rustc}"
+if [[ -x $I8086_RUSTC ]]; then
+  # A rustc built against our LLVM (scripts/rust_build.sh): the target is
+  # i8086-unknown-none and `core` is the library built for it.
+  echo "==> rustc i8086-unknown-none IR: $crate ($bin)"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/i8086-rust-build/native-$(basename "$crate")}"
+  export RUSTC="$I8086_RUSTC"
+  export RUSTFLAGS="-C linker=/bin/true -C embed-bitcode=yes ${EXTRA_RUSTFLAGS:-}"
+  ( cd "$crate" && cargo "+$NIGHTLY" rustc --release --bin "$bin" --target i8086-unknown-none       -Z build-std=core "$@" -- --emit=llvm-ir -o "$out/$bin.ll" )
+else
+  echo "==> rustc msp430-none-elf IR: $crate ($bin)"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/i8086-rust-build/$(basename "$crate")}"
+  # A stub linker lets rustc finish codegen (where --emit=llvm-ir happens).
+  export RUSTFLAGS="-C linker=/bin/true -C embed-bitcode=yes ${EXTRA_RUSTFLAGS:-}"
+  ( cd "$crate" && cargo "+$NIGHTLY" rustc --release --bin "$bin" --target msp430-none-elf \
+      -Z build-std=core "$@" -- --emit=llvm-ir -o "$out/${bin}_msp430.ll" )
 
-echo "==> retarget to i8086"
-src="$out/${bin}_msp430.ll"
-fail=0
-check() { # <description> <extended regex>
-  if grep -Eq "$2" "$src"; then echo "ERROR: the module uses $1 (not implemented, see spec/codegen.md)" >&2; fail=1; fi
-}
-check "atomic operations" '\b(atomicrmw|cmpxchg|fence)\b|load atomic|store atomic'
-check "vector types" '<[0-9]+ x '
-check "address spaces other than 0" 'addrspace\([1-9]'
-check "msp430 intrinsics" 'llvm\.msp430'
-[[ $fail == 0 ]] || exit 1
-sed -e "s|^target datalayout = .*|target datalayout = \"$DATA_LAYOUT\"|" \
-    -e 's|^target triple = .*|target triple = "i8086-unknown-none"|' \
-    "$src" > "$out/$bin.ll"
+  echo "==> retarget to i8086"
+  src="$out/${bin}_msp430.ll"
+  fail=0
+  check() { # <description> <extended regex>
+    if grep -Eq "$2" "$src"; then echo "ERROR: the module uses $1 (not implemented, see spec/codegen.md)" >&2; fail=1; fi
+  }
+  check "atomic operations" '\b(atomicrmw|cmpxchg|fence)\b|load atomic|store atomic'
+  check "vector types" '<[0-9]+ x '
+  check "address spaces other than 0" 'addrspace\([1-9]'
+  check "msp430 intrinsics" 'llvm\.msp430'
+  [[ $fail == 0 ]] || exit 1
+  sed -e "s|^target datalayout = .*|target datalayout = \"$DATA_LAYOUT\"|" \
+      -e 's|^target triple = .*|target triple = "i8086-unknown-none"|' \
+      "$src" > "$out/$bin.ll"
+
+fi
 
 echo "==> llc"
 "$llc" -mtriple=i8086 -O2 -function-sections -data-sections ${LLC_FLAGS:-} -filetype=obj "$out/$bin.ll" -o "$out/$bin.o"

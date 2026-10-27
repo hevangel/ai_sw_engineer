@@ -5,7 +5,7 @@
 | Chip | Intel 8086 / 8088 (same instruction set; 16-bit vs 8-bit external bus). Introduction years (1978 and 1979 as commonly cited) are to be sourced from Intel material before they are stated as fact |
 | Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
 | Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
-| Rust target | `rust/i8086-none.json` |
+| Rust target | `i8086-unknown-none` in a rustc built against this LLVM (`rust/README.md`, `rust/patches/`) |
 | Status | **assembler, disassembler, object writer, integer code generation, runtime library, linker, image packager and Rust programs done** (milestones 2 to 7): `llc` compiles integer code, `rt/` supplies the rest, `i8086-ld` links and packs a bootable floppy, and Rust programs (with `core`) built through the msp430 route boot on the original BIOS; all verified on the 8088 core |
 
 ## Strategy
@@ -28,7 +28,7 @@ In scope (done): variadic functions and `byval` (`spec/abi.md` D3a), interrupt h
 
 Done in the last round: floating point and `i128`, branchless booleans, `loop`/`jcxz`, `-r`, `.EXE` (tiny model), the manual page index, far data pointers (`ptr addrspace(1)`, `spec/abi.md` D7), inline assembly with register constraints.
 
-Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none).
+Not done, and why: `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none).
 
 The tiny model is the default program model; programs with several segments use far data pointers (D7), far calls (D8, `cc 1000`) and segment relocations (D9).
 

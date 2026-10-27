@@ -22,7 +22,9 @@ Milestones (each ends with passing tests):
 16. Far code. **Done 2026-10-27** (`spec/abi.md` D8): the far calling convention (`retf`, `call seg:off`, `call far [slot]` through a far function pointer), `tests/codegen/farcode.ll` and `far_code`; far `memmove`, aggregates and 128-bit accesses through far data pointers.
 17. Several segments. **Done 2026-10-27** (`spec/abi.md` D9): `sym@seg` and `R_I8086_SEG16`, regions with `SEGMENT` in the linker script, the MZ relocation table in `--exe`, vectors through far pointers; a two-segment `.EXE` runs under the original DOS on the RTL and the emulator.
 
-Not planned, with the reason in the README: a rustc with an i8086 target (it needs a rustc built against an LLVM that contains this backend, which this environment cannot do) and running on a real 5150 (no hardware here).
+18. A rustc with an i8086 target. **Done 2026-10-27** (`rust/README.md`): rust-lang/rust at the pinned nightly plus `rust/patches/apply_i8086_target.py`, built against this LLVM (`scripts/build_llvm_for_rust.sh`, `scripts/rust_build.sh`); `build_rust.sh` and `build_compiler_builtins.sh` use it; the programs it builds are byte-identical to the msp430 route's (CHKDSK.COM has the same SHA-256).
+
+Not planned, with the reason in the README: running on a real 5150 (no hardware here).
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 

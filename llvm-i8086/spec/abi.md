@@ -1,6 +1,6 @@
 # i8086 ABI
 
-Written before any backend code. `rust/i8086-none.json` must match it exactly.
+Written before any backend code. the target `i8086-unknown-none` of the rustc in `rust/patches/` (data layout, `c_int` width) must match it exactly.
 
 Status of each decision: **implemented** (with a date) once `llc` produces code that runs on the emulator (`tests/run/`); **proposed** until then. Decisions are numbered for reference; a title that links will freeze them.
 
