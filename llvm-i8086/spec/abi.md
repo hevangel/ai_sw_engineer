@@ -6,7 +6,7 @@ Status of each decision: **implemented** (with a date) once `llc` produces code 
 
 ## Data layout
 
-- D1. LLVM data layout string: `e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16`. Same shape as LLVM's 16-bit MSP430 target. The 8088 has no alignment penalty on its 8-bit bus, so alignment is for the 16-bit 8086, and `a:8` keeps aggregates byte-aligned to save space.
+- D1. LLVM data layout string: `e-m:e-p:16:16-p1:32:16:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16`. The same shape as LLVM's 16-bit MSP430 target (which is why the Rust route works), plus address space 1: the far data pointer of D7 (32 bits, a 16-bit offset part). The 8088 has no alignment penalty on its 8-bit bus, so alignment is for the 16-bit 8086, and `a:8` keeps aggregates byte-aligned to save space.
 - Pointer width / address spaces: 16-bit near pointers into a single 64 KiB segment (tiny/small model, CS = DS = ES = SS). No far address space in the first model (decision D2: segment registers are set once at entry and are not allocatable).
 - Native integer widths: 8 and 16 (`n8:16`). 32-bit and 64-bit integers are legalized into 16-bit pieces; 128-bit integers add, shift and compare in pieces and multiply and divide through libcalls; `float` and `double` are software floating point (D6).
 - Endianness: little.
@@ -46,6 +46,16 @@ A function with the `"interrupt"` attribute, or the `msp430_intrcc` calling conv
 ### Floating point and 128-bit integers (implemented 2026-10-27, D6)
 
 There are no floating-point registers or instructions. `f32` and `f64` are legalized to `i32` and `i64`: they travel exactly as those integers do (an `f32` argument is two words, low first, from the AX, DX, CX sequence; an `f64` is four words; an `f32` is returned in DX:AX, an `f64` through the `sret` pointer), and every operation is a call to the compiler-rt routine of the usual name (`__addsf3`, `__subdf3`, `__mulsf3`, `__divdf3`, `__eqsf2`, `__ltdf2`, `__unordsf2`, `__extendsfdf2`, `__truncdfsf2`, `__fixsfsi`, `__fixunsdfdi`, `__floatsisf`, `__floatundidf`, and the 128-bit forms `__fixsfti`, `__floattidf`...). The comparison routines return a 16-bit `int` (what compiler_builtins defines for a 16-bit target), so the backend declares the comparison libcall result type as i16. 128-bit multiply, divide, remainder and variable shifts are `__multi3`, `__divti3`, `__udivti3`, `__modti3`, `__umodti3`, `__ashlti3`, `__lshrti3`, `__ashrti3`; a 128-bit value is eight words (arguments on the stack after the registers, results through `sret`). The routines are Rust's `compiler_builtins`, compiled by our `llc` (`scripts/build_compiler_builtins.sh`, `rt/README.md`); `sqrt`, `sin` and the other libm functions are not provided.
+
+### Far data pointers (implemented 2026-10-27, D7)
+
+`ptr addrspace(1)` is a far pointer: 32 bits, **offset in the low word and segment in the high word** (so an argument is offset in AX and segment in DX, as any 32-bit value). Address space 0 stays the near, 16-bit pointer of the tiny model; code, stack and the program's own data are near. The layout's index width for address space 1 is 16, so pointer arithmetic changes the offset only and wraps inside the segment (as `ES:[bx+disp]` does on the chip); it never carries into the segment.
+
+Before selection the pass `I8086FarPointers` takes every use apart: a load or store of an integer, floating-point or pointer type becomes inline assembly, one word (or a trailing byte) at a time, `push es ; mov es, seg ; mov r, word ptr es:[bx] ; pop es` (ES is saved because the compiler keeps ES equal to DS for the string instructions); `getelementptr` changes the offset word; `addrspacecast` from a near pointer takes the segment from DS and to a near pointer drops it; `memcpy` and `memset` with a far operand are a byte loop (at most 64 KiB). What stays is the pointer as a 32-bit value: arguments, results, `phi`, `select`, `icmp`, `ptrtoint`, `inttoptr`.
+
+Not done: far *code* (far calls and returns, far function pointers), far pointers to globals (a segment relocation in the linker), `memmove` with a far operand (a diagnostic), far loads and stores of aggregates or vectors or wider than 64 bits (a diagnostic). Rust cannot name address space 1, so far access from Rust is `hal_far_read16` and friends in `system/ibm_pc/platform`.
+
+Inline assembly (used by the pass and available to C-like IR) takes the constraints `r` and `q` (any register of the operand's width), `a b c d S D` (AX, BX, CX, DX, SI, DI or their byte halves) and the `{reg}` form; operands print as register names.
 
 ## Frames (implemented 2026-10-25, D4)
 

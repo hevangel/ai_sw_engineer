@@ -811,6 +811,112 @@ fn loops_and_zero_flag_branches() {
 }
 
 #[test]
+fn far_data_pointers() {
+    let img = load("far.o");
+    let s = &mut Sys::new(&img);
+    // Two segment:offset pairs for one physical address: 0800:1000 and 0900:0000 are 9000h.
+    let (seg_a, off_a, seg_b, off_b) = (0x0800u16, 0x1000u16, 0x0900u16, 0x0000u16);
+    let phys = 0x9000u32;
+    let bytes: Vec<u8> = (0..64u8)
+        .map(|i| i.wrapping_mul(37).wrapping_add(11))
+        .collect();
+    s.poke(phys, &bytes);
+    // loads through either spelling of the address
+    for (seg, off) in [(seg_a, off_a), (seg_b, off_b)] {
+        for k in 0..8u16 {
+            let at = usize::from(k);
+            assert_eq!(
+                s.call("load8", &[off + k, seg]).0 & 0xFF, // AH is not defined for an i8
+                u16::from(bytes[at]),
+                "load8 {seg:04x}:{off:04x}+{k}"
+            );
+            assert_eq!(
+                s.call("load16", &[off + k, seg]).0,
+                u16::from_le_bytes([bytes[at], bytes[at + 1]]),
+                "load16"
+            );
+            let (lo, hi) = s.call("load32", &[off + k, seg]);
+            assert_eq!(
+                (u32::from(hi) << 16) | u32::from(lo),
+                u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]),
+                "load32"
+            );
+        }
+    }
+    // a 64-bit load comes back in memory (sret): AX = the address of the result
+    // stores through one spelling, read through the other
+    s.call("store16", &[off_a + 0x20, seg_a, 0xBEEF]);
+    assert_eq!(s.peek16(phys + 0x20), 0xBEEF);
+    assert_eq!(s.call("load16", &[off_b + 0x20, seg_b]).0, 0xBEEF);
+    s.call("store8", &[off_b + 0x31, seg_b, 0x5A]);
+    assert_eq!(s.peek(phys + 0x31, 1)[0], 0x5A);
+    s.call("store32", &[off_a + 0x28, seg_a, 0x1234, 0xABCD]);
+    assert_eq!(s.peek(phys + 0x28, 4), [0x34, 0x12, 0xCD, 0xAB]);
+    // the segment is not touched by pointer arithmetic, and the offset wraps in the segment
+    let (lo, hi) = s.call("elem16", &[0xFFFE, 0x0700, 3]);
+    assert_eq!(
+        (lo, hi),
+        (0x0004, 0x0700),
+        "elem16 wraps inside the segment"
+    );
+    let (lo, hi) = s.call("elem16", &[off_a, seg_a, 5]);
+    assert_eq!((lo, hi), (off_a + 10, seg_a));
+    let (lo, hi) = s.call("make", &[0x1234, 0x5678]);
+    assert_eq!((lo, hi), (0x5678, 0x1234));
+    assert_eq!(
+        s.call("load_elem16", &[off_a, seg_a, 3]).0,
+        u16::from_le_bytes([bytes[6], bytes[7]])
+    );
+    // loops and block operations
+    let want: u16 = (0..16usize)
+        .map(|i| u16::from_le_bytes([bytes[2 * i], bytes[2 * i + 1]]))
+        .fold(0u16, |t, v| t.wrapping_add(v));
+    assert_eq!(s.call("sum16", &[off_a, seg_a, 16]).0, want, "sum16");
+    assert_eq!(
+        s.call("sum16", &[off_b, seg_b, 1]).0,
+        u16::from_le_bytes([bytes[0], bytes[1]])
+    );
+    // far to far copy into another physical area (0A00:0000 = A000h)
+    let current = s.peek(phys, 64); // the stores above changed some bytes
+    s.call("far_copy", &[0x0000, 0x0A00, off_a, seg_a, 40]);
+    assert_eq!(s.peek(0xA000, 40)[..], current[..40]);
+    assert_eq!(s.peek(0xA000 + 40, 1)[0], 0, "no byte beyond the count");
+    s.call("far_set", &[0x0100, 0x0A00, 0xC3, 20]);
+    assert_eq!(s.peek(0xA100, 20), vec![0xC3; 20]);
+    assert_eq!(s.peek(0xA100 + 20, 1)[0], 0);
+    // a zero count does nothing
+    s.call("far_set", &[0x0100, 0x0A00, 0x77, 0]);
+    assert_eq!(s.peek(0xA100, 1)[0], 0xC3);
+    // far to near
+    s.call("far_to_near", &[0x7000, off_a, seg_a, 10]);
+    assert_eq!(s.peek(0x7000, 10)[..], current[..10]);
+    // near pointers as far ones (DS = 0 here) and back
+    assert_eq!(s.call("near_as_far", &[]).0, 4660);
+    let near = sym(&img, "near_value") as u16;
+    assert_eq!(
+        s.call("far_as_near", &[near, 0x1234]).0,
+        4660,
+        "the segment is dropped"
+    );
+    assert_eq!(s.call("far_eq", &[1, 2, 1, 2]).0, 1);
+    assert_eq!(s.call("far_eq", &[1, 2, 1, 3]).0, 0);
+    assert_eq!(s.call("far_eq", &[1, 2, 5, 2]).0, 0);
+    // video memory is outside the 64 KiB of RAM: B800:0000 is the CGA's text page
+    s.call("store16", &[0x0000, 0xB800, 0x0748]); // 'H', grey on black
+    s.call("store16", &[0x0002, 0xB800, 0x0769]); // 'i'
+    assert!(
+        s.m.text_screen()[0].starts_with("Hi"),
+        "{:?}",
+        s.m.text_screen()[0]
+    );
+    assert_eq!(
+        s.call("load16", &[0x0000, 0xB800]).0,
+        0x0748,
+        "and it reads back"
+    );
+}
+
+#[test]
 fn wide_integers() {
     let img = load("wide.o");
     let s = &mut Sys::new(&img);

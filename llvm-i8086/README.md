@@ -26,9 +26,9 @@ In scope (done): Rust (`core`, `no_std`) through `rust/`.
 
 In scope (done): variadic functions and `byval` (`spec/abi.md` D3a), interrupt handlers in C-like IR and in Rust (D5), static archives and `.COM` output in `i8086-ld`, a first real title (`system/ibm_pc/chkdsk`).
 
-Done in the last round: floating point and `i128`, branchless booleans, `loop`/`jcxz`, `-r`, `.EXE` (tiny model), the manual page index.
+Done in the last round: floating point and `i128`, branchless booleans, `loop`/`jcxz`, `-r`, `.EXE` (tiny model), the manual page index, far data pointers (`ptr addrspace(1)`, `spec/abi.md` D7), inline assembly with register constraints.
 
-Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none), segmented memory models and `.EXE` relocation (tiny model only).
+Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none), far *code* (far calls and returns), far pointers to globals, and `.EXE` files with relocations: the program model is the tiny model, with far *data* pointers (D7) for memory outside the segment.
 
 ## Layout
 

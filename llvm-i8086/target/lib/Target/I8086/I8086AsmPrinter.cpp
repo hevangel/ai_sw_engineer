@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "I8086AsmPrinter.h"
+#include "MCTargetDesc/I8086InstPrinter.h"
 #include "I8086InstrInfo.h"
 #include "I8086MCInstLower.h"
 #include "TargetInfo/I8086TargetInfo.h"
@@ -32,6 +33,23 @@ static bool repForm(unsigned Opc, unsigned &Op) {
   case I8086::P_REP_STOSB: Op = I8086::STOSB; return true;
   case I8086::P_REP_STOSW: Op = I8086::STOSW; return true;
   default: return false;
+  }
+}
+
+bool I8086AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                      const char *ExtraCode, raw_ostream &OS) {
+  if (ExtraCode && ExtraCode[0])
+    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  switch (MO.getType()) {
+  case MachineOperand::MO_Register:
+    OS << StringRef(I8086InstPrinter::getRegisterName(MO.getReg())).lower();
+    return false;
+  case MachineOperand::MO_Immediate:
+    OS << MO.getImm();
+    return false;
+  default:
+    return true;
   }
 }
 

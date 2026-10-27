@@ -20,6 +20,7 @@ FunctionPass *createI8086ISelDag(I8086TargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 
 FunctionPass *createI8086LoopPeephole();
+FunctionPass *createI8086FarPointers();
 
 void initializeI8086DAGToDAGISelLegacyPass(PassRegistry &);
 

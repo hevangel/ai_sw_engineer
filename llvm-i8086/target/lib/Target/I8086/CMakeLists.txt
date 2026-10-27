@@ -15,6 +15,7 @@ add_public_tablegen_target(I8086CommonTableGen)
 
 add_llvm_target(I8086CodeGen
   I8086AsmPrinter.cpp
+  I8086FarPointers.cpp
   I8086FrameLowering.cpp
   I8086ISelDAGToDAG.cpp
   I8086ISelLowering.cpp

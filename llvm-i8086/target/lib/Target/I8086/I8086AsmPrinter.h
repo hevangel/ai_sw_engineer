@@ -24,6 +24,10 @@ public:
   StringRef getPassName() const override { return "I8086 Assembly Printer"; }
 
   void emitInstruction(const MachineInstr *MI) override;
+
+  /// Operands of inline assembly: a register by name, an immediate by value.
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &OS) override;
 };
 
 } // end namespace llvm

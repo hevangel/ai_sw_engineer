@@ -16,7 +16,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 backend="$(cd "$here/.." && pwd)"
 llc="$backend/install/bin/llc"
 NIGHTLY="${RUST_NIGHTLY:-nightly-2026-10-15}"
-DATA_LAYOUT="e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16" # abi.md D1
+DATA_LAYOUT="e-m:e-p:16:16-p1:32:16:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16" # abi.md D1
 check=0
 [[ ${1:-} == --check ]] && check=1
 tmp="$(mktemp -d)"

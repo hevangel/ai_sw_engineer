@@ -155,6 +155,37 @@ const char *I8086TargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
 }
 
+std::pair<unsigned, const TargetRegisterClass *>
+I8086TargetLowering::getRegForInlineAsmConstraint(
+    const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
+  if (Constraint.size() == 1) {
+    bool Byte = VT == MVT::i8;
+    switch (Constraint[0]) {
+    case 'r':
+    case 'q':
+      return {0U, Byte ? &I8086::GR8RegClass : &I8086::GR16RegClass};
+    case 'a':
+      return {Byte ? unsigned(I8086::AL) : unsigned(I8086::AX),
+              Byte ? &I8086::GR8RegClass : &I8086::GR16RegClass};
+    case 'c':
+      return {Byte ? unsigned(I8086::CL) : unsigned(I8086::CX),
+              Byte ? &I8086::GR8RegClass : &I8086::GR16RegClass};
+    case 'd':
+      return {Byte ? unsigned(I8086::DL) : unsigned(I8086::DX),
+              Byte ? &I8086::GR8RegClass : &I8086::GR16RegClass};
+    case 'b':
+      return {unsigned(I8086::BX), &I8086::GR16RegClass};
+    case 'S':
+      return {unsigned(I8086::SI), &I8086::GR16RegClass};
+    case 'D':
+      return {unsigned(I8086::DI), &I8086::GR16RegClass};
+    default:
+      break;
+    }
+  }
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 SDValue I8086TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {

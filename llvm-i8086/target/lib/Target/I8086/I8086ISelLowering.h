@@ -22,6 +22,12 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
+  /// Inline assembly register constraints: r and q any register of the width,
+  /// a b c d S D the accumulator, BX, CX, DX, SI, DI.
+  std::pair<unsigned, const TargetRegisterClass *>
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                               StringRef Constraint, MVT VT) const override;
+
   /// The soft-float comparison routines (`__ltsf2`...) return a 16-bit int, as
   /// compiler_builtins defines them for a 16-bit target (spec/abi.md D6).
   MVT::SimpleValueType getCmpLibcallReturnType() const override {

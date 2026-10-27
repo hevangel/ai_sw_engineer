@@ -21,7 +21,7 @@ using namespace llvm;
 
 // spec/abi.md D1; rust/i8086-none.json carries the same string.
 static StringRef computeDataLayout() {
-  return "e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16";
+  return "e-m:e-p:16:16-p1:32:16:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16";
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeI8086Target() {
@@ -66,6 +66,12 @@ public:
   bool addInstSelector() override {
     addPass(createI8086ISelDag(getTM<I8086TargetMachine>(), getOptLevel()));
     return false;
+  }
+
+  // far pointers (address space 1) are taken apart before selection
+  void addIRPasses() override {
+    addPass(createI8086FarPointers());
+    TargetPassConfig::addIRPasses();
   }
 
   // loop and jcxz, in functions small enough for their 8-bit reach

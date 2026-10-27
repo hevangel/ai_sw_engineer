@@ -18,8 +18,9 @@ Milestones (each ends with passing tests):
 
 13. Code-quality items. **Done 2026-10-27** (`spec/codegen.md`): branchless boolean values, `loop`/`jcxz` and the redundant `test` peepholes; tests in `tests/codegen/{branch,loop}.ll` and `comparisons_as_values`, `loops_and_zero_flag_branches` on the 8088 core. `xlat` was built and tested and then removed: it made `llc` run out of registers in `core` code.
 14. Linker: partial links and `.EXE`. **Done 2026-10-27** (`asm/README.md`): `-r` combines objects and archive members into one relocatable object that links like the parts (tested on the platform runtime and a Rust program); `--exe` writes a tiny-model MZ file; linker relaxation has nothing to shrink (calls are three bytes at every distance, branches are inside one function and the assembler relaxes them).
+15. Far data pointers and inline assembly constraints. **Done 2026-10-27** (`spec/abi.md` D7): `ptr addrspace(1)` is segment:offset, taken apart before selection (loads, stores, arithmetic, casts, block operations); `tests/codegen/far.ll` and `far_data_pointers` on the 8088 core, including the CGA text page at B800:0000.
 
-Not planned, with the reason in the README: a rustc with an i8086 target (needs a patched rustc) and segmented models (far pointers need a different backend design); real hardware.
+Not planned, with the reason in the README: a rustc with an i8086 target (it needs a rustc built against an LLVM that contains this backend, which this environment cannot do) and running on a real 5150 (no hardware here).
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 
