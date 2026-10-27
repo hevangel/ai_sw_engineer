@@ -1538,3 +1538,23 @@ fn runtime_memory_functions() {
         0
     );
 }
+
+#[test]
+fn far_code() {
+    let img = load("farcode.o");
+    let s = &mut Sys::new(&img);
+    // a far function is called with `push cs ; call` and returns with `retf`
+    assert_eq!(s.call("call_direct", &[1, 2, 3, 4, 5]).0, 46);
+    assert_eq!(s.call("call_direct", &[100, 200, 300, 400, 500]).0, 4501);
+    // through a far pointer, the pair read from a frame slot by `call far`
+    let f = sym(&img, "far_sum5") as u16;
+    assert_eq!(s.call("call_indirect", &[f, 0, 1, 2, 3, 4, 5]).0, 46);
+    assert_eq!(s.call("call_indirect", &[f, 0, 10, 20, 30, 40, 50]).0, 451);
+    // the address of a far function as a far pointer: offset in AX, segment (CS = DS) in DX
+    assert_eq!(s.call("far_sum5_address", &[]), (f, 0));
+    // a 32-bit argument and result
+    let (lo, hi) = s.call("call_wide", &[0x0000, 0x0001]);
+    assert_eq!((u32::from(hi) << 16) | u32::from(lo), 0x0001_0000 + 100_000);
+    // far calls in a loop: the loop counter and total live across the calls
+    assert_eq!(s.call("far_loop", &[5]).0, 10);
+}

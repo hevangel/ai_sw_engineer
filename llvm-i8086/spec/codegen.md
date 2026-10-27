@@ -47,6 +47,10 @@ There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`,
 
 Address space 1 pointers are 32-bit (segment:offset) and are taken apart by an IR pass, because instruction selection has no far addressing: see `spec/abi.md` D7 for the rules. The pass runs at every optimisation level; `tests/codegen/far.ll` checks the access sequences and `far_data_pointers` runs them on the 8088 core through two spellings of one physical address, across a segment wrap, in loops, with block operations, and on the CGA's text page at B800:0000.
 
+## Far calls (calling convention 1000)
+
+`LowerCall` with the far convention emits `I8086ISD::CALLF` (a direct callee: the assembly printer writes `push cs` before the `call`) or `I8086ISD::CALLFM` (a far pointer: the 32-bit value is split, stored in a frame slot and the call reads the slot as `call dword ptr [bp-n]`). `LowerFormalArguments` offsets stack arguments by the four-byte return address and the `P_RET` pseudo prints as `retf`. See `spec/abi.md` D8.
+
 ## Small peepholes (I8086LoopPeephole, before emission)
 
 - `dec r ; test r, r ; je/jne` loses the `test` (and likewise after `inc neg add sub and or xor` of the same register): ZF already says it, as long as the flags are dead after the branch.

@@ -22,6 +22,11 @@ inline bool isInterruptHandler(const Function &F) {
          F.getCallingConv() == CallingConv::MSP430_INTR;
 }
 
+/// The far calling convention (`cc 1000` in IR): the arguments and results are as
+/// for a near call, but the return address is a CS:IP pair (`push cs ; call`
+/// to call, `retf` to return), so the stack arguments start two bytes higher.
+constexpr CallingConv::ID I8086_FarCC = CallingConv::FirstTargetCC + 936; // 1000, a number LLVM gives no name
+
 class I8086MachineFunctionInfo : public MachineFunctionInfo {
   virtual void anchor();
 

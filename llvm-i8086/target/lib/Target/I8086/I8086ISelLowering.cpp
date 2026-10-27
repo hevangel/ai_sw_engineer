@@ -138,6 +138,8 @@ const char *I8086TargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case I8086ISD::RET: return "I8086ISD::RET";
   case I8086ISD::CALL: return "I8086ISD::CALL";
+  case I8086ISD::CALLF: return "I8086ISD::CALLF";
+  case I8086ISD::CALLFM: return "I8086ISD::CALLFM";
   case I8086ISD::WRAPPER: return "I8086ISD::WRAPPER";
   case I8086ISD::PUSH: return "I8086ISD::PUSH";
   case I8086ISD::ADDC: return "I8086ISD::ADDC";
@@ -435,13 +437,15 @@ SDValue I8086TargetLowering::LowerFormalArguments(
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, IsVarArg ? CC_I8086_Stack : CC_I8086);
+  // The return address is two bytes (near) or four (far).
+  unsigned RetAddr = CallConv == I8086_FarCC ? 4 : 2;
 
   for (CCValAssign &VA : ArgLocs) {
     const ISD::ArgFlagsTy &Flags = Ins[VA.getValNo()].Flags;
     if (Flags.isByVal()) {
       // The caller copied the object into the argument area: use it there.
       int FI = MFI.CreateFixedObject(Flags.getByValSize(),
-                                     VA.getLocMemOffset() + 2, true);
+                                     VA.getLocMemOffset() + RetAddr, true);
       InVals.push_back(DAG.getFrameIndex(FI, MVT::i16));
       continue;
     }
@@ -453,7 +457,7 @@ SDValue I8086TargetLowering::LowerFormalArguments(
     } else {
       // The argument area starts above the saved BP and the return address:
       // [bp + 4 + offset], that is entry-SP offset + 2 (the return address).
-      int FI = MFI.CreateFixedObject(2, VA.getLocMemOffset() + 2, true);
+      int FI = MFI.CreateFixedObject(2, VA.getLocMemOffset() + RetAddr, true);
       SDValue Addr = DAG.getFrameIndex(FI, MVT::i16);
       V = DAG.getLoad(VA.getLocVT(), DL, Chain, Addr,
                       MachinePointerInfo::getFixedStack(MF, FI));
@@ -471,7 +475,7 @@ SDValue I8086TargetLowering::LowerFormalArguments(
     // The variadic arguments follow the named ones on the stack.
     I8086MachineFunctionInfo *FuncInfo = MF.getInfo<I8086MachineFunctionInfo>();
     FuncInfo->VarArgsFrameIndex =
-        MFI.CreateFixedObject(2, CCInfo.getStackSize() + 2, true);
+        MFI.CreateFixedObject(2, CCInfo.getStackSize() + RetAddr, true);
   }
   return Chain;
 }
@@ -557,6 +561,8 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
+  bool Far = CLI.CallConv == I8086_FarCC;
+  bool Indirect = Far && !isa<GlobalAddressSDNode>(Callee) && !isa<ExternalSymbolSDNode>(Callee);
   auto Promote = [&](unsigned I) {
     CCValAssign &VA = ArgLocs[I];
     SDValue Arg = CLI.OutVals[I];
@@ -565,6 +571,22 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                         VA.getLocVT(), Arg);
     return Arg;
   };
+
+  if (Indirect) {
+    // Through a far pointer (offset low, segment high): the pair goes to a frame
+    // slot, which is what `call far` reads.
+    int FI = MF.getFrameInfo().CreateStackObject(4, Align(2), false);
+    SDValue Slot = DAG.getFrameIndex(FI, MVT::i16);
+    SDValue Off = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, Callee);
+    SDValue Seg = DAG.getNode(
+        ISD::TRUNCATE, DL, MVT::i16,
+        DAG.getNode(ISD::SRL, DL, MVT::i32, Callee, DAG.getConstant(16, DL, MVT::i32)));
+    SDValue Hi = DAG.getNode(ISD::ADD, DL, MVT::i16, Slot, DAG.getConstant(2, DL, MVT::i16));
+    SDValue S1 = DAG.getStore(Chain, DL, Off, Slot, MachinePointerInfo::getFixedStack(MF, FI));
+    SDValue S2 = DAG.getStore(Chain, DL, Seg, Hi, MachinePointerInfo::getFixedStack(MF, FI, 2));
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, S1, S2);
+    Callee = Slot;
+  }
 
   // Memory arguments are pushed right to left, so the first is at the lowest
   // address.
@@ -631,8 +653,8 @@ SDValue I8086TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   if (Glue.getNode())
     Ops.push_back(Glue);
 
-  Chain = DAG.getNode(I8086ISD::CALL, DL, DAG.getVTList(MVT::Other, MVT::Glue),
-                      Ops);
+  Chain = DAG.getNode(Far ? (Indirect ? I8086ISD::CALLFM : I8086ISD::CALLF) : I8086ISD::CALL, DL,
+                      DAG.getVTList(MVT::Other, MVT::Glue), Ops);
   Glue = Chain.getValue(1);
   Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, DL);
   Glue = Chain.getValue(1);

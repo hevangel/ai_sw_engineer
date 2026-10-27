@@ -8,6 +8,7 @@
 
 #include "I8086MCInstLower.h"
 #include "I8086InstrInfo.h"
+#include "I8086MachineFunctionInfo.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -145,7 +146,17 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
     OutMI.addOperand(lowerOperand(MI->getOperand(0)));
     return;
   case I8086::P_RET:
-    OutMI.setOpcode(I8086::RET);
+    OutMI.setOpcode(MI->getMF()->getFunction().getCallingConv() == I8086_FarCC
+                        ? I8086::RETF
+                        : I8086::RET);
+    return;
+  case I8086::P_CALLF:
+    OutMI.setOpcode(I8086::CALL_N);
+    OutMI.addOperand(lowerOperand(MI->getOperand(0)));
+    return;
+  case I8086::P_CALLFm:
+    OutMI.setOpcode(I8086::CALLFm);
+    lowerMem(MI, 0, OutMI);
     return;
   // Machine instructions the frame lowering emits directly (interrupt handlers).
   case I8086::PUSH16s:

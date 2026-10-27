@@ -40,6 +40,12 @@ def i8086_selectcc : SDNode<"I8086ISD::SELECT_CC", SDT_I8086SelCC, [SDNPInGlue]>
 def i8086_call     : SDNode<"I8086ISD::CALL", SDT_I8086Call,
                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                              SDNPVariadic]>;
+def i8086_callf    : SDNode<"I8086ISD::CALLF", SDT_I8086Call,
+                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                             SDNPVariadic]>;
+def i8086_callfm   : SDNode<"I8086ISD::CALLFM", SDT_I8086Call,
+                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                             SDNPVariadic]>;
 def i8086_ret      : SDNode<"I8086ISD::RET", SDT_I8086Ret,
                             [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def i8086_wrapper  : SDNode<"I8086ISD::WRAPPER", SDT_I8086Wrap>;
@@ -320,6 +326,16 @@ let isCall = 1 in {
                        [(i8086_call GR16:$dst)]>;
 }
 def : Pat<(i8086_call (i16 texternalsym:$dst)), (P_CALL texternalsym:$dst)>;
+
+// A far call: `push cs ; call` to a function in this segment, or `call far [slot]`
+// through a four-byte offset:segment slot in the frame.
+let isCall = 1 in {
+  def P_CALLF  : CGInst<(outs), (ins i16imm:$dst, variable_ops),
+                        [(i8086_callf (i16 tglobaladdr:$dst))]>;
+  def P_CALLFm : CGInst<(outs), (ins cgmem:$slot, variable_ops),
+                        [(i8086_callfm addr:$slot)]>;
+}
+def : Pat<(i8086_callf (i16 texternalsym:$dst)), (P_CALLF texternalsym:$dst)>;
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def P_RET : CGInst<(outs), (ins variable_ops), [(i8086_ret)]>;
