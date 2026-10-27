@@ -94,7 +94,7 @@ fn run_on_the_core(program: &str, budget: u64) -> String {
     objects.extend(runtime_objects());
     let linked = i8086_ld::link(
         &objects,
-        &script(&backend().join("tests/run/run.ld")),
+        &script(&backend().join("tests/smoke/smoke.ld")),
         &i8086_ld::Options {
             entry: Some("main".into()),
             ..Default::default()
@@ -107,9 +107,9 @@ fn run_on_the_core(program: &str, budget: u64) -> String {
         m.load_ram(s.addr, &s.data).unwrap();
     }
     m.cpu.s = [0; 4];
-    m.cpu.r[4] = 0xF000;
+    m.cpu.r[4] = 0xFFF0;
     m.cpu.ip = linked.symbols["main"] as u16;
-    assert_eq!(m.run(budget), Step::Halted, "{program} did not finish");
+    let step = m.run(budget);
 
     let len = u16::from_le_bytes([
         m.read(linked.symbols["console_len"]),
@@ -118,7 +118,15 @@ fn run_on_the_core(program: &str, budget: u64) -> String {
     let text: Vec<u8> = (0..u32::from(len))
         .map(|i| m.read(linked.symbols["console"] + i))
         .collect();
-    String::from_utf8(text).unwrap()
+    let text = String::from_utf8_lossy(&text).into_owned();
+    assert_eq!(
+        step,
+        Step::Halted,
+        "{program} did not finish (IP {:04x}); the console so far ends: {:?}",
+        m.cpu.ip,
+        &text[text.len().saturating_sub(300)..]
+    );
+    text
 }
 
 #[test]
@@ -145,6 +153,34 @@ fn the_stress_program_prints_what_the_same_source_prints_on_the_host() {
         assert_eq!(g, w, "line {} differs", i + 1);
     }
     assert_eq!(got, want);
+}
+
+// Soft floating point and 128-bit integers: the same source natively on the host.
+#[path = "../../../../llvm-i8086/tests/smoke/float_rs/src/checks.rs"]
+mod float_checks;
+
+#[test]
+fn soft_float_and_128_bit_integers_equal_the_hosts_results_bit_for_bit() {
+    let mut host = String::new();
+    float_checks::run(&mut host);
+    let want = host.replace('\n', "\r\n");
+    let got = run_on_the_core("float_rs", 300_000_000);
+    for (i, (g, w)) in got.lines().zip(want.lines()).enumerate() {
+        assert_eq!(g, w, "line {} differs", i + 1);
+    }
+    assert_eq!(got.lines().count(), want.lines().count());
+    assert_eq!(got, want);
+    // the text really holds the arithmetic: every kind of line, and a known IEEE result
+    for kind in ["f32 ", "f64 ", "cvt ", "int ", "u128 ", "i128 "] {
+        assert!(got.lines().any(|l| l.starts_with(kind)), "no {kind} lines");
+    }
+    // anchor: -1.5 and -1.5 give -3.0, 0, 2.25, 1.0 in single precision
+    assert!(got.contains("f32 bfc00000 bfc00000 c0400000 00000000 40100000 3f800000"), "{got}");
+    println!(
+        "{} lines, {} bytes identical to the host's",
+        got.lines().count(),
+        got.len()
+    );
 }
 
 fn link_image() -> (i8086_ld::Linked, Vec<u8>, Vec<u8>) {
@@ -295,7 +331,7 @@ fn the_stress_program_agrees_at_every_optimisation_level() {
         objects.extend(runtime_objects());
         let linked = match i8086_ld::link(
             &objects,
-            &script(&backend().join("tests/run/run.ld")),
+            &script(&backend().join("tests/smoke/smoke.ld")),
             &i8086_ld::Options {
                 entry: Some("main".into()),
                 ..Default::default()

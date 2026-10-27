@@ -8,6 +8,8 @@ The routines that `llc` calls for what the 8086 has no instruction for. They use
 | `asm/mem.s` | `memcpy`, `memmove`, `memset`, `memcmp`, `bcmp` | assembly |
 | `ir/di.ll` | `__muldi3`, `__udivdi3`, `__umoddi3`, `__divdi3`, `__moddi3`, `__ashldi3`, `__lshrdi3`, `__ashrdi3` (64-bit) | LLVM IR, compiled by `llc` |
 
+| `obj/compiler_builtins.o` | IEEE 754 single and double arithmetic, comparisons and conversions (`__addsf3`... `__floatundidf`), 128-bit multiply, divide, remainder and shifts (`__multi3`, `__udivti3`...), and weak `mem*` | Rust's `compiler_builtins`, built by `scripts/build_compiler_builtins.sh` (rustc as msp430, the IR filtered of libm and half/fp128 functions by `scripts/ir_drop_functions.py`, our `llc`); weak definitions, so the routines above win |
+
 Each routine is in a section of its own (`.text.<name>`), so a linker that drops unreferenced sections keeps only what a program uses. `scripts/build_rt.sh` builds `obj/*.o` (committed; `run_tests.sh` checks they are fresh).
 
 ## Contracts

@@ -34,10 +34,10 @@ Generated code is checked by running it. The emulator's 8088 core is itself veri
 ## Known gaps
 
 - The 64-bit divide is a 64-step restoring loop and the 64-bit shifts are conditional constant shifts; the 32-bit divide uses `div` on the common paths. Division by zero: the unsigned 64-bit forms return all ones and the dividend (tested); the 32-bit forms reach the chip's own `div` and so raise its divide error (not tested); the signed forms are unspecified. Timing of the runtime routines is not measured.
-- No `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics (inline asm and the HAL), no floating point. Variadic functions, `byval` and interrupt handlers are done (`spec/abi.md` D3a, D5).
+- No `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics (inline asm and the HAL). Floating point (software, `compiler_builtins`) and 128-bit integers work (abi.md D6; `float_rs` equals the host bit for bit); there is no libm. Variadic functions, `byval` and interrupt handlers are done (`spec/abi.md` D3a, D5).
 - Code quality is first-order: a compare with a boolean result builds the value with a branch; a shift by eight of a value in a register pair does not reuse the same register; no peephole pass.
 - Not booted on real hardware; the RTL agrees with the emulator on two images, which is two programs that touch only the screen, the disk and arithmetic.
-- No rustc with an i8086 target (`rust/i8086-none.json` is for one); the msp430 route needs optimisation, no floating point and no i128; The linker has no `-r`, no far relocations and no linker relaxation (`asm/README.md`); it reads archives and writes flat binaries, `.COM` files and the 160 KiB floppy of the 5150 (no `.EXE`).
+- No rustc with an i8086 target (`rust/i8086-none.json` is for one); the msp430 route stands in; The linker has no `-r`, no far relocations and no linker relaxation (`asm/README.md`); it reads archives and writes flat binaries, `.COM` files and the 160 KiB floppy of the 5150 (no `.EXE`).
 - Intel manual page numbers for the table rows are still to be added; the corpus is the authority until then.
 - `esc` (coprocessor escapes) and the `0F`/80186+ and undocumented opcodes are rejected on purpose.
 - A label named `short`, `near` or `far` is read as a keyword.

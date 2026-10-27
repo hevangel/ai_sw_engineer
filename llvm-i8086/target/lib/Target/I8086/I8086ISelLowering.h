@@ -21,6 +21,12 @@ public:
                                const I8086Subtarget &STI);
 
   const char *getTargetNodeName(unsigned Opcode) const override;
+
+  /// The soft-float comparison routines (`__ltsf2`...) return a 16-bit int, as
+  /// compiler_builtins defines them for a 16-bit target (spec/abi.md D6).
+  MVT::SimpleValueType getCmpLibcallReturnType() const override {
+    return MVT::i16;
+  }
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 

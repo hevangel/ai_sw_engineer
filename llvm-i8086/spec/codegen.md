@@ -4,7 +4,7 @@ How `llc -mtriple=i8086` selects instructions. The ABI (registers, calling conve
 
 ## Layers
 
-1. **LLVM IR to a DAG, legalization.** i8 and i16 are the legal types. i1 is promoted, i32 and i64 are split into 16-bit pieces by the generic legalizer. There are no floating-point types.
+1. **LLVM IR to a DAG, legalization.** i8 and i16 are the legal types. i1 is promoted, i32 and i64 are split into 16-bit pieces by the generic legalizer. `float` and `double` are softened to `i32` and `i64` with libcalls (abi.md D6); `half`, `bfloat` and `fp128` are not supported.
 2. **Selection** into the `P_*` instructions of `I8086InstrCodeGen.td` (TableGen patterns, plus `I8086ISelDAGToDAG.cpp` for the memory-operand matcher and the fixed-register instructions).
 3. **Register allocation** over `GR8`, `GR16` and their subclasses.
 4. **Frame lowering**: prologue, epilogue, callee-saved pushes, stack-argument cleanup (`I8086FrameLowering.cpp`).
@@ -53,4 +53,4 @@ A `memcpy` or `memset` that is too large to unroll as loads and stores (more tha
 
 ## What is not done
 
-There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics (port access is assembly in the platform HAL), and no floating point. Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.
+There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics (port access is assembly in the platform HAL). Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.

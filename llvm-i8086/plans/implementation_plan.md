@@ -14,7 +14,9 @@ Milestones (each ends with passing tests):
 10. Interrupt handlers and a program that uses the timer and keyboard. **Done 2026-10-27** (`spec/abi.md` D5): the `interrupt` attribute and the `msp430_intrcc` convention compile to a handler that saves everything, uses CS for DS and ES, and ends in `iret`; `tests/codegen/interrupt.ll`, execution test `interrupt_handlers` on the 8088 core, and the Rust program `tests/smoke/irq_rs` (handlers in Rust for IRQ0 and IRQ1) shows the same screen on the RTL and on the Rust emulator.
 11. Linker: static archives and `.COM` output. **Done 2026-10-27** (`asm/README.md`): `rt/librt.a`, members taken for undefined symbols only, `--com`; the CHKDSK build links the runtime from the archive.
 
-Not planned, with the reason in the README: a rustc with an i8086 target, floating point and i128, `.EXE` and segmented models, linker relaxation, `-r`.
+12. Floating point and 128-bit integers. **Done 2026-10-27** (`spec/abi.md` D6): softened to libcalls, routines from Rust's `compiler_builtins` built for i8086 (`scripts/build_compiler_builtins.sh`), `tests/smoke/float_rs` identical to the host bit for bit.
+
+Not planned, with the reason in the README: a rustc with an i8086 target, `.EXE` and segmented models, linker relaxation, `-r`.
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 

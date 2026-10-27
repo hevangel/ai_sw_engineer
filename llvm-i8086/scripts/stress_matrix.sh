@@ -12,7 +12,7 @@ out="${1:?out_dir}"
 mkdir -p "$out"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-for opt in 1 2 3 s z; do
+for opt in 0 1 2 3 s z; do
   case $opt in [0-3]) q="";; *) q="\"";; esac
   for llc in -O2 -O0; do
     name="opt${opt}_llc${llc#-}"

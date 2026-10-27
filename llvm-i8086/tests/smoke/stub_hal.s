@@ -7,8 +7,11 @@
 hal_putc:
 	push	bx
 	mov	bx, word ptr [console_len]
+	cmp	bx, 8192		; the buffer is full: drop the byte (the tests compare the whole text)
+	jae	.Lfull
 	mov	byte ptr [bx+console], al
 	inc	word ptr [console_len]
+.Lfull:
 	pop	bx
 	ret
 
@@ -22,7 +25,7 @@ hal_halt:
 	.section	.bss.console,"aw",@nobits
 	.globl	console
 console:
-	.zero	2048
+	.zero	8192
 
 	.section	.bss.console_len,"aw",@nobits
 	.globl	console_len

@@ -8,7 +8,7 @@ Status of each decision: **implemented** (with a date) once `llc` produces code 
 
 - D1. LLVM data layout string: `e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-f32:16-f64:16-n8:16-a:8-S16`. Same shape as LLVM's 16-bit MSP430 target. The 8088 has no alignment penalty on its 8-bit bus, so alignment is for the 16-bit 8086, and `a:8` keeps aggregates byte-aligned to save space.
 - Pointer width / address spaces: 16-bit near pointers into a single 64 KiB segment (tiny/small model, CS = DS = ES = SS). No far address space in the first model (decision D2: segment registers are set once at entry and are not allocatable).
-- Native integer widths: 8 and 16 (`n8:16`). 32-bit and 64-bit integers are legalized into 16-bit pieces; no floating point.
+- Native integer widths: 8 and 16 (`n8:16`). 32-bit and 64-bit integers are legalized into 16-bit pieces; 128-bit integers add, shift and compare in pieces and multiply and divide through libcalls; `float` and `double` are software floating point (D6).
 - Endianness: little.
 
 ## Registers
@@ -37,11 +37,15 @@ Imaginary registers (memory-backed pseudo-registers): none planned. The 8086 has
 - **A call through a variadic function type passes every argument on the stack**, the named ones too: the callee cannot know which of AX, DX, CX the caller meant. Slots are 2 bytes, pushed right to left, as above (a byte is a word with the value in the low byte; an i32 is two words, low first; an i64 four). A function with `...` in its type receives all its arguments on the stack the same way.
 - `va_list` is a pointer (16 bits). `va_start` stores the address of the first slot after the named arguments (`[bp + 4 + 2 * named_slots]`). `va_arg` reads the value at the pointer and advances it by the value's size rounded up to a whole slot; there is no extra alignment, because the slot is 2 bytes. `va_copy` copies the pointer; `va_end` does nothing.
 - `byval` arguments (including between register arguments: the register arguments still take AX, DX, CX in order and the object takes stack slots in its position) up to 32 bytes are copied by `push` of word loads from the source, highest word first (an odd last byte is pushed as a zero-extended word); bigger ones get room with `sub sp` and a block copy (`rep movs`). In the callee the argument is the stack memory itself, so changes stay in the callee's copy.
-- There is no floating point, so no variadic floating-point arguments.
+- Floating-point variadic arguments are the integer bit patterns of D6 in 2 or 4 slots (there is no promotion of `float`; that is the frontend's business).
 
 ### Interrupt handlers (implemented 2026-10-27, D5)
 
 A function with the `"interrupt"` attribute, or the `msp430_intrcc` calling convention (what rustc gives `extern "msp430-interrupt"`), is an interrupt handler. It takes no arguments and returns nothing. The prologue is `push bp; mov bp, sp`, then AX, CX, DX, BX, SI, DI (whatever the handler or its callees use: all six, always), then DS and ES, then `push cs; pop ds; push cs; pop es; cld` (the handler runs in the tiny model whatever segment the interrupted program had; the direction flag is clear for the ABI). The epilogue is `lea sp, [bp-16]`, `pop es; pop ds`, the six registers in reverse, `pop bp`, `iret`. FLAGS come back with IRET. The handler runs on the interrupted program's stack. The CPU clears IF on entry; the handler does not set it. The handler is not preserved across calls for any caller (nothing calls it); the vector is installed by the program (the IVT is at 0000:0000, four bytes a vector: offset, segment).
+
+### Floating point and 128-bit integers (implemented 2026-10-27, D6)
+
+There are no floating-point registers or instructions. `f32` and `f64` are legalized to `i32` and `i64`: they travel exactly as those integers do (an `f32` argument is two words, low first, from the AX, DX, CX sequence; an `f64` is four words; an `f32` is returned in DX:AX, an `f64` through the `sret` pointer), and every operation is a call to the compiler-rt routine of the usual name (`__addsf3`, `__subdf3`, `__mulsf3`, `__divdf3`, `__eqsf2`, `__ltdf2`, `__unordsf2`, `__extendsfdf2`, `__truncdfsf2`, `__fixsfsi`, `__fixunsdfdi`, `__floatsisf`, `__floatundidf`, and the 128-bit forms `__fixsfti`, `__floattidf`...). The comparison routines return a 16-bit `int` (what compiler_builtins defines for a 16-bit target), so the backend declares the comparison libcall result type as i16. 128-bit multiply, divide, remainder and variable shifts are `__multi3`, `__divti3`, `__udivti3`, `__modti3`, `__umodti3`, `__ashlti3`, `__lshrti3`, `__ashrti3`; a 128-bit value is eight words (arguments on the stack after the registers, results through `sret`). The routines are Rust's `compiler_builtins`, compiled by our `llc` (`scripts/build_compiler_builtins.sh`, `rt/README.md`); `sqrt`, `sin` and the other libm functions are not provided.
 
 ## Frames (implemented 2026-10-25, D4)
 

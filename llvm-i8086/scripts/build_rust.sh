@@ -14,8 +14,7 @@
 #    opt-level=z, panic=abort, fat LTO) and emits one whole-program LLVM IR
 #    module;
 # 2. the module's triple and data layout are replaced with ours, and the IR is
-#    checked for what the backend does not implement (floating point, i128,
-#    atomics, vectors, other address spaces, msp430 intrinsics; the msp430_intrcc
+#    checked for what the backend does not implement (atomics, vectors, other address spaces, msp430 intrinsics; the msp430_intrcc
 #    calling convention of `extern "msp430-interrupt"` is an interrupt handler, D5);
 # 3. llc -mtriple=i8086 makes <out_dir>/<bin_name>.o (one section per function)
 #    and .s for reading.
@@ -45,8 +44,6 @@ fail=0
 check() { # <description> <extended regex>
   if grep -Eq "$2" "$src"; then echo "ERROR: the module uses $1 (not implemented, see spec/codegen.md)" >&2; fail=1; fi
 }
-check "floating point" '(^|[ (,<])(half|float|double|fp128|x86_fp80)([ ,)>*]|$)|fadd|fsub|fmul|fdiv|fcmp'
-check "i128 integers" '\bi128\b'
 check "atomic operations" '\b(atomicrmw|cmpxchg|fence)\b|load atomic|store atomic'
 check "vector types" '<[0-9]+ x '
 check "address spaces other than 0" 'addrspace\([1-9]'

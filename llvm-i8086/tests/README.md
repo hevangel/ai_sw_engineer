@@ -11,7 +11,7 @@
 - `run/` — `.ll` programs compiled to ELF objects (`scripts/gen_run_objects.sh`, committed as `*.o`), linked by a small linker in `system/ibm_pc/emulator/tests/i8086_codegen.rs`, called with the ABI of `spec/abi.md` on the 8088 core, and compared with the same computation on the host (not lit tests)
 - `../rt/` — the runtime library; `run/rt.ll` calls every routine and the emulator test links it with `rt/obj/*.o`
 - `boot/` — a two-stage boot program in assembly (`hello.s`, committed object `hello.o`), linked by `i8086-ld` with the platform script; `hello.check` is the FileCheck input for the disassembly of the result (not lit tests)
-- `smoke/` — Rust programs (`hello_rs`, `stress_rs`, `irq_rs` with Rust interrupt handlers, `hello_com` for DOS) with their committed objects and the BIOS-free HAL stub; run by `system/ibm_pc/emulator/tests/i8086_rust.rs` (milestone 7)
+- `smoke/` — Rust programs (`hello_rs`, `stress_rs`, `irq_rs` with Rust interrupt handlers, `float_rs` with soft floating point and i128, `hello_com` for DOS) with their committed objects and the BIOS-free HAL stub; run by `system/ibm_pc/emulator/tests/i8086_rust.rs` (milestone 7)
 
 `vector_check.py` is the independent opcode table: SingleStepTests/8086 lists the
 exact bytes and MartyPC's disassembly of thousands of random instances of every
