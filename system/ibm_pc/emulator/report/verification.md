@@ -254,3 +254,9 @@ Findings: the Rust program, checking the write-protected drive A:, ended in DOS'
 | `scripts/build_smoke.sh`, `build_rt.sh`, `build_compiler_builtins.sh`, `stress_matrix.sh` with that rustc | all Rust smoke programs, the runtime library and the twelve stress builds compile (the first attempt failed in `llc` on the libm calls, now named in the backend); `core` is rebuilt with `-Z build-std` at the crate's opt-level |
 | `system/ibm_pc/chkdsk/scripts/build_com.sh` | **`chkdsk.com` is byte for byte the one the msp430 route built** (SHA-256 de17827a...): the recorded RTL comparisons (24 disks, `rtl_target` 8 of 8) stand |
 | `I8086_STRESS_OBJECTS=... cargo test --release -- --include-ignored` (the whole emulator suite) | passes with the new objects: `boot_oracle` and `i8086_dos` (the images are the ones the RTL ran, by SHA-256), `float_rs` and the stress matrix equal the host's text, `i8086_codegen` 20 of 20 |
+
+## Fifteenth record: MartyPC as a third model (2026-10-27)
+
+| Command | Result |
+|---|---|
+| `scripts/martypc_boot_images.sh` (docker; builds `tools/martypc_oracle`, a harness that uses `external/martypc/crates/lib/marty_core` unmodified: IBM 5150 with 64 KiB, CGA, two 160 KiB floppy drives, the original BIOS and BASIC ROMs, the keyboard typing the scripted keys) | `boot_hello`, `hello_rs`, `irq_rs` (timer and keyboard interrupts handled by Rust), and under the original PC DOS 1.00: `HELLO.COM`, `HELLOX.EXE` and `SEGX.EXE` (the two-segment `.EXE`) all show **exactly the 25 screen rows the RTL recorded**. MartyPC's CPU and bus timing were validated by its author against real 8088 hardware, so this is the nearest thing to the physical machine available here; it is independent of both the RTL and the Rust emulator |

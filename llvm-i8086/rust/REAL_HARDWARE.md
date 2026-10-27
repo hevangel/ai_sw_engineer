@@ -7,6 +7,10 @@ Rust emulator. A run on a physical 5150 needs the machine, a 5.25-inch drive and
 (checked 2026-10-27: the host has COM1 and USB mass-storage devices, no floppy controller or flux
 reader). The programs and what a correct run shows are ready, so the run is one step for whoever has the machine.
 
+The closest stand-in available here is MartyPC (`external/martypc`, MIT), whose 8088 and PC timing its author validated against real
+hardware. `system/ibm_pc/emulator/scripts/martypc_boot_images.sh` runs the boot images and the DOS programs (including the two-segment
+`.EXE` and the interrupt program) on it, as a library driven by `tools/martypc_oracle`: all six show exactly the screens the RTL recorded.
+
 ## Disks
 
 - **Boot floppy** `hello_rs`: `system/ibm_pc/emulator/scripts/rtl_boot_images.sh` builds
