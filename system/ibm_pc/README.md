@@ -22,6 +22,10 @@ IBM's [manufacturer history](https://www.ibm.com/history/personal-computer) date
 - Primary (ai_hw_engineer): `$AI_HW_ENGINEER/system/ibm_pc` (5150, 64 KiB, CGA, two drives) and `system/ibm_pc_xt_5160`; RTL CPU `design/intel_8086` with the 8259, 8253, 8255, 8237 and 8272 peripherals. It boots the unchanged IBM BIOS and PC DOS 1.00.
 - Secondary (external/): `external/martypc` ([MartyPC](https://github.com/dbalsom/martypc), cycle-accurate IBM PC/XT emulator in Rust).
 
+## Toolchain
+
+[toolchain/](toolchain/README.md): the compiler profile of this computer (machine and ISA specification, pinned versions, build commands for the boot floppy, `.COM` and `.EXE` formats, independent decoder checks, execution on MartyPC and the RTL, report with hashes).
+
 ## Software
 
 | Title | Year | Original authors | Status | Folder |

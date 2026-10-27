@@ -32,7 +32,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # lit + FileCheck driver for backend tests (FileCheck itself comes from LLVM builds).
-RUN python3 -m pip install --no-cache-dir lit==18.1.8
+RUN python3 -m pip install --no-cache-dir lit==18.1.8 capstone==5.0.7
 
 USER mos
 ENV PATH=/home/mos/.cargo/bin:/usr/local/bin:${PATH} \

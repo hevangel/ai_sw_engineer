@@ -35,12 +35,17 @@ run() { # <image relative to the emulator dir> <cycles> <transcript> [<wait text
   fi
 }
 
-B=emulator/oracle/boot
-run emulator/oracle/boot/images/boot_hello.img 130000000 oracle/boot/boot_hello.txt
-run emulator/oracle/boot/images/hello_rs.img   130000000 oracle/boot/hello_rs.txt
-run emulator/oracle/boot/images/irq_rs.img     130000000 oracle/boot/irq_rs.txt 'ticks ok' abc
+# where the images are (the toolchain profile points these at its own build)
+BOOT_IMG_DIR="${BOOT_IMG_DIR:-emulator/oracle/boot/images}"
+DOS_IMG_DIR="${DOS_IMG_DIR:-chkdsk/build/com}"
+CASES="${CASES:-boot_hello hello_rs irq_rs hello_com hello_exe seg_exe}"
+want_case() { [[ " $CASES " == *" $1 "* ]]; }
+want_case boot_hello && run $BOOT_IMG_DIR/boot_hello.img 130000000 oracle/boot/boot_hello.txt
+want_case hello_rs   && run $BOOT_IMG_DIR/hello_rs.img   130000000 oracle/boot/hello_rs.txt
+want_case irq_rs     && run $BOOT_IMG_DIR/irq_rs.img     130000000 oracle/boot/irq_rs.txt 'ticks ok' abc
 for c in "hello_com hello" "hello_exe hellox" "seg_exe segx"; do
   set -- $c
-  run chkdsk/build/com/dos_$1.img 400000000 oracle/dos/$1.txt "Enter today's date" '10-14-81\r' 'A>' "$2"'\r'
+  want_case $1 || continue
+  run $DOS_IMG_DIR/dos_$1.img 400000000 oracle/dos/$1.txt "Enter today's date" '10-14-81\r' 'A>' "$2"'\r'
 done
 exit $fail
