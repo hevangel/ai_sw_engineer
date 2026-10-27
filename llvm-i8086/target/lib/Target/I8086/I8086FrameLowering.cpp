@@ -39,6 +39,11 @@ void I8086FrameLowering::determineCalleeSaves(MachineFunction &MF,
                                               BitVector &SavedRegs,
                                               RegScavenger *RS) const {
   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
+  // An interrupt handler saves every register, whatever it or its callees use.
+  if (isInterruptHandler(MF.getFunction()))
+    for (MCRegister R : {I8086::AX, I8086::CX, I8086::DX, I8086::BX, I8086::SI,
+                         I8086::DI})
+      SavedRegs.set(R);
   // BP is the frame pointer; the prologue saves it itself.
   SavedRegs.reset(I8086::BP);
 }
@@ -51,7 +56,8 @@ bool I8086FrameLowering::assignCalleeSavedSpillSlots(
 
   // Stack objects exist (locals, spills, incoming stack arguments) or the
   // stack grows by a variable amount: address the frame through BP.
-  bool HasFP = MFI.hasVarSizedObjects() || MFI.getNumObjects() > 0;
+  bool HasFP = MFI.hasVarSizedObjects() || MFI.getNumObjects() > 0 ||
+               isInterruptHandler(MF.getFunction());
   FI->HasFP = HasFP;
 
   // Offsets are from the stack pointer at entry; the return address is at 0.
@@ -65,6 +71,14 @@ bool I8086FrameLowering::assignCalleeSavedSpillSlots(
     CS.setFrameIdx(MFI.CreateFixedSpillStackObject(2, Off));
   }
   FI->NumPushed = CSI.size();
+  if (isInterruptHandler(MF.getFunction())) {
+    // DS and ES are pushed after the registers (emitPrologue).
+    for (int I = 0; I < 2; ++I) {
+      Off -= 2;
+      MFI.CreateFixedSpillStackObject(2, Off);
+    }
+    FI->NumPushed += 2;
+  }
   return true;
 }
 
@@ -114,6 +128,24 @@ void I8086FrameLowering::emitPrologue(MachineFunction &MF,
   // Past the pushes, allocate the locals.
   while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup))
     ++MBBI;
+  if (isInterruptHandler(MF.getFunction())) {
+    // The handler runs with the interrupted program's DS and ES: keep them and
+    // use the code segment (the tiny model: CS = DS = ES = SS).
+    for (MCRegister Seg : {I8086::DS, I8086::ES})
+      BuildMI(MBB, MBBI, DL, TII.get(I8086::PUSH16s))
+          .addReg(Seg)
+          .setMIFlag(MachineInstr::FrameSetup);
+    for (MCRegister Seg : {I8086::DS, I8086::ES}) {
+      BuildMI(MBB, MBBI, DL, TII.get(I8086::PUSH16s))
+          .addReg(I8086::CS)
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII.get(I8086::POP16s))
+          .addReg(Seg, RegState::Define)
+          .setMIFlag(MachineInstr::FrameSetup);
+    }
+    BuildMI(MBB, MBBI, DL, TII.get(I8086::CLD))
+        .setMIFlag(MachineInstr::FrameSetup);
+  }
   int64_t Saved = (FI->HasFP ? 2 : 0) + 2 * int64_t(FI->NumPushed);
   int64_t Adjust = int64_t(MF.getFrameInfo().getStackSize()) - Saved;
   if (FI->HasFP && Adjust > 0)
@@ -151,8 +183,20 @@ void I8086FrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, Pops, DL, TII.get(I8086::P_MOV16rr), I8086::SP)
         .addReg(I8086::BP)
         .setMIFlag(MachineInstr::FrameDestroy);
+  if (isInterruptHandler(MF.getFunction())) {
+    // After the lea: ES and DS come off first (pushed last).
+    for (MCRegister Seg : {I8086::ES, I8086::DS})
+      BuildMI(MBB, Pops, DL, TII.get(I8086::POP16s))
+          .addReg(Seg, RegState::Define)
+          .setMIFlag(MachineInstr::FrameDestroy);
+  }
   BuildMI(MBB, Ret, DL, TII.get(I8086::P_POP16r), I8086::BP)
       .setMIFlag(MachineInstr::FrameDestroy);
+  if (isInterruptHandler(MF.getFunction()) && Ret != MBB.end() &&
+      Ret->getOpcode() == I8086::P_RET) {
+    BuildMI(MBB, Ret, DL, TII.get(I8086::IRET));
+    Ret->eraseFromParent();
+  }
 }
 
 MachineBasicBlock::iterator I8086FrameLowering::eliminateCallFramePseudoInstr(

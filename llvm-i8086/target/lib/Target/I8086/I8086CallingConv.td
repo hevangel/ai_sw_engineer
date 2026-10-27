@@ -36,3 +36,8 @@ def RetCC_I8086 : CallingConv<[
 // BX SI DI BP survive a call (abi.md D3). BP is the frame pointer and is
 // saved by the prologue itself, not through the callee-saved machinery.
 def CSR_I8086 : CalleeSavedRegs<(add BX, SI, DI, BP)>;
+
+// An interrupt handler (the "interrupt" attribute, or the msp430_intrcc calling
+// convention rustc gives `extern "msp430-interrupt"`) preserves everything; it
+// also saves DS and ES and sets them to CS (I8086FrameLowering).
+def CSR_I8086_Intr : CalleeSavedRegs<(add AX, CX, DX, BX, SI, DI, BP)>;

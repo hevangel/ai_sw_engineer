@@ -10,8 +10,17 @@
 #define LLVM_LIB_TARGET_I8086_I8086MACHINEFUNCTIONINFO_H
 
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Function.h"
 
 namespace llvm {
+
+/// Whether `F` is an interrupt handler: the "interrupt" attribute or the
+/// msp430_intrcc calling convention that rustc uses for `extern "msp430-interrupt"`.
+inline bool isInterruptHandler(const Function &F) {
+  return F.hasFnAttribute("interrupt") ||
+         F.getCallingConv() == CallingConv::MSP430_INTR;
+}
 
 class I8086MachineFunctionInfo : public MachineFunctionInfo {
   virtual void anchor();

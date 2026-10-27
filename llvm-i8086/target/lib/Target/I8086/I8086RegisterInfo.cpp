@@ -27,6 +27,8 @@ I8086RegisterInfo::I8086RegisterInfo() : I8086GenRegisterInfo(I8086::SP) {}
 
 const MCPhysReg *
 I8086RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  if (MF && isInterruptHandler(MF->getFunction()))
+    return CSR_I8086_Intr_SaveList;
   return CSR_I8086_SaveList;
 }
 

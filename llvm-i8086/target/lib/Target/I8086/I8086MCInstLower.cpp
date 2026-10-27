@@ -147,6 +147,16 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
   case I8086::P_RET:
     OutMI.setOpcode(I8086::RET);
     return;
+  // Machine instructions the frame lowering emits directly (interrupt handlers).
+  case I8086::PUSH16s:
+  case I8086::POP16s:
+    OutMI.setOpcode(Opc);
+    OutMI.addOperand(lowerOperand(MI->getOperand(0)));
+    return;
+  case I8086::CLD:
+  case I8086::IRET:
+    OutMI.setOpcode(Opc);
+    return;
   default:
     break;
   }

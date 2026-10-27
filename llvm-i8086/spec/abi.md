@@ -30,7 +30,7 @@ Imaginary registers (memory-backed pseudo-registers): none planned. The 8086 has
 - Return values: 16-bit in AX, 32-bit in DX:AX (DX high); anything that does not fit the two return registers is returned through a caller-supplied pointer (`sret`) passed as the first argument.
 - Callee-saved: BX, SI, DI, BP. Caller-saved: AX, CX, DX, FLAGS. The direction flag is clear at calls and returns.
 - Stack: full descending, SS:SP, a PUSH decrements SP by 2, SP kept even at call boundaries; the caller removes stack arguments (`add sp, n`). Depth is limited only by RAM; the linker script places the stack top at `_stack_top` below the data.
-- Interrupt handlers use a separate attribute (IRET, save everything) and are out of scope for the first model.
+- Interrupt handlers: see D5 below.
 
 ### Variadic functions and `byval` (implemented 2026-10-27, D3a)
 
@@ -38,6 +38,10 @@ Imaginary registers (memory-backed pseudo-registers): none planned. The 8086 has
 - `va_list` is a pointer (16 bits). `va_start` stores the address of the first slot after the named arguments (`[bp + 4 + 2 * named_slots]`). `va_arg` reads the value at the pointer and advances it by the value's size rounded up to a whole slot; there is no extra alignment, because the slot is 2 bytes. `va_copy` copies the pointer; `va_end` does nothing.
 - `byval` arguments (including between register arguments: the register arguments still take AX, DX, CX in order and the object takes stack slots in its position) are copied by `push` of word loads from the source, highest word first; an odd last byte is pushed as a zero-extended word. In the callee the argument is the stack memory itself, so changes stay in the callee's copy.
 - Not done: a variadic call passes floating point as nothing (there is no floating point), and a `byval` object above 128 bytes is rejected by the backend with a diagnostic (a loop would be needed).
+
+### Interrupt handlers (implemented 2026-10-27, D5)
+
+A function with the `"interrupt"` attribute, or the `msp430_intrcc` calling convention (what rustc gives `extern "msp430-interrupt"`), is an interrupt handler. It takes no arguments and returns nothing. The prologue is `push bp; mov bp, sp`, then AX, CX, DX, BX, SI, DI (whatever the handler or its callees use: all six, always), then DS and ES, then `push cs; pop ds; push cs; pop es; cld` (the handler runs in the tiny model whatever segment the interrupted program had; the direction flag is clear for the ABI). The epilogue is `lea sp, [bp-16]`, `pop es; pop ds`, the six registers in reverse, `pop bp`, `iret`. FLAGS come back with IRET. The handler runs on the interrupted program's stack. The CPU clears IF on entry; the handler does not set it. The handler is not preserved across calls for any caller (nothing calls it); the vector is installed by the program (the IVT is at 0000:0000, four bytes a vector: offset, segment).
 
 ## Frames (implemented 2026-10-25, D4)
 

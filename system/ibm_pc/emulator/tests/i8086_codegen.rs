@@ -616,6 +616,61 @@ fn variadic_functions_and_byval_arguments() {
 }
 
 #[test]
+fn interrupt_handlers() {
+    let img = load("intr.o");
+    let s = &mut Sys::new(&img);
+    let (isr, isr_cc, idle) = (s.sym("isr"), s.sym("isr_cc"), s.sym("idle"));
+    let (ticks, mix, wide) = (s.sym("ticks"), s.sym("mix"), s.sym("wide"));
+    s.poke(0x40 * 4, &[isr as u8, (isr >> 8) as u8, 0, 0]);
+    s.poke(0x41 * 4, &[isr_cc as u8, (isr_cc >> 8) as u8, 0, 0]);
+    let regs = [
+        0x1111,
+        0x2222,
+        0x3333,
+        0x4444,
+        STACK_TOP as u16,
+        0x5555,
+        0x6666,
+        0x7777,
+    ];
+    let segs = [0x3000, 0, 0, 0x2000]; // ES CS SS DS: the interrupted program's DS is not the handler's
+    {
+        let m = &mut s.m;
+        m.cpu.r = regs;
+        m.cpu.s = segs;
+        m.cpu.ip = idle as u16;
+        m.cpu.halted = false;
+        m.cpu.set_flags(0x0200); // IF
+    }
+    let scramble = |x: u16| -> u16 {
+        let d = x.wrapping_mul(31) ^ 42405;
+        let d = d.wrapping_add(x << 3);
+        (d / 7).wrapping_add(d % 5)
+    };
+    let mut w = 0u32;
+    for n in 0..6u16 {
+        s.m.raise_intr(0x40);
+        s.m.run(3000);
+        w = w.wrapping_mul(65599).wrapping_add(12345);
+        assert_eq!(s.m.cpu.r, regs, "registers after interrupt {n}");
+        assert_eq!(s.m.cpu.s, segs, "segment registers after interrupt {n}");
+        assert_eq!(s.m.cpu.ip as u32 >> 12, idle >> 12, "back in idle");
+        assert_eq!(s.peek16(ticks), n + 1, "ticks");
+        assert_eq!(s.peek16(mix), scramble(n), "mix");
+        let lo = u32::from(s.peek16(wide));
+        let hi = u32::from(s.peek16(wide + 2));
+        assert_eq!(hi << 16 | lo, w, "wide");
+    }
+    // the msp430_intrcc spelling is the same handler shape
+    s.m.raise_intr(0x41);
+    s.m.run(3000);
+    assert_eq!(s.m.cpu.r, regs);
+    assert_eq!(s.m.cpu.s, segs);
+    assert_eq!(s.peek16(ticks), 106);
+    assert_eq!(s.m.cpu.flags() & 0x0200, 0x0200, "IF restored by IRET");
+}
+
+#[test]
 fn wide_integers() {
     let img = load("wide.o");
     let s = &mut Sys::new(&img);
