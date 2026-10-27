@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/I8086FixupKinds.h"
+#include "MCTargetDesc/I8086MCAsmInfo.h"
 #include "MCTargetDesc/I8086MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
@@ -32,12 +33,18 @@ protected:
     case I8086::fixup_8:
       return ELF::R_I8086_8;
     case FK_Data_2:
+      // `.word sym@seg`
+      if (Target.getSpecifier() == I8086::S_SEG)
+        return ELF::R_I8086_SEG16;
+      return ELF::R_I8086_16;
     case I8086::fixup_16:
       return ELF::R_I8086_16;
     case I8086::fixup_pc8:
       return ELF::R_I8086_PC8;
     case I8086::fixup_pc16:
       return ELF::R_I8086_PC16;
+    case I8086::fixup_seg16:
+      return ELF::R_I8086_SEG16;
     default:
       llvm_unreachable("invalid fixup kind for I8086");
     }

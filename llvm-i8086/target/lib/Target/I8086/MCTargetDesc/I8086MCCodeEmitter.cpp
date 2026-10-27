@@ -18,6 +18,7 @@
 
 #include "MCTargetDesc/I8086BaseInfo.h"
 #include "MCTargetDesc/I8086FixupKinds.h"
+#include "MCTargetDesc/I8086MCAsmInfo.h"
 #include "MCTargetDesc/I8086MCTargetDesc.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -104,7 +105,12 @@ void I8086MCCodeEmitter::emitValue(const MCOperand &Op, unsigned Size,
   }
   if (Expr && (PCRel || !isa<MCConstantExpr>(Expr))) {
     MCFixupKind Kind;
-    if (PCRel) {
+    const auto *Ref = dyn_cast<MCSymbolRefExpr>(Expr);
+    if (Ref && Ref->getSpecifier() == I8086::S_SEG && !PCRel && Size == 2) {
+      // The segment of the symbol: a relocation against the plain symbol.
+      Expr = MCSymbolRefExpr::create(&Ref->getSymbol(), Ctx);
+      Kind = MCFixupKind(I8086::fixup_seg16);
+    } else if (PCRel) {
       Kind = MCFixupKind(Size == 1 ? I8086::fixup_pc8 : I8086::fixup_pc16);
       Expr = MCBinaryExpr::createAdd(Expr, MCConstantExpr::create(Bias, Ctx),
                                      Ctx);

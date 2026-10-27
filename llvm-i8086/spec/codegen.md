@@ -49,7 +49,7 @@ Address space 1 pointers are 32-bit (segment:offset) and are taken apart by an I
 
 ## Far calls (calling convention 1000)
 
-`LowerCall` with the far convention emits `I8086ISD::CALLF` (a direct callee: the assembly printer writes `push cs` before the `call`) or `I8086ISD::CALLFM` (a far pointer: the 32-bit value is split, stored in a frame slot and the call reads the slot as `call dword ptr [bp-n]`). `LowerFormalArguments` offsets stack arguments by the four-byte return address and the `P_RET` pseudo prints as `retf`. See `spec/abi.md` D8.
+`LowerCall` with the far convention emits `I8086ISD::CALLF` (a direct callee: `call sym@seg:sym`, opcode 9Ah with a `R_I8086_SEG16` relocation for the segment) or `I8086ISD::CALLFM` (a far pointer: the 32-bit value is split, stored in a frame slot and the call reads the slot as `call dword ptr [bp-n]`). `LowerFormalArguments` offsets stack arguments by the four-byte return address and the `P_RET` pseudo prints as `retf`. See `spec/abi.md` D8.
 
 ## Small peepholes (I8086LoopPeephole, before emission)
 

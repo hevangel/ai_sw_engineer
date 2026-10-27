@@ -355,7 +355,8 @@ fn the_stress_program_agrees_at_every_optimisation_level() {
             m.load_ram(s.addr, &s.data).unwrap();
         }
         m.cpu.s = [0; 4];
-        m.cpu.r[4] = 0xF000;
+        // above the linked region (it ends at 0xF000), so a deep stack cannot reach .bss
+        m.cpu.r[4] = 0xFFF0;
         m.cpu.ip = linked.symbols["main"] as u16;
         let stop = m.run(4_000_000_000);
         let len = u16::from_le_bytes([

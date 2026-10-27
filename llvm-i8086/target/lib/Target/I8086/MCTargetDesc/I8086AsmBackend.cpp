@@ -82,6 +82,7 @@ public:
         {"fixup_16", 0, 16, 0},
         {"fixup_pc8", 0, 8, 0},
         {"fixup_pc16", 0, 16, 0},
+        {"fixup_seg16", 0, 16, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
@@ -146,6 +147,7 @@ void I8086AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case FK_Data_2:
   case I8086::fixup_16:
   case I8086::fixup_pc16:
+  case I8086::fixup_seg16:
     Data[0] = Value & 0xff;
     Data[1] = (Value >> 8) & 0xff;
     break;

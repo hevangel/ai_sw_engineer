@@ -22,6 +22,7 @@ enum Fixups {
   fixup_16,                       // absolute offset, 2 bytes little-endian
   fixup_pc8,                      // PC-relative, 1 byte (short jumps, loops)
   fixup_pc16,                     // PC-relative, 2 bytes (near jump and call)
+  fixup_seg16,                    // segment of a symbol (`sym@seg`), 2 bytes
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind
 };

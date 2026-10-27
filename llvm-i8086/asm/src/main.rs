@@ -142,6 +142,9 @@ fn run() -> Result<(), String> {
         write(p, &flat)?;
     }
     if let Some(p) = &com {
+        if !linked.segment_relocs.is_empty() {
+            return Err("--com: the program uses segment values (`sym@seg`), which only an .EXE can relocate".into());
+        }
         if load != 0x100 {
             return Err(format!(
                 "--com: the image starts at {load:#06x}, a .COM file starts at 0x0100"
@@ -165,7 +168,30 @@ fn run() -> Result<(), String> {
             .symbols
             .get("__bss_end")
             .map_or(0, |&b| b.saturating_sub(end));
-        write(p, &i8086_ld::exe(&flat, load, entry, bss + EXE_STACK)?)?;
+        let multi = linked.sections.iter().any(|s| s.segment > 0);
+        if multi {
+            // segments above the first: the stack is declared in the script
+            let top = *linked.symbols.get("__stack_top").ok_or(
+                "--exe: a program with several segments needs `__stack_top` (the top of a stack                  in the first segment) in the script",
+            )?;
+            let sp = u16::try_from(top).map_err(|_| "__stack_top is outside the segment")?;
+            write(
+                p,
+                &i8086_ld::exe_segmented(&flat, load, entry, 0, Some(sp), &linked.segment_relocs)?,
+            )?;
+        } else {
+            write(
+                p,
+                &i8086_ld::exe_segmented(
+                    &flat,
+                    load,
+                    entry,
+                    bss + EXE_STACK,
+                    None,
+                    &linked.segment_relocs,
+                )?,
+            )?;
+        }
     }
     if let Some(p) = &floppy {
         let img = i8086_ld::floppy(&flat, load, boot_addr, sign, i8086_ld::FLOPPY_160K)?;

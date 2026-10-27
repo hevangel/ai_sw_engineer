@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use crate::elf::*;
-use crate::script::{glob, Script};
+use crate::script::{glob, Script, Segment};
 
 pub struct Options {
     /// Drop sections nothing refers to.
@@ -47,6 +47,9 @@ pub struct Placed {
     pub data: Vec<u8>,
     pub region: String,
     pub inputs: Vec<PlacedInput>,
+    /// The paragraph its segment starts at (0 in the one-segment programs); `addr` is
+    /// the linear address `segment * 16 + offset`.
+    pub segment: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,10 @@ pub struct RegionUse {
     pub origin: u32,
     pub length: u32,
     pub used: u32,
+    /// The segment the region is in (paragraphs), once it holds something.
+    pub segment: u32,
+    /// Whether the region has a segment of its own (`SEGMENT` in the script).
+    pub own_segment: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +73,12 @@ pub struct Linked {
     /// `object: section` for every section the collector dropped.
     pub discarded: Vec<String>,
     pub map: String,
+    /// Linear addresses of the 16-bit words that hold a segment value (`sym@seg`),
+    /// each the paragraph of the symbol's segment from the start of the program.
+    pub segment_relocs: Vec<u32>,
+    /// The segment (paragraph) of each symbol in `symbols`; the values there are
+    /// offsets within it.
+    pub symbol_segments: BTreeMap<String, u32>,
 }
 
 fn base_name(path: &str) -> &str {
@@ -219,6 +232,13 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
         if let Some(e) = &entry_name {
             roots.push(e);
         }
+        // a program with segments says where its stack is (the .EXE header's SP)
+        let stack_top = "__stack_top".to_string();
+        if script.regions.iter().any(|r| r.segment.is_some())
+            && globals.contains_key(stack_top.as_str())
+        {
+            roots.push(&stack_top);
+        }
         for name in roots {
             match globals.get(name.as_str()) {
                 Some(d) => {
@@ -292,6 +312,8 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
             origin: r.origin,
             length: r.length,
             used: 0,
+            segment: 0,
+            own_segment: r.segment.is_some(),
         })
         .collect();
     let mut placed: Vec<Placed> = Vec::new();
@@ -313,24 +335,43 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
             .collect();
         inputs.sort_by_key(|&(oi, si)| (matches[&(oi, si)].rule, oi, si));
 
+        // The first use of a region with a segment of its own fixes the segment.
+        if let Some(seg) = script.regions[ri].segment {
+            if regions[ri].used == 0 && !placed.iter().any(|p| p.region == region_name) {
+                regions[ri].segment = match seg {
+                    Segment::Fixed(n) => n,
+                    Segment::Auto => {
+                        let end = placed
+                            .iter()
+                            .filter(|p| p.size > 0)
+                            .map(|p| p.addr + p.size)
+                            .max()
+                            .unwrap_or(0);
+                        end.div_ceil(16)
+                    }
+                };
+            }
+        }
         let reg = &mut regions[ri];
+        let seg_base = reg.segment * 16;
         let align = inputs
             .iter()
             .map(|&(oi, si)| objs[oi].sections[si].align)
             .max()
             .unwrap_or(1);
         // `used` counts from the region origin; align the absolute address.
-        let start = align_up(reg.origin + reg.used, align);
+        let start = align_up(seg_base + reg.origin + reg.used, align);
         let mut cur = start;
         let mut p = Placed {
             name: out.name.clone(),
             addr: start,
             size: 0,
-            noload: out.noload,
+            noload: out.noload && !reg.own_segment,
             flags: SHF_ALLOC,
             data: Vec::new(),
             region: region_name.clone(),
             inputs: Vec::new(),
+            segment: reg.segment,
         };
         let mut all_nobits = !inputs.is_empty();
         for &(oi, si) in &inputs {
@@ -351,9 +392,11 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
         }
         p.size = cur - start;
         if all_nobits {
-            p.noload = true;
+            // in a segment of its own the zeros are part of the file (the image is one
+            // block that DOS loads)
+            p.noload = !reg.own_segment;
         }
-        reg.used = cur - reg.origin;
+        reg.used = cur - seg_base - reg.origin;
         if u64::from(reg.used) > u64::from(reg.length) {
             return Err(format!(
                 "region {} overflowed by {} bytes ({} bytes placed in {})",
@@ -369,7 +412,7 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
             if s.kind == SHT_NOBITS {
                 continue;
             }
-            if p.noload {
+            if p.noload && !reg.own_segment {
                 return Err(format!(
                     "{}: section {} has contents but {} is NOLOAD",
                     objs[oi].name, s.name, out.name
@@ -383,37 +426,53 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
 
     // --- final symbol values --------------------------------------------
     let mut symbols: BTreeMap<String, u32> = BTreeMap::new();
-    let addr_of = |oi: usize, s: &Symbol| -> Option<u32> {
+    let mut symbol_segments: BTreeMap<String, u32> = BTreeMap::new();
+    let seg_of: Vec<u32> = placed.iter().map(|p| p.segment).collect();
+    // (offset in its segment, segment in paragraphs) of a defined symbol
+    let addr_of = |oi: usize, s: &Symbol| -> Option<(u32, u32)> {
         if s.shndx == SHN_ABS {
-            Some(s.value)
+            Some((s.value, 0))
         } else if s.shndx == SHN_UNDEF || s.shndx >= SHN_ABS {
             None
         } else {
-            where_is
-                .get(&(oi, s.shndx as usize))
-                .map(|&(_, a)| a + s.value)
+            where_is.get(&(oi, s.shndx as usize)).map(|&(pi, a)| {
+                let seg = seg_of[pi];
+                (a + s.value - seg * 16, seg)
+            })
         }
     };
     for (name, d) in &globals {
         let s = &objs[d.obj].symbols[d.sym];
-        if let Some(a) = addr_of(d.obj, s) {
+        if let Some((a, seg)) = addr_of(d.obj, s) {
             symbols.insert((*name).to_string(), a);
+            symbol_segments.insert((*name).to_string(), seg);
         }
     }
     for a in &script.assigns {
         if !(a.provide && symbols.contains_key(&a.name)) {
             symbols.insert(a.name.clone(), a.value);
+            symbol_segments.insert(a.name.clone(), 0);
         }
     }
     for p in &placed {
         let n = p.name.trim_start_matches('.');
-        symbols.entry(format!("__{n}_start")).or_insert(p.addr);
+        let base = p.segment * 16;
+        symbols
+            .entry(format!("__{n}_start"))
+            .or_insert(p.addr - base);
         symbols
             .entry(format!("__{n}_end"))
-            .or_insert(p.addr + p.size);
+            .or_insert(p.addr + p.size - base);
+        symbol_segments
+            .entry(format!("__{n}_start"))
+            .or_insert(p.segment);
+        symbol_segments
+            .entry(format!("__{n}_end"))
+            .or_insert(p.segment);
     }
 
     // --- relocation -----------------------------------------------------
+    let mut segment_relocs: Vec<u32> = Vec::new();
     for &(oi, si) in &ids {
         let Some(&(pi, base)) = where_is.get(&(oi, si)) else {
             continue; // collected
@@ -424,35 +483,38 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
             let sym = &obj.symbols[r.sym as usize];
             let preemptible =
                 sym.kind != STT_SECTION && sym.bind != STB_LOCAL && !sym.name.is_empty();
-            let s: i64 = if sym.shndx == SHN_UNDEF
+            // (offset within its segment, segment) of the target
+            let (s, tseg): (i64, u32) = if sym.shndx == SHN_UNDEF
                 || (preemptible && symbols.contains_key(&sym.name))
             {
                 match symbols.get(&sym.name) {
-                    Some(&a) => i64::from(a),
-                    None if sym.bind == STB_WEAK => 0,
+                    Some(&a) => (i64::from(a), symbol_segments[&sym.name]),
+                    None if sym.bind == STB_WEAK => (0, 0),
                     None => return Err(format!("undefined symbol {}", sym.name)),
                 }
             } else if sym.kind == STT_SECTION {
                 where_is
                     .get(&(oi, sym.shndx as usize))
-                    .map(|&(_, a)| i64::from(a))
+                    .map(|&(pi, a)| (i64::from(a - seg_of[pi] * 16), seg_of[pi]))
                     .ok_or_else(|| format!("{}: relocation against a dropped section", obj.name))?
             } else {
-                i64::from(addr_of(oi, sym).ok_or_else(|| {
+                let (a, seg) = addr_of(oi, sym).ok_or_else(|| {
                     format!(
                         "{}: symbol {} is in a section that was dropped",
                         obj.name, sym.name
                     )
-                })?)
+                })?;
+                (i64::from(a), seg)
             };
-            let p = i64::from(base) + i64::from(r.offset);
+            let own_seg = seg_of[pi];
+            let p = i64::from(base) + i64::from(r.offset) - i64::from(own_seg) * 16;
             let a = i64::from(r.addend);
             let off = (base - out_start + r.offset) as usize;
             let data = &mut placed[pi].data;
             let need = match r.kind {
                 R_I8086_NONE => 0,
                 R_I8086_8 | R_I8086_PC8 => 1,
-                R_I8086_16 | R_I8086_PC16 => 2,
+                R_I8086_16 | R_I8086_PC16 | R_I8086_SEG16 => 2,
                 k => return Err(format!("{}: unknown relocation type {k}", obj.name)),
             };
             if off + need > data.len() {
@@ -482,6 +544,19 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
                         ));
                     }
                     data[off..off + 2].copy_from_slice(&(v as u16).to_le_bytes());
+                }
+                R_I8086_SEG16 => {
+                    data[off..off + 2].copy_from_slice(&(tseg as u16).to_le_bytes());
+                    segment_relocs.push(base + r.offset);
+                }
+                R_I8086_PC8 | R_I8086_PC16 if tseg != own_seg => {
+                    return Err(format!(
+                        "{}: a branch from segment {:#x} to {} in segment {:#x}; use a far call",
+                        where_(),
+                        own_seg,
+                        sym.name,
+                        tseg
+                    ));
                 }
                 R_I8086_PC8 => {
                     let v = s + a - p;
@@ -567,5 +642,7 @@ pub fn link(objs: &[Object], script: &Script, opts: &Options) -> Result<Linked, 
         regions,
         discarded,
         map,
+        segment_relocs,
+        symbol_segments,
     })
 }

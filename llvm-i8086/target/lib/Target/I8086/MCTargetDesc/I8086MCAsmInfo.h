@@ -14,6 +14,11 @@
 namespace llvm {
 class Triple;
 
+namespace I8086 {
+/// Relocation specifiers: `sym@seg` is the segment the symbol is in.
+enum Specifier { S_None = 0, S_SEG = 1 };
+} // namespace I8086
+
 class I8086MCAsmInfo : public MCAsmInfoELF {
   void anchor() override;
 

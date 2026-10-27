@@ -171,3 +171,24 @@ define void @far_move(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n) {
   call void @llvm.memmove.p1.p1.i16(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n, i1 false)
   ret void
 }
+
+; a vector through a far pointer, element by element
+define i16 @vec_sum(ptr addrspace(1) %p) {
+  %v = load <4 x i16>, ptr addrspace(1) %p
+  %a = extractelement <4 x i16> %v, i32 0
+  %b = extractelement <4 x i16> %v, i32 1
+  %c = extractelement <4 x i16> %v, i32 2
+  %d = extractelement <4 x i16> %v, i32 3
+  %s1 = add i16 %a, %b
+  %s2 = add i16 %s1, %c
+  %s3 = add i16 %s2, %d
+  ret i16 %s3
+}
+
+define void @vec_store(ptr addrspace(1) %p, i16 %x) {
+  %v0 = insertelement <2 x i16> poison, i16 %x, i32 0
+  %y = add i16 %x, 1
+  %v1 = insertelement <2 x i16> %v0, i16 %y, i32 1
+  store <2 x i16> %v1, ptr addrspace(1) %p
+  ret void
+}

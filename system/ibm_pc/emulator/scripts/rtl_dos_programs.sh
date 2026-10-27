@@ -26,5 +26,9 @@ rec() { # <name> <file on the disk> <command>
         "$ROOT/system/ibm_pc/chkdsk/scripts/rtl_oracle.sh" "$1" "$ROOT/system/ibm_pc/chkdsk/build/blank.img" "$4"
 }
 [[ -f "$ROOT/system/ibm_pc/chkdsk/build/blank.img" ]] || "$PCDISK" blank "$ROOT/system/ibm_pc/chkdsk/build/blank.img"
-rec hello_com "$WORK/hello.com" HELLO.COM hello
-rec hello_exe "$WORK/hellox.exe" HELLOX.EXE hellox
+[[ -n "${ONLY:-}" && "$ONLY" != hello_com ]] || rec hello_com "$WORK/hello.com" HELLO.COM hello
+[[ -n "${ONLY:-}" && "$ONLY" != hello_exe ]] || rec hello_exe "$WORK/hellox.exe" HELLOX.EXE hellox
+# the two-segment .EXE (llvm-i8086/tests/smoke_ir/seg_exe.ll): a far function and its data in
+# a second segment, found by the segment relocations of the MZ header
+"$LD" -T "$PLAT/link_exe_seg.ld" --exe "$WORK/segx.exe" "$ROOT/llvm-i8086/tests/smoke_ir/seg_exe.o"
+[[ -n "${ONLY:-}" && "$ONLY" != seg_exe ]] || rec seg_exe "$WORK/segx.exe" SEGX.EXE segx

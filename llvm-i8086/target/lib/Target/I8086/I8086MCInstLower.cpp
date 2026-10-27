@@ -8,6 +8,7 @@
 
 #include "I8086MCInstLower.h"
 #include "I8086InstrInfo.h"
+#include "MCTargetDesc/I8086MCAsmInfo.h"
 #include "I8086MachineFunctionInfo.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -150,10 +151,16 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
                         ? I8086::RETF
                         : I8086::RET);
     return;
-  case I8086::P_CALLF:
-    OutMI.setOpcode(I8086::CALL_N);
-    OutMI.addOperand(lowerOperand(MI->getOperand(0)));
+  case I8086::P_CALLF: {
+    // call seg:off, the segment being that of the callee's symbol.
+    MCOperand Off = lowerOperand(MI->getOperand(0));
+    const auto *Ref = cast<MCSymbolRefExpr>(Off.getExpr());
+    OutMI.setOpcode(I8086::CALLF);
+    OutMI.addOperand(Off);
+    OutMI.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+        &Ref->getSymbol(), I8086::S_SEG, Ctx)));
     return;
+  }
   case I8086::P_CALLFm:
     OutMI.setOpcode(I8086::CALLFm);
     lowerMem(MI, 0, OutMI);

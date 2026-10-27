@@ -60,12 +60,6 @@ void I8086AsmPrinter::emitInstruction(const MachineInstr *MI) {
     EmitToStreamer(*OutStreamer, MCInstBuilder(StringOp));
     return;
   }
-  // A call to a far function in this segment pushes the segment half of the
-  // return address first; `retf` pops it.
-  if (MI->getOpcode() == I8086::P_CALLF) {
-    EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(I8086::PUSH16s).addReg(I8086::CS));
-  }
   I8086MCInstLower Lower(OutContext, *this);
   MCInst TmpInst;
   Lower.lower(MI, TmpInst);

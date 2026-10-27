@@ -29,6 +29,7 @@
 
 #include "I8086.h"
 #include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
@@ -175,6 +176,17 @@ private:
             K);
       return Agg;
     }
+    if (auto *VT = dyn_cast<FixedVectorType>(T)) {
+      uint64_t Stride = DL.getTypeStoreSize(VT->getElementType());
+      Value *Vec = PoisonValue::get(T);
+      for (uint64_t K = 0; K < VT->getNumElements(); ++K)
+        Vec = B.CreateInsertElement(
+            Vec,
+            loadAny(B, VT->getElementType(), Seg,
+                    B.CreateAdd(Off, B.getInt16(K * Stride)), DL),
+            B.getInt32(K));
+      return Vec;
+    }
     if (auto *AT = dyn_cast<ArrayType>(T)) {
       uint64_t Stride = DL.getTypeAllocSize(AT->getElementType());
       Value *Agg = PoisonValue::get(T);
@@ -197,6 +209,13 @@ private:
       for (unsigned K = 0; K < ST->getNumElements(); ++K)
         storeAny(B, B.CreateExtractValue(V, K), Seg,
                  B.CreateAdd(Off, B.getInt16(SL->getElementOffset(K))), DL);
+      return;
+    }
+    if (auto *VT = dyn_cast<FixedVectorType>(T)) {
+      uint64_t Stride = DL.getTypeStoreSize(VT->getElementType());
+      for (uint64_t K = 0; K < VT->getNumElements(); ++K)
+        storeAny(B, B.CreateExtractElement(V, B.getInt32(K)), Seg,
+                 B.CreateAdd(Off, B.getInt16(K * Stride)), DL);
       return;
     }
     if (auto *AT = dyn_cast<ArrayType>(T)) {
@@ -282,9 +301,15 @@ private:
     } else if (auto *C = dyn_cast<AddrSpaceCastInst>(&I)) {
       Value *Src = C->getPointerOperand();
       if (isFar(C->getDestTy()) && !isFar(C->getSrcTy())) {
-        // the segment of a near pointer is DS
+        // The segment of a near pointer is DS, unless it points into a global:
+        // then it is the segment the linker places that global in (`name@seg`;
+        // the same value as DS unless the program has several segments).
         auto *FT = FunctionType::get(B.getInt16Ty(), false);
-        Value *DS = B.CreateCall(InlineAsm::get(FT, "mov $0, ds", "=r", false));
+        const Value *Base = getUnderlyingObject(Src);
+        std::string Asm = "mov $0, ds";
+        if (const auto *GV = dyn_cast<GlobalValue>(Base))
+          Asm = "mov $0, \"" + GV->getName().str() + "\"@seg";
+        Value *DS = B.CreateCall(InlineAsm::get(FT, Asm, "=r", false));
         Value *Off = B.CreatePtrToInt(Src, B.getInt16Ty());
         C->replaceAllUsesWith(make(B, DS, Off));
       } else if (isFar(C->getSrcTy()) && !isFar(C->getDestTy())) {

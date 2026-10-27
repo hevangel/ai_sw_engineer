@@ -22,6 +22,19 @@ pub struct Region {
     pub name: String,
     pub origin: u32,
     pub length: u32,
+    /// `SEGMENT = n` or `SEGMENT = AUTO`: the region is in its own segment and
+    /// `origin` is an offset in it (otherwise `origin` is the address in the one
+    /// segment of the program).
+    pub segment: Option<Segment>,
+}
+
+/// Where a region's segment starts, in paragraphs from the start of the program
+/// (the PSP of a DOS program).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Segment {
+    Fixed(u32),
+    /// The first paragraph after everything placed before the region is used.
+    Auto,
 }
 
 /// `file(sec sec ...)`: input sections matching any of `sections` in files
@@ -278,9 +291,20 @@ fn memory(lx: &mut Lexer, script: &mut Script) -> Result<(), String> {
         lx.expect(':')?;
         let mut origin = None;
         let mut length = None;
+        let mut segment = None;
         loop {
             let key = lx.word()?;
             lx.expect('=')?;
+            if key.eq_ignore_ascii_case("segment")
+                && matches!(lx.peek(), Some(Tok::Word(w)) if w.eq_ignore_ascii_case("auto"))
+            {
+                lx.next();
+                segment = Some(Segment::Auto);
+                if !lx.eat(',') {
+                    break;
+                }
+                continue;
+            }
             let cx = Ctx {
                 regions: &script.regions,
                 symbols: HashMap::new(),
@@ -289,6 +313,12 @@ fn memory(lx: &mut Lexer, script: &mut Script) -> Result<(), String> {
             match key.to_ascii_lowercase().as_str() {
                 "origin" | "org" | "o" => origin = Some(v),
                 "length" | "len" | "l" => length = Some(v),
+                "segment" => {
+                    if v > 0xFFFF {
+                        return Err(format!("line {line}: segment {v:#x} is above 0xFFFF"));
+                    }
+                    segment = Some(Segment::Fixed(v));
+                }
                 _ => return Err(format!("line {line}: unknown memory attribute {key:?}")),
             }
             if !lx.eat(',') {
@@ -309,6 +339,7 @@ fn memory(lx: &mut Lexer, script: &mut Script) -> Result<(), String> {
             name,
             origin,
             length,
+            segment,
         });
     }
     Ok(())

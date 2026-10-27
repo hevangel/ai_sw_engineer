@@ -269,32 +269,77 @@ pub fn floppy(
 const HEADER: usize = 512;
 
 pub fn exe(image: &[u8], load_addr: u32, entry: u32, extra: u32) -> Result<Vec<u8>, String> {
+    exe_segmented(image, load_addr, entry, extra, None, &[])
+}
+
+/// A `.EXE` of a program with several segments. `image` starts at the linear address
+/// `load_addr` (0x100: offset 100h of the PSP segment, paragraph 0 being the PSP) and
+/// holds every segment. `relocs` are the linear addresses of the words that hold a
+/// segment number counted from the PSP: they get the header's relocation entries, so
+/// DOS adds the segment it loaded the program at, and the words are stored relative to
+/// the load module (PSP + 10h) as DOS expects. `sp` is the initial SP in the first
+/// segment (a program with segments above its stack declares the stack in the script);
+/// without it the stack follows the image, as in the tiny model.
+pub fn exe_segmented(
+    image: &[u8],
+    load_addr: u32,
+    entry: u32,
+    extra: u32,
+    sp: Option<u16>,
+    relocs: &[u32],
+) -> Result<Vec<u8>, String> {
     if load_addr != 0x100 {
         return Err(format!(
             "the image starts at {load_addr:#06x}; a tiny-model .EXE starts at 0x0100 (link_com.ld)"
         ));
     }
-    if image.len() > 0xFF00 {
+    let multi = sp.is_some();
+    if !multi && image.len() > 0xFF00 {
         return Err(format!("{} bytes do not fit in a segment", image.len()));
+    }
+    if image.len() > 0xE_FF00 {
+        return Err(format!("{} bytes do not fit in memory", image.len()));
     }
     if entry < load_addr || entry >= load_addr + image.len() as u32 {
         return Err(format!("the entry point {entry:#06x} is outside the image"));
     }
-    if 0x100 + image.len() as u32 + extra > 0x10000 {
+    if !multi && 0x100 + image.len() as u32 + extra > 0x10000 {
         return Err(format!(
             "{} bytes of image and {extra} bytes after it do not fit in a segment",
             image.len()
         ));
     }
+    if 0x1C + 4 * relocs.len() > HEADER {
+        return Err(format!(
+            "{} segment relocations do not fit the {HEADER}-byte header",
+            relocs.len()
+        ));
+    }
+    let mut image = image.to_vec();
+    let mut table = Vec::new();
+    for &at in relocs {
+        let i = (at - load_addr) as usize;
+        if i + 2 > image.len() {
+            return Err(format!(
+                "the segment relocation at {at:#x} is outside the image"
+            ));
+        }
+        // the load module starts at paragraph 10h of the PSP
+        let v = u16::from_le_bytes([image[i], image[i + 1]]).wrapping_sub(0x10);
+        image[i..i + 2].copy_from_slice(&v.to_le_bytes());
+        let m = at - load_addr; // offset in the load module (it starts at the image)
+        table.extend_from_slice(&((m & 15) as u16).to_le_bytes());
+        table.extend_from_slice(&((m >> 4) as u16).to_le_bytes());
+    }
     let total = HEADER + image.len();
     // DOS adds the loaded image itself; the minimum is what comes after it
     let min_alloc = extra.div_ceil(16) as u16;
-    let sp = ((0x100 + image.len() as u32 + extra) & !1).min(0xFFFE) as u16;
+    let sp = sp.unwrap_or(((0x100 + image.len() as u32 + extra) & !1).min(0xFFFE) as u16);
     let mut h = vec![0u8; HEADER];
     h[0..2].copy_from_slice(b"MZ");
     h[2..4].copy_from_slice(&((total % 512) as u16).to_le_bytes()); // bytes in the last page
     h[4..6].copy_from_slice(&(total.div_ceil(512) as u16).to_le_bytes()); // pages
-    h[6..8].copy_from_slice(&0u16.to_le_bytes()); // relocations
+    h[6..8].copy_from_slice(&(relocs.len() as u16).to_le_bytes()); // relocations
     h[8..10].copy_from_slice(&((HEADER / 16) as u16).to_le_bytes()); // header paragraphs
     h[10..12].copy_from_slice(&min_alloc.to_le_bytes());
     h[12..14].copy_from_slice(&0xFFFFu16.to_le_bytes());
@@ -303,7 +348,8 @@ pub fn exe(image: &[u8], load_addr: u32, entry: u32, extra: u32) -> Result<Vec<u
     h[20..22].copy_from_slice(&(entry as u16).to_le_bytes()); // IP
     h[22..24].copy_from_slice(&0xFFF0u16.to_le_bytes()); // CS: the PSP segment
     h[24..26].copy_from_slice(&0x1Cu16.to_le_bytes()); // relocation table offset
+    h[0x1C..0x1C + table.len()].copy_from_slice(&table);
     let mut out = h;
-    out.extend_from_slice(image);
+    out.extend_from_slice(&image);
     Ok(out)
 }

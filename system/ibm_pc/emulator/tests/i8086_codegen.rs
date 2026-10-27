@@ -32,6 +32,8 @@ fn backend_dir() -> PathBuf {
 struct Image {
     bytes: Vec<(u32, Vec<u8>)>,
     symbols: HashMap<String, u32>,
+    /// The segment (paragraph) of each symbol; `symbols` are offsets within it.
+    segments: HashMap<String, u32>,
     /// What the collector dropped (for the tests that look at it).
     discarded: Vec<String>,
 }
@@ -73,6 +75,11 @@ fn link_objects(test_object: &[u8], name: &str) -> Image {
             .collect(),
         symbols: linked
             .symbols
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
+        segments: linked
+            .symbol_segments
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect(),
@@ -930,6 +937,14 @@ fn far_data_pointers() {
     assert_eq!(s.call("read_global_far", &[]).0, 777);
     s.call("write_global_far", &[4242]);
     assert_eq!(s.call("read_gl_near", &[]).0, 4242);
+    // vectors through a far pointer, element by element
+    for (i, v) in [3u16, 5, 7, 11].iter().enumerate() {
+        s.call("store16", &[off_a + 0x500 + 2 * i as u16, seg_a, *v]);
+    }
+    assert_eq!(s.call("vec_sum", &[off_a + 0x500, seg_a]).0, 26);
+    s.call("vec_store", &[off_a + 0x600, seg_a, 40]);
+    assert_eq!(s.peek16(phys + 0x600), 40);
+    assert_eq!(s.peek16(phys + 0x602), 41);
     // memmove, both directions, overlapping
     let ramp: Vec<u8> = (0..32u8).map(|i| i + 1).collect();
     s.poke(0xB000, &ramp); // far 0B00:0000
@@ -1557,4 +1572,28 @@ fn far_code() {
     assert_eq!((u32::from(hi) << 16) | u32::from(lo), 0x0001_0000 + 100_000);
     // far calls in a loop: the loop counter and total live across the calls
     assert_eq!(s.call("far_loop", &[5]).0, 10);
+}
+
+#[test]
+fn several_segments() {
+    let img = load("segments.o");
+    let s = &mut Sys::new(&img);
+    // the far section is in a segment above the program's own
+    let seg = img.segments["fardata"];
+    assert!(seg > 0 && img.segments["far_add"] == seg);
+    assert_eq!(img.segments["t_add"], 0);
+    let data = seg * 16 + img.symbols["fardata"];
+    assert_eq!(s.peek16(data), 11);
+    // direct far calls: call seg:off, retf back
+    assert_eq!(s.call("t_add", &[1000, 234]).0, 1234);
+    assert_eq!(s.call("t_chain", &[1, 2, 3, 4]).0, 10);
+    // the far function reads its own segment's data through a far pointer
+    assert_eq!(s.call("t_sum", &[]).0, 110);
+    // and writes it
+    assert_eq!(s.call("t_bump", &[5]).0, 5);
+    assert_eq!(s.call("t_bump", &[7]).0, 12);
+    assert_eq!(s.peek16(seg * 16 + img.symbols["farcounter"]), 12);
+    // through a pointer to the far function whose segment half is relocated
+    assert_eq!(s.call("t_pointer", &[40, 2]).0, 42);
+    assert_eq!(u32::from(s.call("t_segment_of_fardata", &[]).0), seg);
 }

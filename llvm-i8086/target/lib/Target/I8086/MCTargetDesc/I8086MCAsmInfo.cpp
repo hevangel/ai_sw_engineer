@@ -21,4 +21,6 @@ I8086MCAsmInfo::I8086MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   SupportsDebugInformation = false;
   AlignmentIsInBytes = true;
   UsesELFSectionDirectiveForBSS = true;
+  UseAtForSpecifier = true;
+  initializeAtSpecifiers({{I8086::S_SEG, "seg"}});
 }

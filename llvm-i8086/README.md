@@ -12,7 +12,7 @@
 
 No usable 16-bit real-mode backend exists. LLVM's x86 `-m16` mode emits 386+ opcodes and 32-bit operand overrides, which an 8088 cannot execute (AGENTS rule, [spec/llvm-backends.md](../spec/llvm-backends.md)), so this is a new target rather than a configuration of X86. It follows the pattern of `llvm-i8008` and `llvm-i4004`: pseudo-instructions selected over a small allocatable register set, a documented ABI before code, and a runtime library for operations the chip lacks.
 
-The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS), 16-bit near pointers, so the 8086's segment registers are set once at entry and not allocated. Far pointers, multiple segments and the large model are out of scope until a title needs more than 64 KiB.
+The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS), 16-bit near pointers, so the 8086's segment registers are set once at entry and not allocated. Programs that need more than 64 KiB use far pointers, far calls and several segments (`spec/abi.md` D7 to D9); the compiler has no large-model switch, the program says which pointers are far.
 
 In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and disassembles the whole 8086 integer instruction set in Intel syntax, relaxes branches, and writes ELF objects with the relocations of `spec/abi.md`; `llvm-objdump` and `llvm-readobj` read them. Verified against a hand-written opcode table and the physical-chip instruction corpus (`tests/`).
 
@@ -28,7 +28,9 @@ In scope (done): variadic functions and `byval` (`spec/abi.md` D3a), interrupt h
 
 Done in the last round: floating point and `i128`, branchless booleans, `loop`/`jcxz`, `-r`, `.EXE` (tiny model), the manual page index, far data pointers (`ptr addrspace(1)`, `spec/abi.md` D7), inline assembly with register constraints.
 
-Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none), `.EXE` files with relocations and several linked segments: the program model is the tiny model, with far *data* pointers (D7) for memory outside the segment and far calls (D8, `cc 1000`) with `retf`.
+Not done, and why: a rustc with an i8086 target (needs a patched rustc; the msp430 route stands in, `rust/README.md`), `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none).
+
+The tiny model is the default program model; programs with several segments use far data pointers (D7), far calls (D8, `cc 1000`) and segment relocations (D9).
 
 ## Layout
 

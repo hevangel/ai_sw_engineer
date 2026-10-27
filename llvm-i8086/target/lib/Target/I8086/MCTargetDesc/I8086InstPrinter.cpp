@@ -90,8 +90,15 @@ void I8086InstPrinter::printBrTarget(const MCInst *MI, unsigned OpNo,
 void I8086InstPrinter::printFarPtr(const MCInst *MI, unsigned OpNo,
                                    raw_ostream &O) {
   // Operands are (offset, segment); the syntax is segment:offset.
-  O << format("0x%x:0x%x", (unsigned)(MI->getOperand(OpNo + 1).getImm() & 0xffff),
-              (unsigned)(MI->getOperand(OpNo).getImm() & 0xffff));
+  for (unsigned K : {1u, 0u}) {
+    const MCOperand &Op = MI->getOperand(OpNo + K);
+    if (Op.isImm())
+      O << format("0x%x", (unsigned)(Op.getImm() & 0xffff));
+    else
+      MAI.printExpr(O, *Op.getExpr());
+    if (K)
+      O << ':';
+  }
 }
 
 void I8086InstPrinter::printMem(const MCInst *MI, unsigned OpNo, raw_ostream &O,

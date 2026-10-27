@@ -31,6 +31,12 @@ for crate in "$backend"/tests/smoke/*/; do
   "$here/build_rust.sh" "$crate" "$name" "$tmp/$name" >&2
   emit "$tmp/$name/$name.o" "$crate/$name.o"
 done
+# IR programs (tests/smoke_ir/*.ll): llc straight to an object
+for ll in "$backend"/tests/smoke_ir/*.ll; do
+  name="$(basename "$ll" .ll)"
+  "$backend/install/bin/llc" -mtriple=i8086 -O2 -filetype=obj "$ll" -o "$tmp/$name.o"
+  emit "$tmp/$name.o" "${ll%.ll}.o"
+done
 "$backend/install/bin/llvm-mc" -triple=i8086 -filetype=obj "$backend/tests/smoke/stub_hal.s" -o "$tmp/stub_hal.o"
 emit "$tmp/stub_hal.o" "$backend/tests/smoke/stub_hal.o"
 exit $fail

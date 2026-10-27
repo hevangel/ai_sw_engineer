@@ -29,6 +29,7 @@ pub const R_I8086_8: u8 = 1;
 pub const R_I8086_16: u8 = 2;
 pub const R_I8086_PC8: u8 = 3;
 pub const R_I8086_PC16: u8 = 4;
+pub const R_I8086_SEG16: u8 = 5;
 
 #[derive(Debug, Clone)]
 pub struct Section {

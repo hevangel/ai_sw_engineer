@@ -14,3 +14,6 @@ ELF_RELOC(R_I8086_16,   2)
 ELF_RELOC(R_I8086_PC8,  3)
 // 16-bit PC-relative displacement (near JMP and CALL); addend includes the -2 field bias.
 ELF_RELOC(R_I8086_PC16, 4)
+// 16-bit segment value of the symbol's segment (`sym@seg`): the paragraph number of the
+// segment the linker placed it in, relative to the program's first segment.
+ELF_RELOC(R_I8086_SEG16, 5)

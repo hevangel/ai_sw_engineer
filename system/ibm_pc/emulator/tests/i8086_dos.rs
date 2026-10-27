@@ -90,6 +90,50 @@ fn link_exe(smoke_crate: &str) -> Vec<u8> {
     .unwrap()
 }
 
+/// The two-segment `.EXE` (`tests/smoke_ir/seg_exe.ll`, `platform/link_exe_seg.ld`).
+fn link_seg_exe() -> Vec<u8> {
+    let objects = vec![object(&backend().join("tests/smoke_ir/seg_exe.o"))];
+    let script = i8086_ld::parse_script(
+        &std::fs::read_to_string(platform().join("link_exe_seg.ld")).unwrap(),
+    )
+    .unwrap();
+    let linked = i8086_ld::link(&objects, &script, &i8086_ld::Options::default()).unwrap();
+    let (load, flat) = linked.flat_binary();
+    i8086_ld::exe_segmented(
+        &flat,
+        load,
+        linked.entry.expect("an entry point"),
+        0,
+        Some(linked.symbols["__stack_top"] as u16),
+        &linked.segment_relocs,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_two_segment_exe_has_a_relocation_for_each_segment_value() {
+    let exe = link_seg_exe();
+    let w = |at: usize| u16::from_le_bytes([exe[at], exe[at + 1]]);
+    assert_eq!(&exe[..2], b"MZ");
+    // msg_far@seg in far_print (a mov imm16) and the two `call seg:off` in _start
+    // (far_print and far_twice): three words hold a segment
+    let n = usize::from(w(6));
+    assert_eq!(n, 3, "relocation count");
+    let far_seg = w(512 + usize::from(w(0x1C + 2)) * 16 + usize::from(w(0x1C)));
+    for i in 0..n {
+        let at = 512 + usize::from(w(0x1C + 4 * i + 2)) * 16 + usize::from(w(0x1C + 4 * i));
+        assert_eq!(w(at), far_seg, "every segment value is the far segment");
+    }
+    // stored relative to the load module (PSP + 10h): the far segment follows
+    // the first one's contents, a few paragraphs above 0x10
+    assert!(far_seg < 0x100, "{far_seg:#x}");
+    assert_eq!(w(16), exe_sp(&exe), "SP is the program's __stack_top");
+}
+
+fn exe_sp(exe: &[u8]) -> u16 {
+    u16::from_le_bytes([exe[16], exe[17]])
+}
+
 #[test]
 fn the_exe_is_an_mz_header_around_the_com_image() {
     let exe = link_exe("hello_com");
@@ -150,6 +194,10 @@ fn screen_rows(transcript: &str) -> Vec<String> {
 /// screen with the RTL's transcript `oracle/dos/<transcript>.txt` (and the DOS disk with
 /// the one the RTL ran).
 fn dos_runs(file: &str, contents: &[u8], command: &str, transcript: &str) {
+    dos_runs_showing(file, contents, command, transcript, "Rust under DOS");
+}
+
+fn dos_runs_showing(file: &str, contents: &[u8], command: &str, transcript: &str, marker: &str) {
     let dir = rom_dir().expect("firmware not found: set IBM_PC_ROMS or AI_HW_ENGINEER");
     let bios = checked(&dir, "bios.bin", BIOS_SHA256);
     let basic = checked(&dir, "basic.bin", BASIC_SHA256);
@@ -192,7 +240,7 @@ fn dos_runs(file: &str, contents: &[u8], command: &str, transcript: &str) {
     let last = &got_rows[got_rows.len() - 25..];
     let want = screen_rows(&transcript);
     assert_eq!(last, &want[..], "screen differs from the RTL's:\n{got}");
-    assert!(want.iter().any(|r| r == "Rust under DOS"));
+    assert!(want.iter().any(|r| r == marker));
 }
 
 #[test]
@@ -206,4 +254,16 @@ fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
 #[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
 fn dos_runs_the_rust_exe_program_and_shows_what_the_rtl_showed() {
     dos_runs("HELLOX.EXE", &link_exe("hello_com"), "hellox", "hello_exe");
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_two_segment_exe_and_shows_what_the_rtl_showed() {
+    dos_runs_showing(
+        "SEGX.EXE",
+        &link_seg_exe(),
+        "segx",
+        "seg_exe",
+        "Far segment!",
+    );
 }

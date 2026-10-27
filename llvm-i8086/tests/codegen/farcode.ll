@@ -10,8 +10,8 @@ define cc 1000 i16 @callee(i16 %a) {
 }
 
 ; CHECK-LABEL: direct:
-; CHECK:      push cs
-; CHECK-NEXT: call callee
+; CHECK:      call
+; CHECK-SAME: callee@seg:callee
 define i16 @direct(i16 %a) {
   %r = call cc 1000 i16 @callee(i16 %a)
   ret i16 %r
