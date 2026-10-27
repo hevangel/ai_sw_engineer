@@ -1,87 +1,86 @@
 //! Replay every oracle transcript in `oracle/transcripts/` through the core.
 //!
-//! Transcript format (one event per line, `#` starts a comment):
+//! A transcript (recorded from the original CHKDSK on the RTL by
+//! `scripts/rtl_oracle.sh`) holds the command typed, the SHA-256 of the disk in
+//! drive B before and after, and the screen. The disks come from
+//! `tests/common/disks.rs` (the test disks, rebuilt in Rust and checked against
+//! the recorded "before" hash) or from the reference images (work disk, PC DOS
+//! 1.00 disk), which are not in the repository: those cases are skipped when
+//! `$IBM_PC_ROMS` or `$AI_HW_ENGINEER` do not lead to them.
 //!
-//! ```text
-//! > 41 42        input bytes (hex), fed to Hal::read_input in order
-//! < 41 42        output bytes (hex) the original produced, in order
-//! ```
-//!
-//! Inputs and expected outputs are compared as two ordered streams; timing
-//! between them is not modeled here (add it if the title depends on it).
+//! For each case the core runs against `HostDos`, a model of the DOS calls, and
+//! must print exactly the screen rows between the command and the next prompt
+//! and leave disk B with exactly the recorded hash.
 
-use software::{Hal, Machine};
-use std::collections::VecDeque;
-use std::path::Path;
+mod common;
 
-struct ReplayIo {
-    input: VecDeque<u8>,
-    output: Vec<u8>,
+use common::transcript::{reference_dir, transcript, Transcript, CASES};
+use common::{disks, hostdos::HostDos, sha256};
+
+/// What DOS shows after the program ends: the output, then the prompt's CR LF.
+fn screen_lines(out: &[u8]) -> Vec<String> {
+    let mut text = String::from_utf8_lossy(out).into_owned();
+    text += "\r\n";
+    let mut lines: Vec<String> = text
+        .split("\r\n")
+        .map(|l| l.trim_end().to_string())
+        .collect();
+    lines.pop(); // the (empty) row the prompt starts on
+    lines
 }
 
-impl Hal for ReplayIo {
-    fn read_input(&mut self) -> Option<u8> {
-        self.input.pop_front()
-    }
-    fn write_output(&mut self, value: u8) {
-        self.output.push(value);
-    }
-}
-
-fn parse_hex(line: &str, file: &Path) -> Vec<u8> {
-    line.split_whitespace()
-        .map(|t| {
-            u8::from_str_radix(t, 16)
-                .unwrap_or_else(|_| panic!("{}: bad hex byte {t:?}", file.display()))
-        })
-        .collect()
-}
-
-fn replay(file: &Path) {
-    let text = std::fs::read_to_string(file).expect("read transcript");
-    let mut input = VecDeque::new();
-    let mut expected = Vec::new();
-    for raw in text.lines() {
-        let line = raw.split('#').next().unwrap_or("").trim();
-        if let Some(rest) = line.strip_prefix('>') {
-            input.extend(parse_hex(rest, file));
-        } else if let Some(rest) = line.strip_prefix('<') {
-            expected.extend(parse_hex(rest, file));
-        } else if !line.is_empty() {
-            panic!("{}: unrecognized line {raw:?}", file.display());
-        }
-    }
-
-    let mut io = ReplayIo {
-        input,
-        output: Vec::new(),
-    };
-    let mut machine = Machine::new();
-    // Bound the run so a hung reimplementation fails instead of spinning.
-    for _ in 0..1_000_000 {
-        if !machine.step(&mut io) && io.input.is_empty() {
-            break;
-        }
-    }
-    assert_eq!(
-        io.output,
-        expected,
-        "output differs from oracle in {}",
-        file.display()
-    );
+/// Runs the transcript's command with `a` in drive A and `b` in drive B.
+fn run_case(name: &str, t: &Transcript, a: Vec<u8>, b: Vec<u8>) -> HostDos {
+    let mut dos = HostDos::new(a, b);
+    dos.command(t.command.strip_prefix("chkdsk").unwrap().trim_start());
+    software::run(&mut dos);
+    let got = screen_lines(&dos.out);
+    let want = t.rows_after(&t.command);
+    assert_eq!(got, want, "{name}: screen differs from the RTL's");
+    dos
 }
 
 #[test]
-fn oracle_transcripts_replay_exactly() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("oracle/transcripts");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
-        .expect("oracle/transcripts missing")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
-        .collect();
-    files.sort();
-    assert!(!files.is_empty(), "no transcripts in {}", dir.display());
-    for file in &files {
-        replay(file);
+fn the_core_prints_what_the_original_printed_and_leaves_the_same_disk() {
+    let mut ran = 0;
+    for &(name, disk) in CASES {
+        let Some(t) = transcript(name) else {
+            eprintln!("{name}: no transcript yet");
+            continue;
+        };
+        let b = disks::build(disk);
+        assert_eq!(
+            sha256::hex(&b),
+            t.before,
+            "{name}: the disk built here is not the one the RTL checked"
+        );
+        let dos = run_case(name, &t, disks::build("blank"), b);
+        assert_eq!(
+            sha256::hex(&dos.disks[1]),
+            t.after,
+            "{name}: disk B differs from the RTL's afterwards"
+        );
+        ran += 1;
     }
+    assert!(ran >= 10, "only {ran} transcripts replayed");
+}
+
+#[test]
+fn the_reference_disks_agree_too() {
+    let Some(dir) = reference_dir() else {
+        eprintln!("(no reference disks: skipped)");
+        return;
+    };
+    let dos_disk = std::fs::read(dir.join("pcdos100.img")).unwrap();
+    let work = std::fs::read(dir.join("workdisk.img")).unwrap();
+    for (name, b) in [("001_workdisk", work), ("003_dosdisk", dos_disk.clone())] {
+        let t = transcript(name).unwrap();
+        assert_eq!(sha256::hex(&b), t.before, "{name}: not the recorded disk");
+        let dos = run_case(name, &t, dos_disk.clone(), b);
+        assert_eq!(sha256::hex(&dos.disks[1]), t.after, "{name}");
+    }
+    // `chkdsk` with no drive checks the current drive, A: the DOS disk.
+    let t = transcript("011_no_args").unwrap();
+    assert_eq!(t.dos_sha, sha256::hex(&dos_disk));
+    run_case("011_no_args", &t, dos_disk, disks::build("d3_sizes"));
 }

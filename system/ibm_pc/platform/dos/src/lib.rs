@@ -22,9 +22,72 @@ pub struct Regs {
     pub flags: u16,
 }
 
+impl Regs {
+    /// A register block for a call that takes pointers: DS and ES are this
+    /// program's segment (the tiny model: DS = ES = SS = CS).
+    pub fn tiny(ax: u16) -> Regs {
+        let segment = cs();
+        Regs {
+            ax,
+            es: segment,
+            ds: segment,
+            ..Regs::default()
+        }
+    }
+}
+
 extern "C" {
     fn dos_call(regs: *mut Regs);
     fn dos_exit() -> !;
+    fn dos_cs() -> u16;
+    fn dos_far_read16(segment: u16, offset: u16) -> u16;
+    fn dos_far_write16(segment: u16, offset: u16, value: u16);
+    fn dos_flush_guarded(target: u8, original: u8, modified: u8);
+    /// AX as DOS passed it at entry (`runtime/crt0_com.s`).
+    static dos_entry_ax: u16;
+}
+
+/// Function 0Dh (writes the disk buffers) with a critical-error handler that ignores a
+/// write-protect error on drive `target` unless `fat_modified`; other errors reach the
+/// handler DOS had, after drive `original` is selected again. Restores the vector.
+pub fn flush_guarded(target: u8, original: u8, fat_modified: bool) {
+    unsafe { dos_flush_guarded(target, original, u8::from(fat_modified)) }
+}
+
+/// The program's segment (CS, which is also DS, ES and SS).
+pub fn cs() -> u16 {
+    unsafe { dos_cs() }
+}
+
+/// AX at entry: AL is non-zero if the first command-line parameter named an invalid drive.
+pub fn entry_ax() -> u16 {
+    unsafe { core::ptr::read_volatile(&raw const dos_entry_ax) }
+}
+
+/// A byte of this program's segment (the PSP is at offset 0 of it).
+pub fn read_byte(offset: u16) -> u8 {
+    unsafe { core::ptr::read_volatile(usize::from(offset) as *const u8) }
+}
+
+/// A word of this program's segment.
+pub fn read_word(offset: u16) -> u16 {
+    unsafe { core::ptr::read_volatile(usize::from(offset) as *const u16) }
+}
+
+/// The word at `segment:offset`, anywhere in the 1 MiB address space.
+///
+/// # Safety
+/// The address must be readable memory.
+pub unsafe fn far_read16(segment: u16, offset: u16) -> u16 {
+    dos_far_read16(segment, offset)
+}
+
+/// Writes the word at `segment:offset`.
+///
+/// # Safety
+/// The address must be memory the program may change.
+pub unsafe fn far_write16(segment: u16, offset: u16, value: u16) {
+    dos_far_write16(segment, offset, value)
 }
 
 /// Executes INT 21h with `regs` and stores the registers it returns.

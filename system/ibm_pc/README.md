@@ -2,7 +2,7 @@
 
 CPU: Intel 8088 (8086 instruction set). Backend: `llvm-i8086` (real-mode 8086 only).
 
-Status: **the emulator boots the unchanged IBM BIOS and PC DOS 1.00 and matches the RTL**; the backend and titles are not started. The emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes; the whole machine (8088, 8259, 8253, 8255 and keyboard, 8237, 8272, CGA text) runs a 20-step DOS and BASIC session, including CGA graphics, whose screens, video memory and written disk image are identical to the RTL's ([report](emulator/report/verification.md)). No speaker, compiled image, backend code or title yet.
+Status: **the emulator boots the unchanged IBM BIOS and PC DOS 1.00 and matches the RTL; `llvm-i8086` compiles Rust for the machine; the first title, `chkdsk`, runs under DOS.** The emulator's 8088 core passes all 566,721 physical-chip vectors the RTL passes, and the whole machine runs a 20-step DOS and BASIC session whose screens, video memory and written disk image are identical to the RTL's ([report](emulator/report/verification.md)). Rust floppy images and Rust `.COM` programs built by `llvm-i8086` run on the RTL and on the emulator with the same screen. The Rust `CHKDSK.COM` prints the same text and leaves the same disk as the original PC DOS 1.00 `CHKDSK.COM` on 24 test disks ([chkdsk](chkdsk/README.md)). No speaker yet.
 
 ## History
 
@@ -26,8 +26,9 @@ IBM's [manufacturer history](https://www.ibm.com/history/personal-computer) date
 
 | Title | Year | Original authors | Status | Folder |
 |---|---|---|---|---|
+| CHKDSK (PC DOS 1.00) | 1981 | Microsoft for IBM | reimplemented in Rust, identical to the original on the test disks | [chkdsk/](chkdsk/README.md) |
 
-No title chosen yet; candidates are in [../../llvm-i8086/plans/implementation_plan.md](../../llvm-i8086/plans/implementation_plan.md).
+Other candidates are in [../../llvm-i8086/plans/implementation_plan.md](../../llvm-i8086/plans/implementation_plan.md).
 
 ## Sources
 

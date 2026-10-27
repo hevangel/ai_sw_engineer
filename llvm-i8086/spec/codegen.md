@@ -45,7 +45,7 @@ There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`,
 
 ## Memory operations
 
-A `memcpy` or `memset` that is too large to unroll as loads and stores (more than four of them) is a block instruction: `rep movsb`/`rep movsw` (CX = count, DI = destination, SI = source) and `rep stosb`/`rep stosw` (CX, DI, and AL or AX). Words are used when the size is a known even number and both ends are known to be 2-byte aligned; a word fill of a variable byte builds the byte in both halves of AX. The direction flag is clear (the ABI), so the copies go forward; `memmove` stays a call, because its overlap rule needs the direction decided at run time. No segment override is used, which also avoids the 8086/8088 erratum in which an interrupt during a `rep` with a segment override resumes without the override.
+A `memcpy` or `memset` that is too large to unroll as loads and stores (more than four of them) is a block instruction: `rep movsb`/`rep movsw` (CX = count, DI = destination, SI = source) and `rep stosb`/`rep stosw` (CX, DI, and AL or AX). Words are used when the size is a known even number and both ends are known to be 2-byte aligned; a word fill of a variable byte builds the byte in both halves of AX. The direction flag is clear (the ABI), so the copies go forward; `memmove` stays a call, because its overlap rule needs the direction decided at run time. No segment override is used, which also avoids the 8086/8088 erratum in which an interrupt during a `rep` with a segment override resumes without the override. The length operand may be an `i64` (LLVM makes one for the odd-sized tail of a struct initialiser): it is truncated to the 16-bit count (found compiling the CHKDSK title; `tests/codegen/memops.ll`).
 
 ## Verification
 

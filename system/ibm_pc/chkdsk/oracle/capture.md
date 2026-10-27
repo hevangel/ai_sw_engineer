@@ -17,3 +17,9 @@ One run takes about three minutes of host time (a full RAM test and DOS boot).
 | `002_blank.txt` | `pcdisk blank` | `chkdsk b:` |
 | `003_dosdisk.txt` | `pcdos100.img` | `chkdsk b:` |
 | `004`–`014` | the damaged disks of `scripts/make_disks.py` | see the table in [the spec](../spec/spec.md) |
+
+## The Rust program on the RTL
+
+`oracle/rust_on_rtl/<case>.txt` are not oracle data: they are the **Rust** `bin/chkdsk.com` run the same way (`scripts/rtl_target.sh`, the DOS disk with `RCHKDSK.COM` added), kept to be compared with the original's transcript of the same case by `tests/rtl_target.rs`.
+
+`004`–`024` are the cases of `scripts/make_disks.py`; the last ten (`015`–`024`) are boundary disks added because wrong variants of the core survived the earlier ones (see [the test plan](../plans/testplan.md)).

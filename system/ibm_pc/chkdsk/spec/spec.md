@@ -101,3 +101,25 @@ Test disks are made by `scripts/make_disks.py`; the disk afterwards is the SHA-2
 | `014_bad_parameter_name` | `chkdsk b:x` | `Invalid parameter` | unchanged |
 
 Corrections to the reading above that these runs force: the *freed* count is the bytes of clusters owned by no file **after** the repairs (a cross-link or a cut chain also frees clusters), the size error is reported again for a file whose chain was cut, and a cross-link is reported *after* the size error of the first file.
+
+## Details settled by reimplementing against the oracle
+
+Each of these was wrong or missing in the first reading above and is now fixed by a passing replay.
+
+| Detail | Source of the answer |
+|---|---|
+| The search (function 11h/12h) returns every directory entry whose first byte is not E5h, never-used (00h) ones included; hidden and system files too (attribute byte 6 in the extended FCB). A work disk with a zero-filled directory therefore reports 64 files. | `001_workdisk`, `003_dosdisk` |
+| A search record is 44 bytes: the 7-byte extended FCB header, the drive, the 32-byte directory entry (first cluster at record offset 34, size at 36) and the FCB's 4-byte random-record field (40). The record size field is at 21. | the offsets the original uses; the Rust `DosCom` uses the same and runs under the real DOS |
+| A size repair opens the record (0Fh), sets the record size to the sector size and the random record to the chain's sectors, writes **zero** records (28h) and closes (10h): DOS makes the file exactly as long as the chain and stamps the date typed at the prompt (10-14-81) in the entry. | `005`, `006`, `007`, `018` (the disks afterwards, byte for byte) |
+| A first cluster of 0 with a non-zero size is a size error, not an allocation error. | `018_no_clusters` |
+| A first cluster above the last (314) deletes the entry (13h) and prints `Directory error-file :` (a space before the colon); 315 and 400 both do. The entry's old clusters are then lost and freed. | `015`, `021` |
+| A chain entry that is free, or above the last cluster but below FF8h (315 and 0200h tested), cuts the chain with FFFh at the current cluster and prints the allocation error; the rest of the chain is lost and freed. | `006`, `016`, `020` |
+| A chain that loops back to a cluster of its own file is reported as `Files cross-linked:` with the same name twice. | `017_chain_loop` |
+| The totals follow a blank line from the freed-space message and use the sectors-per-cluster shift (always 0 on this disk). | all |
+| The critical-error handler (INT 24h, 3BBh) exists only around the final disk reset: a write-protect error on the checked drive is ignored unless this program changed the FAT; otherwise the previous handler runs after the original drive is selected again. Without it, checking the write-protected drive A: ends with `Write protect error writing drive A`. | found by running the Rust program under DOS (`011_no_args`) |
+
+### Not reproduced
+
+- The owner table of the original lies directly above the stack at 782h, so a first cluster of 1 overwrites stack bytes; the Rust table has two spare entries instead. A first cluster of 1 is not in the oracle.
+- The core holds at most 64 directory records and 340 clusters (a 160 KiB diskette has 64 and 313); a bigger FAT prints `Diskette not initialized`, which the original never does.
+- `div` overflow of the original (a size so large the quotient exceeds 16 bits) would trap; the Rust version divides in 32 bits.

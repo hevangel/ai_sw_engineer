@@ -64,14 +64,14 @@ fn link_com(smoke_crate: &str) -> (u32, Vec<u8>) {
 fn the_com_file_starts_at_100h_with_the_runtime_entry() {
     let (load, com) = link_com("hello_com");
     assert_eq!(load, 0x100, "DOS loads a .COM at offset 100h");
-    assert_eq!(com[0], 0xFC, "crt0_com starts with CLD");
+    // crt0_com keeps AX (mov bx, ax), clears the direction flag, then reads the top of memory
+    // from the PSP (mov ax, [2]) to place the stack
+    assert_eq!(&com[..6], &[0x89, 0xC3, 0xFC, 0xA1, 0x02, 0x00]);
     assert!(
         com.len() < 0xFE00,
         "{} bytes do not fit in a segment",
         com.len()
     );
-    // the entry reads the top of memory from the PSP (mov ax, [2]) and ends the program with INT 20h
-    assert_eq!(&com[1..4], &[0xA1, 0x02, 0x00]);
     assert!(com.windows(2).any(|w| w == [0xCD, 0x20]));
 }
 

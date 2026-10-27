@@ -90,6 +90,46 @@ def main():
         d[fat * SECTOR] = 0xFD
     disks['d9_media_byte'] = d
 
+    d, chains = sized()  # first cluster of F5 beyond the disk: a directory error
+    struct.pack_into('<H', d, 3 * SECTOR + 5 * 32 + 26, 400)
+    disks['d10_directory_error'] = d
+
+    d, chains = sized()  # a chain entry beyond the last cluster
+    fat_set(d, chains[6][2], 0x200)
+    disks['d11_chain_beyond_disk'] = d
+
+    d, chains = sized()  # a chain that loops back to its own first cluster
+    fat_set(d, chains[6][-1], chains[6][0])
+    disks['d12_chain_loop'] = d
+
+    d, chains = sized()  # a file with a size but no clusters
+    struct.pack_into('<I', d, 3 * SECTOR + 0 * 32 + 28, 1000)
+    disks['d13_no_clusters'] = d
+
+    d, chains = sized()  # exactly one used cluster that no file owns
+    fat_set(d, 310, 0xFFF)
+    disks['d14_one_lost_cluster'] = d
+
+    d, chains = sized()  # a chain entry just beyond the last cluster (315)
+    fat_set(d, chains[6][2], 315)
+    disks['d15_chain_to_315'] = d
+
+    d, chains = sized()  # a first cluster just beyond the last cluster
+    struct.pack_into('<H', d, 3 * SECTOR + 5 * 32 + 26, 315)
+    disks['d16_first_cluster_315'] = d
+
+    d, chains = sized()  # a chain that ends with FF8h, the lowest end-of-chain value
+    fat_set(d, chains[6][-1], 0xFF8)
+    disks['d17_end_ff8'] = d
+
+    d, chains = sized()  # a chain entry FF7h (bad cluster) inside the chain
+    fat_set(d, chains[6][2], 0xFF7)
+    disks['d18_chain_ff7'] = d
+
+    d, chains = sized()  # an unowned used cluster at the very end of the FAT
+    fat_set(d, 314, 0xFFF)
+    disks['d19_lost_last_cluster'] = d
+
     for name, img in disks.items():
         assert len(img) == 160 * 1024
         with open(f'{out}/{name}.img', 'wb') as f:

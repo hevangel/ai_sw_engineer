@@ -17,6 +17,14 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+# On the target only: the DOS runtime of the platform (see src/main.rs).
+[target.'cfg(target_os = "none")'.dependencies]
+ibm_pc_dos = { path = "../platform/dos" }
+
+[dev-dependencies]
+# The Rust emulator the target test runs DOS and the .COM on, and the disk tool that adds it to the DOS disk.
+system_emulator = { package = "ibm_pc-emulator", path = "../emulator" }
+pcdisk = { path = "../platform/tools/pcdisk" }
 
 [profile.dev]
 panic = "abort"

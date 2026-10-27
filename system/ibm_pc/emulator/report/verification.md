@@ -203,3 +203,14 @@ single-step) is tested by hand-worked programs, not by silicon vectors.
 | negative control | changing one digit in the recorded RTL screen makes the test fail |
 
 The program exercises `dos_call` (a register block loaded and stored around INT 21h), `core::fmt` with a 32-bit product, and the exit through INT 20h under the unchanged DOS. The first attempt of the test hung because its script held a real carriage return instead of the two characters `\r` the session format expects (a test bug, not an emulator difference).
+
+## Tenth record: the first title, CHKDSK, under PC DOS 1.00 (2026-10-26)
+
+| Command (in `system/ibm_pc/chkdsk`) | Result |
+|---|---|
+| `cargo test` | the portable core against a model of DOS: **24 of 24** recordings of the original `CHKDSK.COM` (screen rows and the SHA-256 of disk B afterwards) |
+| `cargo test --release --test target_dos -- --ignored` | the Rust `CHKDSK.COM` (built by `llvm-i8086`) under the real PC DOS 1.00 **on this emulator**: the same rows and the same disk as the original on the RTL, **24 of 24**, repairs included |
+| `cargo test --test rtl_target` | the Rust `CHKDSK.COM` under the real PC DOS 1.00 **on the RTL**: identical to the original on the RTL in 8 of 8 recorded cases (every kind of repair), recorded with the current `bin/chkdsk.com` |
+| seven wrong variants of the core | all fail the replay (three survived the first 18 recordings; the boundary disks 019-024 were added) |
+
+Findings: the Rust program, checking the write-protected drive A:, ended in DOS's `Write protect error` prompt on this emulator; the original avoids it with a critical-error handler around its disk reset, which the Rust runtime now has (`dos_flush_guarded`). No difference between this emulator and the RTL appeared in any of the 24 cases.

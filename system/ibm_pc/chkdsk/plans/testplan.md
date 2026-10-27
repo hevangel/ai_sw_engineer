@@ -16,12 +16,13 @@ The oracle is the original `CHKDSK.COM` running under PC DOS 1.00 on the ai_hw_e
 | D8 | full disk | `CHKDSK B:` | zero available |
 | D9 | media byte changed from FEh | `CHKDSK B:` | *Diskette not initialized* |
 | D10 | any | `CHKDSK`, `CHKDSK C:`, `CHKDSK B: X` | drive and parameter errors |
+| D11–D19 | boundary disks of `scripts/make_disks.py`: first cluster beyond the disk (400, 315), chain entry beyond the disk (0200h, 315), FF7h and FF8h in a chain, a loop, a size without clusters, one lost cluster, a lost last cluster | `CHKDSK B:` | each threshold of the checks, found by wrong variants of the core that survived earlier cases |
 
 ## Layers
 
-1. `pcdisk` unit tests (done): format round trip, real-disk listing.
-2. Oracle replay on the host: the Rust core against every transcript.
-3. Target: the Rust `CHKDSK.COM` on the Rust emulator, compared with the oracle (screen and disk).
-4. Target on the RTL for the same disks, compared with the original (screen, disk, and not just the end state: the register state at exit when the two runs are identical programs).
-5. Negative controls: a deliberately changed message, count or repair must fail the comparison.
-6. Mutation testing of the portable core (`cargo-mutants`) against the transcripts.
+1. `pcdisk` unit tests: format round trip, real-disk listing.
+2. Oracle replay on the host (`tests/oracle_replay.rs`): the core against `HostDos` for every transcript; the test disks are rebuilt in Rust and checked against the recorded "before" hash, the disk afterwards against the recorded "after" hash.
+3. Target on the Rust emulator (`tests/target_dos.rs`, `--ignored`): `bin/chkdsk.com` under the real PC DOS 1.00, screen and disk B against the original's transcripts.
+4. Target on the RTL (`scripts/rtl_target.sh`, `oracle/rust_on_rtl/*.txt`, checked by `tests/rtl_target.rs`): the same, recorded on the RTL, against the original's.
+5. Negative controls: seven deliberately wrong variants of the core (thresholds, boundaries, counters) each fail the replay; the transcripts of the boundary cases (019–024) were added because earlier variants survived.
+6. Not done: mutation testing with `cargo-mutants` (not installed in the images), disks of other sizes (the DOS 1.00 media byte FEh only).

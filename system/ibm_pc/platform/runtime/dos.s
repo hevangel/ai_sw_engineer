@@ -57,3 +57,120 @@ dos_call:
 	.globl	dos_exit
 dos_exit:
 	int	0x20
+
+; u16 dos_cs(void): the code segment, which is also DS, ES and SS in a .COM program
+	.section	.text.dos_cs,"ax",@progbits
+	.globl	dos_cs
+dos_cs:
+	mov	ax, cs
+	ret
+
+; u16 dos_far_read16(u16 segment, u16 offset)
+	.section	.text.dos_far_read16,"ax",@progbits
+	.globl	dos_far_read16
+dos_far_read16:
+	push	bx
+	push	es
+	mov	es, ax
+	mov	bx, dx
+	mov	ax, word ptr es:[bx]
+	pop	es
+	pop	bx
+	ret
+
+; void dos_far_write16(u16 segment, u16 offset, u16 value)
+	.section	.text.dos_far_write16,"ax",@progbits
+	.globl	dos_far_write16
+dos_far_write16:
+	push	bx
+	push	es
+	mov	es, ax
+	mov	bx, dx
+	mov	word ptr es:[bx], cx
+	pop	es
+	pop	bx
+	ret
+
+; void dos_flush_guarded(u8 target, u8 original, u8 modified)
+; PC DOS function 0Dh (disk reset: writes the buffers) with a critical-error
+; handler that ignores write-protect errors on drive `target` unless the
+; program changed the FAT (`modified` == 1); every other error goes to the
+; handler that was installed (after selecting drive `original` again). The
+; vector is restored afterwards. This is what the original CHKDSK.COM does
+; at its address 385h.
+	.section	.bss.dos_ce,"aw",@nobits
+dos_ce_target:
+	.zero	1
+dos_ce_original:
+	.zero	1
+dos_ce_modified:
+	.zero	1
+dos_ce_old:
+	.zero	4
+
+	.section	.text.dos_flush_guarded,"ax",@progbits
+	.globl	dos_flush_guarded
+dos_flush_guarded:
+	push	bx
+	push	si
+	push	di
+	push	bp
+	push	ds
+	push	es
+	mov	byte ptr [dos_ce_target], al
+	mov	byte ptr [dos_ce_original], dl
+	mov	byte ptr [dos_ce_modified], cl
+	push	ds
+	pop	es			; ES = this program's segment
+	xor	ax, ax
+	mov	ds, ax
+	mov	si, 0x90		; the INT 24h vector
+	mov	di, dos_ce_old
+	mov	cx, 2
+	cld
+	rep
+	movsw
+	push	es
+	pop	ds
+	mov	dx, dos_critical_handler
+	mov	ax, 0x2524
+	int	0x21
+	mov	ah, 0x0d
+	int	0x21
+	xor	ax, ax
+	mov	es, ax
+	mov	di, 0x90
+	mov	si, dos_ce_old
+	mov	cx, 2
+	rep
+	movsw
+	pop	es
+	pop	ds
+	pop	bp
+	pop	di
+	pop	si
+	pop	bx
+	ret
+
+dos_critical_handler:
+	sti
+	and	di, 0xff
+	jne	.Lchain			; only the write-protect error
+	cmp	ah, 3
+	jne	.Lchain
+	cmp	byte ptr cs:[dos_ce_target], al
+	jne	.Lchain
+	cmp	byte ptr cs:[dos_ce_modified], 1
+	je	.Lchain
+	xor	al, al			; ignore
+	iret
+.Lchain:
+	mov	si, ax
+	push	dx
+	mov	dl, byte ptr cs:[dos_ce_original]
+	mov	ah, 0x0e
+	int	0x21
+	pop	dx
+	mov	ax, si
+	.byte	0x2e, 0xff, 0x2e	; jmp far cs:[dos_ce_old]
+	.word	dos_ce_old

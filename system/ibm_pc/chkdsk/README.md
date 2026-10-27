@@ -6,7 +6,7 @@
 | Original year | 1981 (PC DOS 1.00 shipped with the IBM PC, August 1981) |
 | Original authors | Microsoft for IBM; the DOS 1.x CHKDSK is generally credited to Microsoft (Tim Paterson's QDOS/86-DOS lineage). Authorship of this particular program is not recorded in the binary. |
 | Machine | ibm_pc — i8086 |
-| Status | specified from the disassembly; no Rust yet |
+| Status | reimplemented in Rust; identical to the original on 24 test disks (screen and disk afterwards), on the Rust emulator and on the RTL |
 
 ## Why this is the first title
 
@@ -40,4 +40,19 @@ CHKDSK checked the consistency of a FAT disk: file allocation chains, directory 
 
 ## Run
 
-Not yet runnable: see the [plan](plans/implementation_plan.md).
+```bash
+cargo test                                   # the core against the 24 oracle transcripts, on the host
+cargo test --release --test target_dos -- --ignored   # bin/chkdsk.com under PC DOS 1.00 on the Rust emulator
+cargo test --test rtl_target                 # the Rust program vs the original, both recorded on the RTL
+scripts/build_com.sh                         # rebuild bin/chkdsk.com (ai-sw-engineer image)
+scripts/rtl_oracle_all.sh                    # re-record the original on the RTL (about 3 minutes per case)
+scripts/rtl_target.sh                        # record the Rust program on the RTL
+```
+
+The ignored test needs the original BIOS, Cassette BASIC and PC DOS 1.00 disk (see [provenance](original/provenance.md); looked up in `$IBM_PC_ROMS`, else `$AI_HW_ENGINEER/system/ibm_pc/work/reference`).
+
+## Result
+
+- `bin/chkdsk.com`: 3501 bytes (the original: 1395). Rust with `core`'s code the program uses (no `core::fmt`), the DOS runtime of the platform (`crt0_com`, `dos_call`, the critical-error handler) and the compiler's runtime library, built at `opt-level=z`.
+- The portable core (`src/lib.rs`, `no_std`, no allocation) calls DOS only through the `Dos` trait; `DosCom` in `src/main.rs` makes the INT 21h calls of the original, `tests/common/hostdos.rs` models them over a disk image.
+- What the Rust program does that the original does, observed: 24 cases of screen text and the disk afterwards, including repairs of sizes, cut chains, cross-links, lost clusters and entries pointing outside the disk. See [the spec](spec/spec.md) for what is and is not reproduced.

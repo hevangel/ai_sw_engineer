@@ -63,3 +63,25 @@ define void @pattern50(ptr %d) {
   call void @llvm.memset.p0.i16(ptr %d, i8 165, i16 50, i1 false)
   ret void
 }
+
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
+declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)
+
+; A length of type i64 (LLVM produces one for a memset of a tail of odd size)
+; is a 16-bit count.
+; CHECK-LABEL: zero9_i64:
+; CHECK:      mov cx, 9
+; CHECK:      rep
+; CHECK-NEXT: stosb
+define void @zero9_i64(ptr %d) {
+  call void @llvm.memset.p0.i64(ptr %d, i8 0, i64 9, i1 false)
+  ret void
+}
+
+; CHECK-LABEL: copy_n_i64:
+; CHECK:      rep
+; CHECK-NEXT: movsb
+define void @copy_n_i64(ptr %d, ptr %s, i64 %n) {
+  call void @llvm.memcpy.p0.p0.i64(ptr %d, ptr %s, i64 %n, i1 false)
+  ret void
+}

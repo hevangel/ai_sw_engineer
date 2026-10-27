@@ -32,7 +32,8 @@ SDValue I8086SelectionDAGInfo::EmitTargetCodeForMemcpy(
   bool Words = C && C->getZExtValue() % 2 == 0 && DstAlign >= Align(2) &&
                SrcAlign >= Align(2);
   SDValue Count =
-      Words ? DAG.getConstant(C->getZExtValue() / 2, dl, MVT::i16) : Size;
+      Words ? DAG.getConstant(C->getZExtValue() / 2, dl, MVT::i16)
+            : DAG.getZExtOrTrunc(Size, dl, MVT::i16); // the length may be an i64
 
   SDValue Glue;
   Chain = DAG.getCopyToReg(Chain, dl, I8086::CX, Count, Glue);
@@ -56,7 +57,8 @@ SDValue I8086SelectionDAGInfo::EmitTargetCodeForMemset(
     return Chain;
   bool Words = C && C->getZExtValue() % 2 == 0 && Alignment >= Align(2);
   SDValue Count =
-      Words ? DAG.getConstant(C->getZExtValue() / 2, dl, MVT::i16) : Size;
+      Words ? DAG.getConstant(C->getZExtValue() / 2, dl, MVT::i16)
+            : DAG.getZExtOrTrunc(Size, dl, MVT::i16); // the length may be an i64
 
   SDValue Fill;
   if (Words) {
