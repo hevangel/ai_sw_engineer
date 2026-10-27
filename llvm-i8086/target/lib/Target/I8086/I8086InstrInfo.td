@@ -361,9 +361,14 @@ def RETi  : I8086Inst<(outs), (ins imm16:$imm), "ret\t$imm", 0xC2, FNone, I16>;
 def RETFi : I8086Inst<(outs), (ins imm16:$imm), "retf\t$imm", 0xCA, FNone, I16>;
 def : MnemonicAlias<"retn", "ret">;
 
+// loop and jcxz are also produced by the code generator (I8086LoopPeephole).
+let isBranch = 1, isTerminator = 1, Uses = [CX] in {
+let Defs = [CX] in
 def LOOP   : I8086Inst<(outs), (ins brtarget8:$t), "loop\t$t", 0xE2, FRel8>;
+}
 def LOOPE  : I8086Inst<(outs), (ins brtarget8:$t), "loope\t$t", 0xE1, FRel8>;
 def LOOPNE : I8086Inst<(outs), (ins brtarget8:$t), "loopne\t$t", 0xE0, FRel8>;
+let isBranch = 1, isTerminator = 1, Uses = [CX] in
 def JCXZ   : I8086Inst<(outs), (ins brtarget8:$t), "jcxz\t$t", 0xE3, FRel8>;
 def : MnemonicAlias<"loopz", "loope">;
 def : MnemonicAlias<"loopnz", "loopne">;

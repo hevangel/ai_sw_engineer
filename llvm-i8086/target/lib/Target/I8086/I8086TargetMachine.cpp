@@ -67,6 +67,9 @@ public:
     addPass(createI8086ISelDag(getTM<I8086TargetMachine>(), getOptLevel()));
     return false;
   }
+
+  // loop and jcxz, in functions small enough for their 8-bit reach
+  void addPreEmitPass() override { addPass(createI8086LoopPeephole()); }
 };
 } // namespace
 

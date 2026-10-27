@@ -2,12 +2,19 @@
 
 use std::process::ExitCode;
 
+/// The stack a `.EXE` asks DOS for, beyond the image and `.bss`.
+const EXE_STACK: u32 = 4096;
+
 const USAGE: &str = "\
 usage: i8086-ld -T script.ld [options] object.o...
 
   -T <file>          linker script (required)
-  -o <file>          write an ELF executable
+  -o <file>          write an ELF executable (with -r: the combined relocatable object)
+  -r                 partial link: combine the objects (and the archive members they
+                     need) into one relocatable object; no script, nothing placed
   --bin <file>       write the loaded sections as a flat binary
+  --exe <file>       write a tiny-model PC DOS .EXE: an MZ header and the same image
+                     (linked at 0100h, link_com.ld); CS = SS = the PSP segment
   --com <file>       write a PC DOS .COM file: the flat binary, which must start
                      at offset 0100h and fit in the segment (link_com.ld)
   --floppy <file>    write a bootable 160 KiB floppy image (needs --boot-addr)
@@ -46,6 +53,8 @@ fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let (mut script, mut elf, mut bin, mut floppy, mut map) = (None, None, None, None, None);
     let mut com: Option<String> = None;
+    let mut relocatable = false;
+    let mut exe: Option<String> = None;
     let mut opts = i8086_ld::Options::default();
     let mut boot_addr = 0x7C00u32;
     let mut sign = false;
@@ -57,6 +66,8 @@ fn run() -> Result<(), String> {
             "-o" => elf = Some(value("a file")?),
             "--bin" => bin = Some(value("a file")?),
             "--com" => com = Some(value("a file")?),
+            "--exe" => exe = Some(value("a file")?),
+            "-r" | "--relocatable" => relocatable = true,
             "--floppy" => floppy = Some(value("a file")?),
             "-Map" | "--map" => map = Some(value("a file")?),
             "-e" => opts.entry = Some(value("a symbol")?),
@@ -72,13 +83,17 @@ fn run() -> Result<(), String> {
             _ => inputs.push(a),
         }
     }
-    let script_path = script.ok_or_else(|| format!("no linker script (-T)\n{USAGE}"))?;
     if inputs.is_empty() {
         return Err(format!("no input files\n{USAGE}"));
     }
-    let script_text =
-        std::fs::read_to_string(&script_path).map_err(|e| format!("{script_path}: {e}"))?;
-    let script = i8086_ld::parse_script(&script_text).map_err(|e| format!("{script_path}: {e}"))?;
+    let script = if relocatable {
+        None // a partial link places nothing
+    } else {
+        let script_path = script.ok_or_else(|| format!("no linker script (-T)\n{USAGE}"))?;
+        let script_text =
+            std::fs::read_to_string(&script_path).map_err(|e| format!("{script_path}: {e}"))?;
+        Some(i8086_ld::parse_script(&script_text).map_err(|e| format!("{script_path}: {e}"))?)
+    };
     let mut objects = Vec::new();
     let mut archives = Vec::new();
     for path in &inputs {
@@ -91,10 +106,12 @@ fn run() -> Result<(), String> {
     }
     if !archives.is_empty() {
         let mut roots = opts.undefined.clone();
-        if let Some(e) = &opts.entry {
+        if relocatable {
+            // only what the objects themselves need
+        } else if let Some(e) = &opts.entry {
             roots.push(e.clone());
-        } else if let Some(e) = &script.entry {
-            roots.push(e.clone());
+        } else if let Some(e) = script.as_ref().and_then(|s| s.entry.clone()) {
+            roots.push(e);
         } else {
             roots.push("_start".to_string());
         }
@@ -102,6 +119,14 @@ fn run() -> Result<(), String> {
         objects = all;
         eprintln!("i8086-ld: {} archive members taken", taken.len());
     }
+    if relocatable {
+        let path = elf.ok_or_else(|| format!("-r needs -o <file>\n{USAGE}"))?;
+        let bytes = i8086_ld::link_relocatable(&objects)?;
+        std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))?;
+        eprintln!("i8086-ld: {} objects combined into {path}", objects.len());
+        return Ok(());
+    }
+    let script = script.expect("a script is required without -r");
     let linked = i8086_ld::link(&objects, &script, &opts)?;
 
     let write =
@@ -129,6 +154,18 @@ fn run() -> Result<(), String> {
             ));
         }
         write(p, &flat)?;
+    }
+    if let Some(p) = &exe {
+        let entry = linked
+            .entry
+            .ok_or("--exe needs an entry point (ENTRY in the script, -e, or _start)")?;
+        // what follows the file: .bss up to __bss_end, and room for a stack
+        let end = load + flat.len() as u32;
+        let bss = linked
+            .symbols
+            .get("__bss_end")
+            .map_or(0, |&b| b.saturating_sub(end));
+        write(p, &i8086_ld::exe(&flat, load, entry, bss + EXE_STACK)?)?;
     }
     if let Some(p) = &floppy {
         let img = i8086_ld::floppy(&flat, load, boot_addr, sign, i8086_ld::FLOPPY_160K)?;

@@ -175,7 +175,10 @@ fn soft_float_and_128_bit_integers_equal_the_hosts_results_bit_for_bit() {
         assert!(got.lines().any(|l| l.starts_with(kind)), "no {kind} lines");
     }
     // anchor: -1.5 and -1.5 give -3.0, 0, 2.25, 1.0 in single precision
-    assert!(got.contains("f32 bfc00000 bfc00000 c0400000 00000000 40100000 3f800000"), "{got}");
+    assert!(
+        got.contains("f32 bfc00000 bfc00000 c0400000 00000000 40100000 3f800000"),
+        "{got}"
+    );
     println!(
         "{} lines, {} bytes identical to the host's",
         got.lines().count(),

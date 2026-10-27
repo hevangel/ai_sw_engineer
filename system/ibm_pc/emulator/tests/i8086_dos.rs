@@ -60,6 +60,48 @@ fn link_com(smoke_crate: &str) -> (u32, Vec<u8>) {
         .flat_binary()
 }
 
+/// The tiny-model `.EXE` of the same program: an MZ header around the `.COM` image.
+fn link_exe(smoke_crate: &str) -> Vec<u8> {
+    let mut objects = vec![
+        object(&platform().join("runtime/crt0_com.o")),
+        object(&platform().join("runtime/dos.o")),
+        object(&backend().join(format!("tests/smoke/{smoke_crate}/{smoke_crate}.o"))),
+    ];
+    let lib = i8086_ld::parse_archive(
+        "librt.a",
+        &std::fs::read(backend().join("rt/librt.a")).unwrap(),
+    )
+    .unwrap();
+    let (objects, _) =
+        i8086_ld::select_members(std::mem::take(&mut objects), vec![lib], &["_start".into()]);
+    let script =
+        i8086_ld::parse_script(&std::fs::read_to_string(platform().join("link_com.ld")).unwrap())
+            .unwrap();
+    let linked = i8086_ld::link(&objects, &script, &i8086_ld::Options::default()).unwrap();
+    let (load, flat) = linked.flat_binary();
+    // what follows the file's bytes: .bss and a 4 KiB stack (as `i8086-ld --exe` asks)
+    let bss = linked.symbols["__bss_end"] - (load + flat.len() as u32);
+    i8086_ld::exe(
+        &flat,
+        load,
+        linked.entry.expect("an entry point"),
+        bss + 4096,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_exe_is_an_mz_header_around_the_com_image() {
+    let exe = link_exe("hello_com");
+    let (_, com) = link_com("hello_com");
+    assert_eq!(&exe[..2], b"MZ");
+    // a one-sector header (PC DOS 1.00 loads in whole sectors), then the .COM image
+    assert_eq!(&exe[512..], &com[..]);
+    // CS = SS = load segment - 10h, IP = 0100h: crt0_com starts it as it starts the .COM
+    assert_eq!(u16::from_le_bytes([exe[0x16], exe[0x17]]), 0xFFF0);
+    assert_eq!(u16::from_le_bytes([exe[0x14], exe[0x15]]), 0x0100);
+}
+
 #[test]
 fn the_com_file_starts_at_100h_with_the_runtime_entry() {
     let (load, com) = link_com("hello_com");
@@ -104,18 +146,18 @@ fn screen_rows(transcript: &str) -> Vec<String> {
         .collect()
 }
 
-#[test]
-#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
-fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
+/// Boots DOS with `contents` on the DOS disk as `file`, types `command`, and compares the
+/// screen with the RTL's transcript `oracle/dos/<transcript>.txt` (and the DOS disk with
+/// the one the RTL ran).
+fn dos_runs(file: &str, contents: &[u8], command: &str, transcript: &str) {
     let dir = rom_dir().expect("firmware not found: set IBM_PC_ROMS or AI_HW_ENGINEER");
     let bios = checked(&dir, "bios.bin", BIOS_SHA256);
     let basic = checked(&dir, "basic.bin", BASIC_SHA256);
     let mut disk = pcdisk::Disk::from_bytes(checked(&dir, "pcdos100.img", DOS_SHA256)).unwrap();
-    let (_, com) = link_com("hello_com");
-    disk.add("HELLO.COM", &com).unwrap();
+    disk.add(file, contents).unwrap();
 
     let transcript = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("oracle/dos/hello_com.txt"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("oracle/dos/{transcript}.txt")),
     )
     .unwrap();
     let want_sha = transcript
@@ -125,17 +167,17 @@ fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
     assert_eq!(
         sha256::hex(disk.bytes()),
         want_sha,
-        "the DOS disk with HELLO.COM built here is not the one the RTL ran"
+        "the DOS disk with {file} built here is not the one the RTL ran"
     );
 
     // `\r` below is the two characters the session format uses for Enter
     let script = [
-        "boot",
-        "until contains Enter today's date",
-        r"type 10-14-81\r",
-        "until endswith A>",
-        r"type hello\r",
-        "until endswith A>",
+        "boot".to_string(),
+        "until contains Enter today's date".to_string(),
+        r"type 10-14-81\r".to_string(),
+        "until endswith A>".to_string(),
+        format!(r"type {command}\r"),
+        "until endswith A>".to_string(),
     ]
     .join("\n");
     let steps = session::parse(&script).unwrap();
@@ -151,4 +193,17 @@ fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
     let want = screen_rows(&transcript);
     assert_eq!(last, &want[..], "screen differs from the RTL's:\n{got}");
     assert!(want.iter().any(|r| r == "Rust under DOS"));
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
+    let (_, com) = link_com("hello_com");
+    dos_runs("HELLO.COM", &com, "hello", "hello_com");
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_rust_exe_program_and_shows_what_the_rtl_showed() {
+    dos_runs("HELLOX.EXE", &link_exe("hello_com"), "hellox", "hello_exe");
 }

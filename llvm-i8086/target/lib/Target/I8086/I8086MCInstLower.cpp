@@ -153,6 +153,11 @@ void I8086MCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
     OutMI.setOpcode(Opc);
     OutMI.addOperand(lowerOperand(MI->getOperand(0)));
     return;
+  case I8086::LOOP:
+  case I8086::JCXZ:
+    OutMI.setOpcode(Opc);
+    OutMI.addOperand(lowerOperand(MI->getOperand(0)));
+    return;
   case I8086::CLD:
   case I8086::IRET:
     OutMI.setOpcode(Opc);

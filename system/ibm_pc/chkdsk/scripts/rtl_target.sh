@@ -7,7 +7,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 HW="$(cd "$AI_HW_ENGINEER" && pwd)"
 PCDISK="$PLATFORM_DIR/tools/pcdisk/target/release/pcdisk"
-[[ -x $PCDISK ]] || (cd "$PLATFORM_DIR/tools/pcdisk" && cargo build --quiet --release)
+[[ -x $PCDISK ]] || (cd "$PLATFORM_DIR/tools/pcdisk" && cargo +"${RUST_TOOLCHAIN:-1.99.1}" build --quiet --release)
 mkdir -p "$BUILD_DIR/disks" "$BUILD_DIR/rtl_target" "$TITLE_DIR/oracle/rust_on_rtl"
 DOS="$BUILD_DIR/rtl_target/dos_rchkdsk.img"
 cp "$HW/system/ibm_pc/work/reference/pcdos100.img" "$DOS"

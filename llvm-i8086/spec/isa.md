@@ -1,6 +1,73 @@
 # i8086 instruction set
 
-Subset the backend emits: the original 8086/8088 instruction set. Source: Intel, *The 8086 Family User's Manual* (edition to be confirmed) instruction-set chapter and opcode map; **page numbers and a row-by-row check against the manual are owed** and are the first job of milestone 2 (each row below becomes one MC encode test in `tests/mc/`, checked against the manual's opcode table, per AGENTS). Until then this document is a design summary, not a verified reference.
+Subset the backend emits: the original 8086/8088 instruction set. Source: Intel, *The 8086 Family User's Manual*, October 1979, order number 9800722-03 (the copy in the hardware project's `references/intel_8086_family_users_manual_1979.pdf`, SHA-256 `717194ec03520d6499a40523abdfd4ed15a2b8ccc45a21c653e2b443c248664c`; it is copyrighted and not in this repository). The page of every mnemonic is in the index below; the encodings were then verified against the physical chip, which is the stronger oracle (see Verification status).
+
+## Manual page index
+
+Pages are the manual's own numbers (chapter 2, "8086 and 8088 Central Processing Units"). *Description* is the instruction's entry in section 2.4 (pages 2-31 to 2-48); *Reference* is its entry in Table 2-21, "Instruction Set Reference Data" (pages 2-51 to 2-68: the encoding bytes, clock counts and flag effects per operand form). The index was made by reading the manual's pages, not by trusting the backend's own table.
+
+| Mnemonic | Description | Reference |
+|---|---|---|
+| AAA | 2-35 | 2-51 |
+| AAD, AAM | 2-37 | 2-51 |
+| AAS | 2-36 | 2-51 |
+| ADC, ADD | 2-35 | 2-52 |
+| AND | 2-38 | 2-52 |
+| CALL | 2-43 | 2-52 |
+| CBW | 2-38 | 2-52 |
+| CLC, CLD, CMC | 2-47 | 2-53 |
+| CLI | 2-48 | 2-53 |
+| CMP | 2-36 | 2-53 |
+| CMPSB, CMPSW | 2-42 | 2-53 |
+| CWD | 2-38 | 2-54 |
+| DAA, DAS, DEC | 2-36 | 2-54 |
+| DIV | 2-37 | 2-54 |
+| HLT | 2-48 | 2-55 |
+| IDIV, IMUL | 2-37 | 2-55 |
+| IN | 2-32 | 2-55 |
+| INC | 2-35 | 2-55 |
+| INT, INT3 | 2-46 | 2-56 |
+| INTO, IRET | 2-47 | 2-56 |
+| JA/JNBE, JAE/JNB, JB/JNAE | 2-46 (table of conditions) | 2-56 |
+| JBE/JNA, JC, JCXZ, JE/JZ, JG/JNLE, JGE/JNL, JL/JNGE | 2-46 | 2-57 |
+| JLE/JNG, JNC, JNE/JNZ, JNO, JNP/JPO, JNS | 2-46 | 2-58 |
+| JO, JP/JPE, JS | 2-46 | 2-59 |
+| JMP | 2-45 | 2-58 |
+| LAHF | 2-32 | 2-59 |
+| LDS, LEA, LES | 2-32 | 2-59 |
+| LOCK | 2-48 | 2-60 |
+| LODSB, LODSW | 2-43 | 2-60 |
+| LOOP, LOOPE/LOOPZ | 2-45 | 2-60 |
+| LOOPNE/LOOPNZ | 2-46 | 2-60 |
+| MOV, POP, PUSH | 2-31 | 2-61, 2-62, 2-63 |
+| MOVSB, MOVSW | 2-42 | 2-61 |
+| MUL | 2-36 | 2-61 |
+| NEG | 2-36 | 2-62 |
+| NOP | 2-48 | 2-62 |
+| NOT, OR | 2-38 | 2-62 |
+| OUT | 2-32 | 2-62 |
+| POPF, PUSHF | 2-33 | 2-63 |
+| RCL, RCR | 2-40 | 2-63 |
+| REP, REPE/REPZ | 2-42 | 2-63 |
+| REPNE/REPNZ | 2-42 | 2-64 |
+| RET, RETF | 2-45 | 2-64 |
+| ROL | 2-39 | 2-64 |
+| ROR | 2-40 | 2-64 |
+| SAHF | 2-33 | 2-64 |
+| SAL/SHL, SAR | 2-39 | 2-65 |
+| SBB | 2-36 | 2-65 |
+| SCASB, SCASW | 2-43 | 2-65 |
+| SHR | 2-39 | 2-66 |
+| STC, STD | 2-47 | 2-66 |
+| STI | 2-48 | 2-66 |
+| STOSB, STOSW | 2-43 | 2-66 |
+| SUB | 2-36 | 2-67 |
+| TEST | 2-39 | 2-67 |
+| WAIT | 2-48 | 2-67 |
+| XCHG, XLAT | 2-32 | 2-67 |
+| XOR | 2-38 | 2-68 |
+
+`ESC` (2-48), the 80186+ opcodes and the undocumented ones are rejected on purpose.
 
 ## Registers
 

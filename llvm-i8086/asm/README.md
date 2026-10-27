@@ -31,12 +31,14 @@ i8086-ld -T system/ibm_pc/platform/link.ld --sign \
 
 ## Not supported
 
-Shared objects, `-r` partial links, common symbols, linker relaxation (the assembler already relaxes branches within a section, so a branch to another section is the long form), far (segment:offset) relocations, overlays and several segments (tiny model only: so no `.EXE` with a relocation table either), debug-section processing (non-allocatable sections are ignored).
+Shared objects, common symbols, far (segment:offset) relocations, overlays and several segments (tiny model only: so no `.EXE` with a relocation table), debug-section processing (non-allocatable sections are ignored). There is no linker relaxation because there is nothing for it to shrink: a near call is three bytes at every distance, and a jump or branch stays inside its function, where the assembler relaxes it.
 
 ## Archives and `.COM` files (2026-10-27)
 
 - A `.a` file on the command line is a static archive (GNU or BSD `ar` format, as `llvm-ar rcsD` writes). Its members are taken only if they define a symbol that is still undefined (or an entry/`-u` root), transitively and whatever the order of the members or of the command line; the sections the members bring are then garbage collected like any other. `rt/librt.a` is the runtime library in this form. The log line says how many members were taken.
 - `--com <file>` writes the flat binary as a PC DOS `.COM` file and checks that it starts at 0100h (`system/ibm_pc/platform/link_com.ld`) and fits the segment.
+- `-r` (`--relocatable`) with `-o file` is a partial link: the objects and the archive members they need become one relocatable object (sections kept as they are, so one section per function still allows garbage collection later; symbols merged by name, a strong definition beating a weak one, two strong ones an error; every relocation kept and renumbered). Linking the result gives the same image as linking the parts (`tests/partial.rs`, including the platform runtime and a Rust program).
+- `--exe <file>` writes a tiny-model PC DOS `.EXE`: an MZ header (no relocations, CS = SS = the PSP segment, so offsets are the `.COM` offsets from 0100h and `crt0_com.s` starts it unchanged) around the same image (`tests/exe.rs`; run under DOS in `system/ibm_pc/emulator/tests/i8086_dos.rs`, and recorded on the RTL). Three things about the header came from running `.EXE`s under the real PC DOS 1.00, which crashed on each: the header must be a whole **sector** (512 bytes; a 32-byte one is not enough), the **maximum allocation must be FFFFh** (a smaller one never starts the program), and **SP must lie inside the memory the program asked for** (DOS builds the first `IRET` frame there; the minimum allocation is the `.bss` plus a 4 KiB stack).
 - Tests: `tests/archive.rs` (members taken, transitive and out-of-order members, long names, two archives, an unresolved symbol still an error, truncated and non-archive input, the command line with `--com`).
 
 ## Tests

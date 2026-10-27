@@ -59,14 +59,38 @@ define i16 @umin(i16 %a, i16 %b) {
   ret i16 %r
 }
 
-; A boolean value is built with a branch too (there is no setcc).
+; A boolean value is the borrow of a compare, `sbb`'d into a register: no branch
+; (there is no setcc). Equality compares the xor with 1; the result is negated.
 ; CHECK-LABEL: bool:
-; CHECK:      mov al, 1
-; CHECK:      cmp
-; CHECK-NEXT: je
-; CHECK:      mov al, 0
+; CHECK:      xor
+; CHECK:      cmp {{[a-z]+}}, 1
+; CHECK-NEXT: sbb
+; CHECK-NEXT: neg
+; CHECK-NOT:  j
 define zeroext i1 @bool(i16 %a, i16 %b) {
   %c = icmp eq i16 %a, %b
+  ret i1 %c
+}
+
+; CHECK-LABEL: bool_ult:
+; CHECK:      cmp {{[a-z]+}}, dx
+; CHECK-NEXT: sbb
+; CHECK-NEXT: neg
+; CHECK-NOT:  j
+define zeroext i1 @bool_ult(i16 %a, i16 %b) {
+  %c = icmp ult i16 %a, %b
+  ret i1 %c
+}
+
+; Signed compares flip the sign bits and use the same borrow.
+; CHECK-LABEL: bool_slt:
+; CHECK:      xor {{[a-z]+}}, 0x8000
+; CHECK:      xor {{[a-z]+}}, 0x8000
+; CHECK:      cmp
+; CHECK-NEXT: sbb
+; CHECK-NOT:  j
+define zeroext i1 @bool_slt(i16 %a, i16 %b) {
+  %c = icmp slt i16 %a, %b
   ret i1 %c
 }
 

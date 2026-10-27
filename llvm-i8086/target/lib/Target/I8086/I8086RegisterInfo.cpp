@@ -73,6 +73,32 @@ bool I8086RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   return false;
 }
 
+// A value that `dec` produces and a `jne` tests is a loop counter: CX lets the
+// peephole (I8086LoopPeephole) make the pair a `loop`. Only a hint.
+bool I8086RegisterInfo::getRegAllocationHints(
+    Register VirtReg, ArrayRef<MCPhysReg> Order,
+    SmallVectorImpl<MCPhysReg> &Hints, const MachineFunction &MF,
+    const VirtRegMap *VRM, const LiveRegMatrix *Matrix) const {
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  for (const MachineInstr &Def : MRI.def_instructions(VirtReg)) {
+    if (Def.getOpcode() != I8086::P_DEC16r)
+      continue;
+    auto Next = std::next(Def.getIterator());
+    while (Next != Def.getParent()->end() && Next->isDebugInstr())
+      ++Next;
+    if (Next != Def.getParent()->end() &&
+        Next->getOpcode() == I8086::P_TEST16rr)
+      Next = std::next(Next);
+    if (Next != Def.getParent()->end() && Next->getOpcode() == I8086::P_JCC &&
+        Next->getOperand(1).getImm() == I8086CC::NE) {
+      Hints.push_back(I8086::CX);
+      break;
+    }
+  }
+  return TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints, MF,
+                                                   VRM, Matrix);
+}
+
 Register I8086RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   return I8086::BP;
 }

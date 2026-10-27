@@ -16,7 +16,10 @@ Milestones (each ends with passing tests):
 
 12. Floating point and 128-bit integers. **Done 2026-10-27** (`spec/abi.md` D6): softened to libcalls, routines from Rust's `compiler_builtins` built for i8086 (`scripts/build_compiler_builtins.sh`), `tests/smoke/float_rs` identical to the host bit for bit.
 
-Not planned, with the reason in the README: a rustc with an i8086 target, `.EXE` and segmented models, linker relaxation, `-r`.
+13. Code-quality items. **Done 2026-10-27** (`spec/codegen.md`): branchless boolean values, `loop`/`jcxz` and the redundant `test` peepholes; tests in `tests/codegen/{branch,loop}.ll` and `comparisons_as_values`, `loops_and_zero_flag_branches` on the 8088 core. `xlat` was built and tested and then removed: it made `llc` run out of registers in `core` code.
+14. Linker: partial links and `.EXE`. **Done 2026-10-27** (`asm/README.md`): `-r` combines objects and archive members into one relocatable object that links like the parts (tested on the platform runtime and a Rust program); `--exe` writes a tiny-model MZ file; linker relaxation has nothing to shrink (calls are three bytes at every distance, branches are inside one function and the assembler relaxes them).
+
+Not planned, with the reason in the README: a rustc with an i8086 target (needs a patched rustc) and segmented models (far pointers need a different backend design); real hardware.
 
 Whole-program size gate from the first function that lowers (AGENTS): link and measure against the RAM budget in `system/ibm_pc/platform/memory_map.md`.
 

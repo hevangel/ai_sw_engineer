@@ -678,6 +678,139 @@ fn interrupt_handlers() {
 }
 
 #[test]
+fn comparisons_as_values() {
+    let img = load("bool.o");
+    let s = &mut Sys::new(&img);
+    type Pred = (&'static str, fn(i16, i16) -> bool, fn(u16, u16) -> bool);
+    let preds: [Pred; 10] = [
+        ("eq", |a, b| a == b, |a, b| a == b),
+        ("ne", |a, b| a != b, |a, b| a != b),
+        ("ult", |_, _| false, |a, b| a < b),
+        ("ule", |_, _| false, |a, b| a <= b),
+        ("ugt", |_, _| false, |a, b| a > b),
+        ("uge", |_, _| false, |a, b| a >= b),
+        ("slt", |a, b| a < b, |_, _| false),
+        ("sle", |a, b| a <= b, |_, _| false),
+        ("sgt", |a, b| a > b, |_, _| false),
+        ("sge", |a, b| a >= b, |_, _| false),
+    ];
+    let mut vs = values();
+    vs.extend([0x7FFF, 0x8000, 0x8001, 0xFFFF, 0, 1, 999, 1000, 1001]);
+    for &x in &vs {
+        for &y in &vs {
+            for (name, signed, unsigned) in &preds {
+                let want16 = if name.starts_with('s') {
+                    signed(x as i16, y as i16)
+                } else {
+                    unsigned(x, y)
+                };
+                assert_eq!(
+                    s.call(&format!("b16_{name}"), &[x, y]).0,
+                    u16::from(want16),
+                    "b16_{name}({x:#x}, {y:#x})"
+                );
+                let (x8, y8) = (x & 0xFF, y & 0xFF);
+                let want8 = if name.starts_with('s') {
+                    signed(i16::from(x8 as u8 as i8), i16::from(y8 as u8 as i8))
+                } else {
+                    unsigned(x8, y8)
+                };
+                assert_eq!(
+                    s.call(&format!("b8_{name}"), &[x8, y8]).0,
+                    u16::from(want8),
+                    "b8_{name}({x8:#x}, {y8:#x})"
+                );
+            }
+        }
+        for (name, signed, unsigned) in &preds {
+            let want = if name.starts_with('s') {
+                signed(x as i16, 1000)
+            } else {
+                unsigned(x, 1000)
+            };
+            assert_eq!(
+                s.call(&format!("bk_{name}"), &[x]).0,
+                u16::from(want),
+                "bk_{name}({x:#x})"
+            );
+        }
+    }
+    for &a in &[0u16, 1, 0x8000, 0xFFFF, 5] {
+        for &b in &[0u16, 1, 0x8000, 0x7FFF, 6] {
+            for &c in &[0u16, 2, 0x8000, 0xFFFF] {
+                let want =
+                    u16::from((a as i16) < (b as i16)) + u16::from(b < c) + u16::from(a != c);
+                assert_eq!(s.call("count_lt", &[a, b, c]).0, want, "count_lt");
+            }
+        }
+    }
+}
+
+#[test]
+fn loops_and_zero_flag_branches() {
+    let img = load("loops.o");
+    let s = &mut Sys::new(&img);
+    // sum_down(p, n) adds p[n], p[n-1], ... p[1]
+    let table = 0u32; // the array lives at 0x8000, clear of the image
+    let base = 0x8000u32 + table;
+    for i in 0..300u16 {
+        s.poke(
+            base + 2 * u32::from(i),
+            &(i.wrapping_mul(7).wrapping_add(3)).to_le_bytes(),
+        );
+    }
+    for n in [1u16, 2, 3, 5, 17, 100, 299] {
+        let want = (1..=n).fold(0u16, |t, i| {
+            t.wrapping_add(i.wrapping_mul(7).wrapping_add(3))
+        });
+        assert_eq!(
+            s.call_budget("sum_down", &[base as u16, n], 2_000_000).0,
+            want,
+            "sum_down({n})"
+        );
+        let want = (1..=n).fold(0u16, |t, i| {
+            t.wrapping_add(i.wrapping_mul(3).wrapping_add(1))
+        });
+        assert_eq!(
+            s.call_budget("calls_in_loop", &[n], 2_000_000).0,
+            want,
+            "calls_in_loop({n})"
+        );
+        let mut x = 5u16;
+        for _ in 0..n {
+            x = (((x.wrapping_add(7) ^ 9) << 1).wrapping_add(5) & 4095) | 3;
+        }
+        assert_eq!(
+            s.call_budget("long_loop", &[n, 5, 7, 9], 2_000_000).0,
+            x,
+            "long_loop({n})"
+        );
+    }
+    for &x in &values() {
+        for &y in values().iter().step_by(3) {
+            assert_eq!(s.call("z_sub", &[x, y]).0, if x == y { 111 } else { 222 });
+            assert_eq!(
+                s.call("z_and", &[x, y]).0,
+                if x & y != 0 { 333 } else { 444 }
+            );
+            assert_eq!(s.call("z_xor", &[x, y]).0, if x == y { 1 } else { x ^ y });
+            assert_eq!(
+                s.call("z_or", &[x, y]).0,
+                if x | y == 0 { 5 } else { x | y }
+            );
+        }
+        assert_eq!(
+            s.call("z_dec", &[x]).0,
+            if x == 1 { 7 } else { x.wrapping_sub(1) }
+        );
+        assert_eq!(
+            s.call("z_neg", &[x]).0,
+            if x != 0 { 0u16.wrapping_sub(x) } else { 9 }
+        );
+    }
+}
+
+#[test]
 fn wide_integers() {
     let img = load("wide.o");
     let s = &mut Sys::new(&img);

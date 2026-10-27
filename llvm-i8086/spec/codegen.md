@@ -30,7 +30,7 @@ A memory reference is four operands: base, index, displacement (a constant or a 
 
 ## Control flow
 
-There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`, or `TEST r, r` for a compare with zero) and the glued branch reads them. A `select` and a boolean value become a diamond: `j<cc>` over a copy, joined by a PHI (`EmitInstrWithCustomInserter`). The hardware condition code is the low nibble of the Jcc opcode (`I8086CC`). Branches are emitted in the relaxable form, so the assembler picks a two-byte short branch or the five-byte inverted-jump-over-near-jump (see [asm_syntax.md](asm_syntax.md)).
+There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`, or `TEST r, r` for a compare with zero) and the glued branch reads them. A `select` becomes a diamond: `j<cc>` over a copy, joined by a PHI (`EmitInstrWithCustomInserter`). A boolean *value* of a compare of bytes or words has no branch: it is the borrow of an unsigned compare, `mov r, 0 ; cmp a, b ; sbb r, 0 ; neg r` (`inc r` for the complement; the operands are swapped for the other two orders), signed compares flip both sign bits first (`xor 0x8000`), and equality compares the xor with 1 (`==`) or 0 with the xor (`!=`) (`LowerSETCC`; `tests/codegen/branch.ll`, and `comparisons_as_values` runs all ten predicates on bytes, words and constants against the host). The hardware condition code is the low nibble of the Jcc opcode (`I8086CC`). Branches are emitted in the relaxable form, so the assembler picks a two-byte short branch or the five-byte inverted-jump-over-near-jump (see [asm_syntax.md](asm_syntax.md)).
 
 ## Arithmetic
 
@@ -43,6 +43,12 @@ There is no `setcc` and no conditional move. A comparison sets the flags (`CMP`,
 - i8 to i16: zero-extend writes the high byte of the same register (`mov ah, 0`, also for `and x, 255`), sign-extend uses `cbw` (the byte is moved to AL), truncate reads the low half of a `GR16_ABCD` register.
 - Absolute addresses with AL or AX use the short `mov al/ax, [addr]` forms, the same choice the assembler makes, so `llc -filetype=obj` and `llc | llvm-mc` produce identical objects (checked by `scripts/gen_run_objects.sh`).
 
+## Small peepholes (I8086LoopPeephole, before emission)
+
+- `dec r ; test r, r ; je/jne` loses the `test` (and likewise after `inc neg add sub and or xor` of the same register): ZF already says it, as long as the flags are dead after the branch.
+- `dec cx ; jne L` is `loop L` and `test cx, cx ; je L` is `jcxz L`, but only in a function of at most 17 instructions: `loop` and `jcxz` reach 127 bytes and the assembler does not relax them, and 17 instructions of at most 7 bytes cannot be further apart than that. The register allocator is hinted to put a loop counter (the result of a `dec` that a `jne` tests) in CX (`getRegAllocationHints`); a counter that ends up elsewhere stays `dec`/`jne`.
+- `xlat` is not selected. It needs the table in BX and the index in AL, both fixed registers; a selector that did it (`load i8 (base + zext(index))` as `mov bx, base ; xlat`) worked on small functions and tested correct on the 8088 core, but made `llc` run out of registers in two functions of `core` (`char::escape_debug_ext`, `IntErrorKind::fmt`), whose many address registers already compete for BX. The instruction is supported by the assembler and the disassembler and is used in hand-written assembly.
+
 ## Memory operations
 
 A `memcpy` or `memset` that is too large to unroll as loads and stores (more than four of them) is a block instruction: `rep movsb`/`rep movsw` (CX = count, DI = destination, SI = source) and `rep stosb`/`rep stosw` (CX, DI, and AL or AX). Words are used when the size is a known even number and both ends are known to be 2-byte aligned; a word fill of a variable byte builds the byte in both halves of AX. The direction flag is clear (the ABI), so the copies go forward; `memmove` stays a call, because its overlap rule needs the direction decided at run time. No segment override is used, which also avoids the 8086/8088 erratum in which an interrupt during a `rep` with a segment override resumes without the override. The length operand may be an `i64` (LLVM makes one for the odd-sized tail of a struct initialiser): it is truncated to the 16-bit count (found compiling the CHKDSK title; `tests/codegen/memops.ll`).
@@ -53,4 +59,4 @@ A `memcpy` or `memset` that is too large to unroll as loads and stores (more tha
 
 ## What is not done
 
-There is no `memmove`/`memcmp` inline code (both are calls), no `loop`/`jcxz`/`xlat` selection, no `in`/`out` intrinsics (port access is assembly in the platform HAL). Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.
+`memmove` and `memcmp` are calls into `rt/` (assembly with `rep movs` and `repe cmpsb`: inline code would be no shorter), there are no `in`/`out` intrinsics (port access is assembly in the platform HAL or inline asm), and `loop`/`jcxz` are used only where the 8-bit reach is certain. `xlat` is not selected (see the peepholes). Multiply and divide of 32 and 64 bits, and variable shifts of those, are calls into `rt/`.

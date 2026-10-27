@@ -25,6 +25,10 @@ public:
   const uint32_t *getCallPreservedMask(const MachineFunction &MF,
                                        CallingConv::ID) const override;
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+  bool getRegAllocationHints(Register VirtReg, ArrayRef<MCPhysReg> Order,
+                             SmallVectorImpl<MCPhysReg> &Hints,
+                             const MachineFunction &MF, const VirtRegMap *VRM,
+                             const LiveRegMatrix *Matrix) const override;
   const TargetRegisterClass *
   getPointerRegClass(unsigned Kind = 0) const override;
   bool eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,

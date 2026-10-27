@@ -19,6 +19,8 @@ class FunctionPass;
 FunctionPass *createI8086ISelDag(I8086TargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 
+FunctionPass *createI8086LoopPeephole();
+
 void initializeI8086DAGToDAGISelLegacyPass(PassRegistry &);
 
 } // namespace llvm

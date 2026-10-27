@@ -5,7 +5,7 @@ The Rust `CHKDSK.COM` for PC DOS 1.00 on the IBM PC 5150, built by `llvm-i8086`,
 | Check | Result |
 |---|---|
 | Host replay (the core against a model of DOS, screen and disk afterwards) | 24 / 24 transcripts identical (`cargo test`) |
-| Target image size | `bin/chkdsk.com` 3501 bytes (original 1395); no ROM budget (a .COM in a 64 KiB segment) |
+| Target image size | `bin/chkdsk.com` 3506 bytes (original 1395); no ROM budget (a .COM in a 64 KiB segment) |
 | RAM use | one segment: 3.5 KB image, about 3.5 KB of tables and stack frames (owner table 684 B, 64 records of 44 B, FAT and search state) |
 | Rust emulator running the Rust `.COM` under the real PC DOS 1.00 | 24 / 24 cases: same rows after the command as the original on the RTL, same disk B afterwards (`tests/target_dos.rs`) |
 | RTL running the Rust `.COM` under the real PC DOS 1.00 | 8 / 8 recorded cases identical to the original on the RTL, screen and disk (`tests/rtl_target.rs`) |

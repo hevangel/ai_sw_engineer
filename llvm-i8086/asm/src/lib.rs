@@ -12,10 +12,12 @@ pub mod archive;
 pub mod elf;
 pub mod link;
 pub mod output;
+pub mod partial;
 pub mod script;
 
 pub use archive::{parse_archive, select_members};
 pub use elf::{parse as parse_object, Object};
 pub use link::{link, Linked, Options, Placed};
-pub use output::{floppy, FLOPPY_160K};
+pub use output::{exe, floppy, FLOPPY_160K};
+pub use partial::link_relocatable;
 pub use script::{parse as parse_script, Script};

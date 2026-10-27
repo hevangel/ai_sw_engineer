@@ -255,14 +255,77 @@ SDValue I8086TargetLowering::LowerSELECT_CC(SDValue Op,
                      DAG.getTargetConstant(HW, DL, MVT::i8), Cmp);
 }
 
-// There is no setcc instruction: a boolean is a select between 1 and 0.
+// There is no setcc instruction. A comparison of bytes or words becomes the
+// carry flag and `sbb r, r`: the borrow of an unsigned compare is -1 (or 0) in
+// every bit, and a negate or an increment makes it 1 or 0. Signed compares flip
+// the sign bits first; equality is a compare of the xor with zero. Anything else
+// is a select between 1 and 0.
 SDValue I8086TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
-  SDValue Sel = DAG.getNode(
-      ISD::SELECT_CC, DL, VT, Op.getOperand(0), Op.getOperand(1),
-      DAG.getConstant(1, DL, VT), DAG.getConstant(0, DL, VT), Op.getOperand(2));
-  return LowerSELECT_CC(Sel, DAG);
+  SDValue L = Op.getOperand(0), R = Op.getOperand(1);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+  EVT OT = L.getValueType();
+  if (OT != MVT::i8 && OT != MVT::i16) {
+    SDValue Sel = DAG.getNode(ISD::SELECT_CC, DL, VT, L, R,
+                              DAG.getConstant(1, DL, VT),
+                              DAG.getConstant(0, DL, VT), Op.getOperand(2));
+    return LowerSELECT_CC(Sel, DAG);
+  }
+
+  bool Signed = ISD::isSignedIntSetCC(CC);
+  if (OT == MVT::i8) {
+    unsigned Ext = Signed ? ISD::SIGN_EXTEND : ISD::ZERO_EXTEND;
+    L = DAG.getNode(Ext, DL, MVT::i16, L);
+    R = DAG.getNode(Ext, DL, MVT::i16, R);
+  }
+  if (Signed) {
+    SDValue Flip = DAG.getConstant(0x8000, DL, MVT::i16);
+    L = DAG.getNode(ISD::XOR, DL, MVT::i16, L, Flip);
+    R = DAG.getNode(ISD::XOR, DL, MVT::i16, R, Flip);
+    switch (CC) {
+    case ISD::SETLT: CC = ISD::SETULT; break;
+    case ISD::SETGE: CC = ISD::SETUGE; break;
+    case ISD::SETGT: CC = ISD::SETUGT; break;
+    case ISD::SETLE: CC = ISD::SETULE; break;
+    default: break;
+    }
+  }
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i16);
+  // x == y is x ^ y below 1; x != y is 0 below x ^ y.
+  if (CC == ISD::SETEQ || CC == ISD::SETNE) {
+    SDValue X = DAG.getNode(ISD::XOR, DL, MVT::i16, L, R);
+    if (CC == ISD::SETEQ) {
+      L = X;
+      R = DAG.getConstant(1, DL, MVT::i16);
+    } else {
+      L = Zero;
+      R = X;
+    }
+    CC = ISD::SETULT;
+  }
+  // Only the "borrow" forms are left: ULT, UGE (its complement), UGT and ULE by swapping.
+  bool Complement = false;
+  switch (CC) {
+  case ISD::SETULT: break;
+  case ISD::SETUGE: Complement = true; break;
+  case ISD::SETUGT: std::swap(L, R); break;
+  case ISD::SETULE: std::swap(L, R); Complement = true; break;
+  default: llvm_unreachable("unexpected condition");
+  }
+  // CF = L < R (unsigned). A constant on the left cannot be a `cmp`: subtract.
+  SDValue Flags = isa<ConstantSDNode>(L)
+                      ? DAG.getNode(I8086ISD::SUBC, DL,
+                                    DAG.getVTList(MVT::i16, MVT::Glue), L, R)
+                            .getValue(1)
+                      : DAG.getNode(I8086ISD::CMP, DL, MVT::Glue, L, R);
+  SDValue Mask = DAG.getNode(I8086ISD::SUBE, DL, DAG.getVTList(MVT::i16, MVT::Glue),
+                             Zero, Zero, Flags);
+  SDValue Res = Complement
+                    ? DAG.getNode(ISD::ADD, DL, MVT::i16, Mask.getValue(0),
+                                  DAG.getConstant(1, DL, MVT::i16))
+                    : DAG.getNode(ISD::SUB, DL, MVT::i16, Zero, Mask.getValue(0));
+  return DAG.getZExtOrTrunc(Res, DL, VT);
 }
 
 // Add / subtract with a carry (borrow) in and out, for the pieces of a wider

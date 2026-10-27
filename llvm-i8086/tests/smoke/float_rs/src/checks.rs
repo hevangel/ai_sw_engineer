@@ -137,13 +137,24 @@ fn show<T: core::fmt::Display>(w: &mut impl Write, v: Option<T>) {
 
 /// Checked arithmetic above 16 bits: the overflow-detecting multiplies are libcalls.
 pub fn checked<W: Write>(w: &mut W) {
-    for &(a, b) in &[(3i32, 5i32), (65536, 65536), (i32::MAX, 2), (-46341, 46341), (i32::MIN, -1)] {
+    for &(a, b) in &[
+        (3i32, 5i32),
+        (65536, 65536),
+        (i32::MAX, 2),
+        (-46341, 46341),
+        (i32::MIN, -1),
+    ] {
         let _ = write!(w, "chk32 {a} {b}");
         show(w, a.checked_mul(b));
         show(w, a.checked_add(b));
         let _ = writeln!(w);
     }
-    for &(a, b) in &[(3i64, 5i64), (1 << 32, 1 << 31), (i64::MAX, 2), (-3_037_000_500, 3_037_000_500)] {
+    for &(a, b) in &[
+        (3i64, 5i64),
+        (1 << 32, 1 << 31),
+        (i64::MAX, 2),
+        (-3_037_000_500, 3_037_000_500),
+    ] {
         let _ = write!(w, "chk64 {a} {b}");
         show(w, a.checked_mul(b));
         show(w, a.checked_sub(b));

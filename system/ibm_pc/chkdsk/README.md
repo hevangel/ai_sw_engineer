@@ -53,6 +53,6 @@ The ignored test needs the original BIOS, Cassette BASIC and PC DOS 1.00 disk (s
 
 ## Result
 
-- `bin/chkdsk.com`: 3501 bytes (the original: 1395). Rust with `core`'s code the program uses (no `core::fmt`), the DOS runtime of the platform (`crt0_com`, `dos_call`, the critical-error handler) and the compiler's runtime library, built at `opt-level=z`.
+- `bin/chkdsk.com`: 3506 bytes (the original: 1395). Rust with `core`'s code the program uses (no `core::fmt`), the DOS runtime of the platform (`crt0_com`, `dos_call`, the critical-error handler) and the compiler's runtime library, built at `opt-level=z`.
 - The portable core (`src/lib.rs`, `no_std`, no allocation) calls DOS only through the `Dos` trait; `DosCom` in `src/main.rs` makes the INT 21h calls of the original, `tests/common/hostdos.rs` models them over a disk image.
 - What the Rust program does that the original does, observed: 24 cases of screen text and the disk afterwards, including repairs of sizes, cut chains, cross-links, lost clusters and entries pointing outside the disk. See [the spec](spec/spec.md) for what is and is not reproduced.

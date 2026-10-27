@@ -247,3 +247,63 @@ pub fn floppy(
     img.resize(size, 0);
     Ok(img)
 }
+
+/// A PC DOS `.EXE` (an MZ file) for a tiny-model program: the same image a `.COM`
+/// file holds, linked at offset 0100h, behind a one-sector (512-byte) header with no
+/// relocations. PC DOS 1.00 loads the file in whole sectors and does not run an EXE whose
+/// header is shorter than one (found by running one: a 32-byte header crashes).
+///
+/// DOS loads the image 0100h bytes above the program segment prefix and starts it
+/// at `CS:IP` with the segment registers relative to the load segment; with
+/// `CS = SS = load segment - 10h` the image's own offsets (0100h up) are the offsets
+/// in the program segment, DS = ES = CS (the PSP's segment, as for a `.COM`), and
+/// the program is the same one `crt0_com.s` starts.
+///
+/// `extra` is the memory the program needs after the file's bytes: its `.bss` and the
+/// stack. The header's minimum is that and its maximum is "all" (FFFFh), so DOS gives the
+/// program the memory a `.COM` gets. Two things found by running `.EXE`s under PC DOS 1.00:
+/// a smaller maximum does not start the program, and DOS builds the program's first
+/// `IRET` frame at the `SS:SP` of the header, so SP must be inside the memory the program
+/// has (at the end of what it asked for, not at FFFEh).
+/// The header of a `.EXE`: one 512-byte sector.
+const HEADER: usize = 512;
+
+pub fn exe(image: &[u8], load_addr: u32, entry: u32, extra: u32) -> Result<Vec<u8>, String> {
+    if load_addr != 0x100 {
+        return Err(format!(
+            "the image starts at {load_addr:#06x}; a tiny-model .EXE starts at 0x0100 (link_com.ld)"
+        ));
+    }
+    if image.len() > 0xFF00 {
+        return Err(format!("{} bytes do not fit in a segment", image.len()));
+    }
+    if entry < load_addr || entry >= load_addr + image.len() as u32 {
+        return Err(format!("the entry point {entry:#06x} is outside the image"));
+    }
+    if 0x100 + image.len() as u32 + extra > 0x10000 {
+        return Err(format!(
+            "{} bytes of image and {extra} bytes after it do not fit in a segment",
+            image.len()
+        ));
+    }
+    let total = HEADER + image.len();
+    // DOS adds the loaded image itself; the minimum is what comes after it
+    let min_alloc = extra.div_ceil(16) as u16;
+    let sp = ((0x100 + image.len() as u32 + extra) & !1).min(0xFFFE) as u16;
+    let mut h = vec![0u8; HEADER];
+    h[0..2].copy_from_slice(b"MZ");
+    h[2..4].copy_from_slice(&((total % 512) as u16).to_le_bytes()); // bytes in the last page
+    h[4..6].copy_from_slice(&(total.div_ceil(512) as u16).to_le_bytes()); // pages
+    h[6..8].copy_from_slice(&0u16.to_le_bytes()); // relocations
+    h[8..10].copy_from_slice(&((HEADER / 16) as u16).to_le_bytes()); // header paragraphs
+    h[10..12].copy_from_slice(&min_alloc.to_le_bytes());
+    h[12..14].copy_from_slice(&0xFFFFu16.to_le_bytes());
+    h[14..16].copy_from_slice(&0xFFF0u16.to_le_bytes()); // SS: the PSP segment
+    h[16..18].copy_from_slice(&sp.to_le_bytes()); // SP (crt0_com moves it)
+    h[20..22].copy_from_slice(&(entry as u16).to_le_bytes()); // IP
+    h[22..24].copy_from_slice(&0xFFF0u16.to_le_bytes()); // CS: the PSP segment
+    h[24..26].copy_from_slice(&0x1Cu16.to_le_bytes()); // relocation table offset
+    let mut out = h;
+    out.extend_from_slice(image);
+    Ok(out)
+}
