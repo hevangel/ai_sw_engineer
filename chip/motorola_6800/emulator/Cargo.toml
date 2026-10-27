@@ -1,0 +1,12 @@
+[package]
+name = "motorola_6800"
+version = "0.1.0"
+edition = "2021"
+description = "Bus-cycle-accurate MC6800 CPU core (no_std library)"
+license = "MIT"
+
+[dependencies]
+
+[lib]
+name = "motorola_6800"
+path = "src/lib.rs"
