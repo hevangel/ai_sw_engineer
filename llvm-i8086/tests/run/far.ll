@@ -106,3 +106,68 @@ define i16 @far_eq(ptr addrspace(1) %a, ptr addrspace(1) %b) {
   %r = zext i1 %c to i16
   ret i16 %r
 }
+
+; --- aggregates, wide integers, far globals, memmove ---------------------------
+declare void @llvm.memmove.p1.p1.i16(ptr addrspace(1), ptr addrspace(1), i16, i1)
+
+%S = type { i8, i16, i32 }
+
+define i32 @struct_sum(ptr addrspace(1) %p) {
+  %s = load %S, ptr addrspace(1) %p
+  %a = extractvalue %S %s, 0
+  %b = extractvalue %S %s, 1
+  %c = extractvalue %S %s, 2
+  %a32 = zext i8 %a to i32
+  %b32 = zext i16 %b to i32
+  %t = add i32 %a32, %b32
+  %r = add i32 %t, %c
+  ret i32 %r
+}
+
+define void @struct_store(ptr addrspace(1) %p, i8 %a, i16 %b, i32 %c) {
+  %s0 = insertvalue %S poison, i8 %a, 0
+  %s1 = insertvalue %S %s0, i16 %b, 1
+  %s2 = insertvalue %S %s1, i32 %c, 2
+  store %S %s2, ptr addrspace(1) %p
+  ret void
+}
+
+define i16 @array_sum(ptr addrspace(1) %p) {
+  %v = load [4 x i16], ptr addrspace(1) %p
+  %a = extractvalue [4 x i16] %v, 0
+  %b = extractvalue [4 x i16] %v, 1
+  %c = extractvalue [4 x i16] %v, 2
+  %d = extractvalue [4 x i16] %v, 3
+  %s1 = add i16 %a, %b
+  %s2 = add i16 %s1, %c
+  %s3 = add i16 %s2, %d
+  ret i16 %s3
+}
+
+; bits 96..111 of a 128-bit value
+define i16 @load128_top(ptr addrspace(1) %p) {
+  %v = load i128, ptr addrspace(1) %p
+  %s = lshr i128 %v, 96
+  %t = trunc i128 %s to i16
+  ret i16 %t
+}
+
+; a global seen through a far pointer: a constant expression
+@gl = global i16 777
+define i16 @read_global_far() {
+  %v = load i16, ptr addrspace(1) addrspacecast (ptr @gl to ptr addrspace(1))
+  ret i16 %v
+}
+define void @write_global_far(i16 %v) {
+  store i16 %v, ptr addrspace(1) addrspacecast (ptr @gl to ptr addrspace(1))
+  ret void
+}
+define i16 @read_gl_near() {
+  %v = load i16, ptr @gl
+  ret i16 %v
+}
+
+define void @far_move(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n) {
+  call void @llvm.memmove.p1.p1.i16(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n, i1 false)
+  ret void
+}

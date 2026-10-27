@@ -901,7 +901,49 @@ fn far_data_pointers() {
     assert_eq!(s.call("far_eq", &[1, 2, 1, 2]).0, 1);
     assert_eq!(s.call("far_eq", &[1, 2, 1, 3]).0, 0);
     assert_eq!(s.call("far_eq", &[1, 2, 5, 2]).0, 0);
-    // video memory is outside the 64 KiB of RAM: B800:0000 is the CGA's text page
+    // structs and arrays, element by element; a 128-bit value in eight word accesses
+    s.call("store16", &[off_a + 0x100, seg_a, 0x0000]);
+    s.call(
+        "struct_store",
+        &[off_a + 0x200, seg_a, 0xAB, 0x1234, 0x5678, 0x0001],
+    );
+    assert_eq!(s.peek(phys + 0x200, 8)[0], 0xAB);
+    assert_eq!(s.peek16(phys + 0x202), 0x1234);
+    assert_eq!(s.peek(phys + 0x204, 4), [0x78, 0x56, 0x01, 0x00]);
+    let (lo, hi) = s.call("struct_sum", &[off_a + 0x200, seg_a]);
+    assert_eq!(
+        (u32::from(hi) << 16) | u32::from(lo),
+        0xAB + 0x1234 + 0x0001_5678,
+        "struct_sum"
+    );
+    for (i, v) in [100u16, 200, 300, 400].iter().enumerate() {
+        s.call("store16", &[off_a + 0x300 + 2 * i as u16, seg_a, *v]);
+    }
+    assert_eq!(s.call("array_sum", &[off_a + 0x300, seg_a]).0, 1000);
+    let wide: Vec<u8> = (0..16u8).map(|i| 0x10 + i).collect();
+    s.poke(phys + 0x400, &wide);
+    assert_eq!(
+        s.call("load128_top", &[off_a + 0x400, seg_a]).0,
+        u16::from_le_bytes([wide[12], wide[13]])
+    );
+    // a global through a far-pointer constant (the segment is DS = 0 here)
+    assert_eq!(s.call("read_global_far", &[]).0, 777);
+    s.call("write_global_far", &[4242]);
+    assert_eq!(s.call("read_gl_near", &[]).0, 4242);
+    // memmove, both directions, overlapping
+    let ramp: Vec<u8> = (0..32u8).map(|i| i + 1).collect();
+    s.poke(0xB000, &ramp); // far 0B00:0000
+    s.call("far_move", &[0x0004, 0x0B00, 0x0000, 0x0B00, 20]); // up by 4: copies from the end
+    let mut want = ramp.clone();
+    want.copy_within(0..20, 4);
+    assert_eq!(s.peek(0xB000, 32), want, "memmove up");
+    s.poke(0xB000, &ramp);
+    s.call("far_move", &[0x0000, 0x0B00, 0x0004, 0x0B00, 20]); // down by 4: copies forward
+    let mut want = ramp.clone();
+    want.copy_within(4..24, 0);
+    assert_eq!(s.peek(0xB000, 32), want, "memmove down");
+    s.call("far_move", &[0x0002, 0x0B00, 0x0002, 0x0B00, 0]); // nothing
+                                                              // video memory is outside the 64 KiB of RAM: B800:0000 is the CGA's text page
     s.call("store16", &[0x0000, 0xB800, 0x0748]); // 'H', grey on black
     s.call("store16", &[0x0002, 0xB800, 0x0769]); // 'i'
     assert!(

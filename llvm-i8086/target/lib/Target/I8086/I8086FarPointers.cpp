@@ -54,7 +54,33 @@ public:
   FarPointers() : FunctionPass(ID) {}
   StringRef getPassName() const override { return "I8086 far pointers"; }
 
+  // A constant expression of far pointer type (an `addrspacecast` of a global, a
+  // `getelementptr` of one) becomes instructions, so the lowering below sees it.
+  static bool expandConstants(Function &F) {
+    bool Changed = false;
+    bool Again = true;
+    while (Again) {
+      Again = false;
+      for (BasicBlock &BB : F)
+        for (Instruction &I : BB)
+          for (unsigned K = 0; K < I.getNumOperands(); ++K) {
+            auto *CE = dyn_cast<ConstantExpr>(I.getOperand(K));
+            if (!CE || !isFar(CE->getType()))
+              continue;
+            Instruction *At = &I;
+            if (auto *P = dyn_cast<PHINode>(&I))
+              At = P->getIncomingBlock(K)->getTerminator();
+            Instruction *New = CE->getAsInstruction();
+            New->insertBefore(At->getIterator());
+            I.setOperand(K, New);
+            Again = Changed = true;
+          }
+    }
+    return Changed;
+  }
+
   bool runOnFunction(Function &F) override {
+    bool Expanded = expandConstants(F);
     SmallVector<Instruction *, 16> Work;
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
@@ -62,7 +88,7 @@ public:
           Work.push_back(&I);
     for (Instruction *I : Work)
       lower(*I);
-    return !Work.empty();
+    return Expanded || !Work.empty();
   }
 
 private:
@@ -135,12 +161,60 @@ private:
     report_fatal_error("I8086: a far load or store of this type is not supported");
   }
 
+  // Structs and arrays are loaded and stored element by element.
+  Value *loadAny(IRBuilder<> &B, Type *T, Value *Seg, Value *Off,
+                 const DataLayout &DL) {
+    if (auto *ST = dyn_cast<StructType>(T)) {
+      const StructLayout *SL = DL.getStructLayout(ST);
+      Value *Agg = PoisonValue::get(T);
+      for (unsigned K = 0; K < ST->getNumElements(); ++K)
+        Agg = B.CreateInsertValue(
+            Agg,
+            loadAny(B, ST->getElementType(K), Seg,
+                    B.CreateAdd(Off, B.getInt16(SL->getElementOffset(K))), DL),
+            K);
+      return Agg;
+    }
+    if (auto *AT = dyn_cast<ArrayType>(T)) {
+      uint64_t Stride = DL.getTypeAllocSize(AT->getElementType());
+      Value *Agg = PoisonValue::get(T);
+      for (uint64_t K = 0; K < AT->getNumElements(); ++K)
+        Agg = B.CreateInsertValue(
+            Agg,
+            loadAny(B, AT->getElementType(), Seg,
+                    B.CreateAdd(Off, B.getInt16(K * Stride)), DL),
+            K);
+      return Agg;
+    }
+    return loadValue(B, T, Seg, Off, DL);
+  }
+
+  void storeAny(IRBuilder<> &B, Value *V, Value *Seg, Value *Off,
+                const DataLayout &DL) {
+    Type *T = V->getType();
+    if (auto *ST = dyn_cast<StructType>(T)) {
+      const StructLayout *SL = DL.getStructLayout(ST);
+      for (unsigned K = 0; K < ST->getNumElements(); ++K)
+        storeAny(B, B.CreateExtractValue(V, K), Seg,
+                 B.CreateAdd(Off, B.getInt16(SL->getElementOffset(K))), DL);
+      return;
+    }
+    if (auto *AT = dyn_cast<ArrayType>(T)) {
+      uint64_t Stride = DL.getTypeAllocSize(AT->getElementType());
+      for (uint64_t K = 0; K < AT->getNumElements(); ++K)
+        storeAny(B, B.CreateExtractValue(V, K), Seg,
+                 B.CreateAdd(Off, B.getInt16(K * Stride)), DL);
+      return;
+    }
+    storeValue(B, V, Seg, Off, DL);
+  }
+
   Value *loadValue(IRBuilder<> &B, Type *T, Value *Seg, Value *Off,
                    const DataLayout &DL) {
     Type *IT = asInteger(B, T, DL);
     unsigned Bytes = DL.getTypeStoreSize(IT);
-    if (Bytes > 8)
-      report_fatal_error("I8086: a far load wider than 64 bits is not supported");
+    if (Bytes > 16)
+      report_fatal_error("I8086: a far load wider than 128 bits is not supported");
     Type *Wide = B.getIntNTy(Bytes * 8);
     Value *Acc = ConstantInt::get(Wide, 0);
     unsigned At = 0;
@@ -168,8 +242,8 @@ private:
     Type *T = V->getType();
     Type *IT = asInteger(B, T, DL);
     unsigned Bytes = DL.getTypeStoreSize(IT);
-    if (Bytes > 8)
-      report_fatal_error("I8086: a far store wider than 64 bits is not supported");
+    if (Bytes > 16)
+      report_fatal_error("I8086: a far store wider than 128 bits is not supported");
     Type *Wide = B.getIntNTy(Bytes * 8);
     Value *I = V;
     if (T->isPointerTy())
@@ -194,11 +268,11 @@ private:
     IRBuilder<> B(&I);
     if (auto *L = dyn_cast<LoadInst>(&I)) {
       Value *P = L->getPointerOperand();
-      Value *V = loadValue(B, L->getType(), seg(B, P), off(B, P), DL);
+      Value *V = loadAny(B, L->getType(), seg(B, P), off(B, P), DL);
       L->replaceAllUsesWith(V);
     } else if (auto *S = dyn_cast<StoreInst>(&I)) {
       Value *P = S->getPointerOperand();
-      storeValue(B, S->getValueOperand(), seg(B, P), off(B, P), DL);
+      storeAny(B, S->getValueOperand(), seg(B, P), off(B, P), DL);
     } else if (auto *G = dyn_cast<GetElementPtrInst>(&I)) {
       Value *P = G->getPointerOperand();
       Value *Delta = emitGEPOffset(&B, DL, G);
@@ -240,22 +314,53 @@ private:
       B.CreateStore(V, B.CreateGEP(B.getInt8Ty(), Base, Idx));
   }
 
+  // The 20-bit address of a pointer, near (the segment is DS) or far, in 32 bits.
+  Value *linear(IRBuilder<> &B, Value *P) {
+    Value *Seg;
+    Value *Off;
+    if (isFar(P->getType())) {
+      Seg = seg(B, P);
+      Off = off(B, P);
+    } else {
+      auto *FT = FunctionType::get(B.getInt16Ty(), false);
+      Seg = B.CreateCall(InlineAsm::get(FT, "mov $0, ds", "=r", false));
+      Off = B.CreatePtrToInt(P, B.getInt16Ty());
+    }
+    Value *S = B.CreateShl(B.CreateZExt(Seg, B.getInt32Ty()), 4);
+    return B.CreateAdd(S, B.CreateZExt(Off, B.getInt32Ty()));
+  }
+
+  // memcpy, memset and memmove as byte loops: for (i = 0; i < len; ++i) dst[i] = src[i]
+  // (or the value). A memmove whose destination is above its source copies from the
+  // end instead, so overlapping ranges are right in both directions.
   void lowerMem(MemIntrinsic &M, const DataLayout &DL) {
-    if (isa<MemMoveInst>(M))
-      report_fatal_error("I8086: memmove with a far pointer is not supported");
-    // `before` .. loop .. `after`: for (i = 0; i < len; ++i) dst[i] = src[i] / value
+    bool Move = isa<MemMoveInst>(M);
+    LLVMContext &C = M.getContext();
     BasicBlock *Pre = M.getParent();
+    Function *F = Pre->getParent();
     BasicBlock *After = Pre->splitBasicBlock(&M, "far.mem.after");
-    BasicBlock *Loop = BasicBlock::Create(M.getContext(), "far.mem.loop",
-                                          Pre->getParent(), After);
     Pre->getTerminator()->eraseFromParent();
+    BasicBlock *Dir = Move ? BasicBlock::Create(C, "far.mem.dir", F, After) : nullptr;
+    BasicBlock *Fwd = BasicBlock::Create(C, "far.mem.fwd", F, After);
+    BasicBlock *Back = Move ? BasicBlock::Create(C, "far.mem.back", F, After) : nullptr;
+
     IRBuilder<> B(Pre);
     Type *I16 = B.getInt16Ty();
     Value *Len = B.CreateZExtOrTrunc(M.getLength(), I16);
-    B.CreateCondBr(B.CreateICmpEQ(Len, B.getInt16(0)), After, Loop);
-    B.SetInsertPoint(Loop);
+    B.CreateCondBr(B.CreateICmpEQ(Len, B.getInt16(0)), After, Move ? Dir : Fwd);
+    BasicBlock *FwdFrom = Pre;
+    if (Move) {
+      B.SetInsertPoint(Dir);
+      auto *T = cast<MemTransferInst>(&M);
+      Value *D = linear(B, M.getRawDest());
+      Value *S = linear(B, T->getRawSource());
+      B.CreateCondBr(B.CreateICmpULE(D, S), Fwd, Back);
+      FwdFrom = Dir;
+    }
+
+    B.SetInsertPoint(Fwd);
     PHINode *Idx = B.CreatePHI(I16, 2);
-    Idx->addIncoming(B.getInt16(0), Pre);
+    Idx->addIncoming(B.getInt16(0), FwdFrom);
     Value *V = nullptr;
     if (auto *T = dyn_cast<MemTransferInst>(&M))
       V = byteAt(B, T->getRawSource(), Idx, DL);
@@ -263,8 +368,19 @@ private:
       V = cast<MemSetInst>(&M)->getValue();
     storeByteAt(B, M.getRawDest(), Idx, V, DL);
     Value *Next = B.CreateAdd(Idx, B.getInt16(1));
-    Idx->addIncoming(Next, Loop);
-    B.CreateCondBr(B.CreateICmpULT(Next, Len), Loop, After);
+    Idx->addIncoming(Next, Fwd);
+    B.CreateCondBr(B.CreateICmpULT(Next, Len), Fwd, After);
+
+    if (Move) {
+      B.SetInsertPoint(Back);
+      auto *T = cast<MemTransferInst>(&M);
+      PHINode *J = B.CreatePHI(I16, 2);
+      J->addIncoming(Len, Dir);
+      Value *Dn = B.CreateSub(J, B.getInt16(1));
+      storeByteAt(B, M.getRawDest(), Dn, byteAt(B, T->getRawSource(), Dn, DL), DL);
+      J->addIncoming(Dn, Back);
+      B.CreateCondBr(B.CreateICmpEQ(Dn, B.getInt16(0)), After, Back);
+    }
     M.eraseFromParent();
   }
 };
