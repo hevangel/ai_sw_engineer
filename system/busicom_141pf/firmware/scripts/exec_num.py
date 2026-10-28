@@ -20,6 +20,7 @@ container; exit status nonzero on any mismatch)
 """
 import json
 import os
+import pathlib
 import random
 import subprocess
 import sys
@@ -31,6 +32,15 @@ ROOT = os.path.abspath(os.path.join(TITLE, "..", "..", ".."))
 BACKEND = os.path.join(ROOT, "llvm-i4004")
 BIN = os.path.join(BACKEND, "install", "bin")
 LLVM_MC = os.environ.get("LLVM_MC", os.path.join(BIN, "llvm-mc"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 PACK = os.path.join(BACKEND, "asm", "i4004_pack.py")
 XCHECK = os.path.join(BACKEND, "tools", "chips_xcheck")
 NUM_S = os.path.join(TITLE, "asm", "num.s")
@@ -95,10 +105,9 @@ def target_dir(cwd):
 
 
 def build_image(leaf, work):
-    s = os.path.join(work, f"{leaf}.s")
     sym = leaf if leaf in HEAVY else "__leaf_" + leaf[2:]
-    with open(s, "w") as f:
-        f.write(DRIVER.format(leaf=sym))
+    s = contained(work, f"{leaf}.s")
+    s.write_text(DRIVER.format(leaf=sym))
     drv, num = os.path.join(work, f"{leaf}.o"), os.path.join(work, "num.o")
     run([LLVM_MC, "-triple=i4004", "-filetype=obj", s, "-o", drv])
     if not os.path.exists(num):
@@ -298,9 +307,8 @@ def main():
             bad = 0
             for (a1, a2, a3, img), w in zip(todo, want):
                 rom[1], rom[3], rom[5] = a1, a2, a3
-                rp = os.path.join(work, "case.bin")
-                with open(rp, "wb") as f:
-                    f.write(rom)
+                rp = contained(work, "case.bin")
+                rp.write_bytes(bytes(rom))
                 cycles = "6000000" if leaf in ENTRIES else "400000"
                 out = run([runner, rp, "".join("%x" % v for v in img), cycles]).stdout
                 kv = dict(l.split("=", 1) for l in out.split())

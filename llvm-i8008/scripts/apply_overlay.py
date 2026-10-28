@@ -15,21 +15,27 @@ All edits are idempotent: running twice is a no-op. Anchored on unique strings
 so they survive minor upstream whitespace changes.
 """
 import os
+import pathlib
 import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.normpath(os.path.join(HERE, "..", "target"))
 
+# Root of the LLVM tree this run may write into; set by main().
+_TREE = None
+
+
+def write(p, s):
+    p = pathlib.Path(p).resolve()
+    if pathlib.Path(_TREE).resolve() not in p.parents:
+        raise SystemExit(f"refusing write outside the LLVM tree: {p}")
+    p.write_text(s, encoding="utf-8", newline="\n")
+
 
 def read(p):
     with open(p, "r", encoding="utf-8") as f:
         return f.read()
-
-
-def write(p, s):
-    with open(p, "w", encoding="utf-8", newline="\n") as f:
-        f.write(s)
 
 
 def ensure(path, anchor, insert, label, after=True, once_marker=None):
@@ -62,6 +68,8 @@ def main():
         print("usage: apply_overlay.py <LLVM_SRC>", file=sys.stderr)
         sys.exit(2)
     src = os.path.abspath(sys.argv[1])
+    global _TREE
+    _TREE = src
     llvm = os.path.join(src, "llvm")
     if not os.path.isdir(llvm):
         print(f"not an LLVM tree: {src}", file=sys.stderr)

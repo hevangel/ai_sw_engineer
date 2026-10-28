@@ -84,7 +84,8 @@ See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_templ
 | Atari 2600 | MOS 6507 | `llvm-mos6502` (llvm-mos) | planned |
 | Commodore 64 | MOS 6510 | `llvm-mos6502` (llvm-mos) | planned |
 | Nintendo NES | Ricoh 2A03 | `llvm-mos6502` (llvm-mos) | planned |
-| IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | scaffolded: platform maps and backend ISA/ABI specs drafted; the emulator boots the original BIOS and PC DOS 1.00 and matches the RTL; `llvm-i8086` assembles and disassembles the 8086 integer instruction set (checked against the physical-chip corpus) and `llc` compiles integer code (native mul/div, carries, block moves), `i8086-ld` links it with a runtime library into a floppy image the original BIOS boots; a Rust target and a title are not yet — see `system/ibm_pc/README.md` |
+| IBM PC 5150 / XT | Intel 8088 / 8086 | `llvm-i8086` (new, real-mode 8086 only) | **Rust runs on the 8088**: `i8086-unknown-none` rustc target, CHKDSK reimplemented in Rust (identical to the original on 24 test disks); the emulator boots the original BIOS and PC DOS 1.00 and matches the RTL; compiler profile and verification in `system/ibm_pc/toolchain/` — see `system/ibm_pc/README.md` |
+| IBM PC AT 5170 | Intel 80286 | `llvm-i286` (new) | audit/specification stage (`llvm-i286/`, issue #66) |
 
 ## Quick start
 

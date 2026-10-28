@@ -15,12 +15,22 @@ Simulator: MICRAL_SIM, default the RTL harness platform/sim/build/micral_rtl.
 """
 import argparse
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIM = os.environ.get("MICRAL_SIM", os.path.join(HERE, "..", "sim", "build", "micral_rtl"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 
 def unescape(s):
@@ -53,8 +63,8 @@ def load(path):
 
 def run(args, keys):
     with tempfile.TemporaryDirectory() as d:
-        tin, tout = os.path.join(d, "in"), os.path.join(d, "out")
-        open(tin, "wb").write(keys)
+        tin, tout = contained(d, "in"), contained(d, "out")
+        tin.write_bytes(keys)
         cmd = [SIM, "--tty-in", tin, "--tty-out", tout, "--idle", "20000",
                "--max-cycles", str(args.max_cycles), "--regs"]
         if args.ram:

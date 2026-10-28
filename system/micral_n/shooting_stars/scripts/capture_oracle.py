@@ -15,6 +15,7 @@ mask table.
 """
 import hashlib
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,15 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TITLE = os.path.dirname(HERE)
 RTL = os.environ.get("MICRAL_SIM", os.path.join(TITLE, "..", "platform", "sim", "build", "micral_rtl"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 WIN = "52138752985"
 LOSE = "52468"
@@ -54,12 +64,12 @@ def main():
     sha = hashlib.sha256(open(orig, "rb").read()).hexdigest()
     for name, keys in SCENARIOS:
         with tempfile.TemporaryDirectory() as d:
-            tin, tout = os.path.join(d, "in"), os.path.join(d, "out")
-            open(tin, "wb").write(keys.encode())
+            tin, tout = contained(d, "in"), contained(d, "out")
+            tin.write_bytes(keys.encode())
             r = subprocess.run([RTL, "--ram", f"{orig}@0", "--tty-in", tin, "--tty-out", tout,
                                 "--idle", "20000", "--max-cycles", "200000000", "--regs"],
                                capture_output=True, text=True)
-            out = open(tout, "rb").read()
+            out = tout.read_bytes()
         if "halted" not in r.stderr:
             raise SystemExit(f"{name}: the original did not halt: {r.stderr}")
         lines = [f"# Captured from the original (build/original.bin, SHA-256 {sha}) on the",
@@ -73,8 +83,8 @@ def main():
                 cur = bytearray()
         if cur:
             lines.append("> " + esc(cur))
-        p = os.path.join(TITLE, "oracle", "transcripts", name + ".txt")
-        open(p, "w", newline="\n").write("\n".join(lines) + "\n")
+        p = contained(TITLE, "oracle", "transcripts", name + ".txt")
+        p.write_text("\n".join(lines) + "\n", newline="\n")
         print(f"{name}: {len(out)} bytes")
 
 
