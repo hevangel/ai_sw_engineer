@@ -15,6 +15,7 @@ TODO: introduction year (sourced), manufacturer, why the machine matters. State 
 
 ## Simulators
 
+- Local Rust system emulator: [emulator/](emulator/README.md): library and CLI running original and compiled images; state which chip cores it shares with the secondary below
 - Primary (ai_hw_engineer): TODO path under `$AI_HW_ENGINEER/system/` or `design/`
 - Secondary (external/): TODO emulator submodule
 

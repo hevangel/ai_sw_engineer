@@ -22,6 +22,7 @@ echo "==> creating system/$SYSTEM (chip: $CHIP)"
 mkdir -p "$DEST"
 cp "$TEMPLATE/system_README.md" "$DEST/README.md"
 cp -r "$TEMPLATE/platform" "$DEST/platform"
+cp -r "$TEMPLATE/emulator" "$DEST/emulator"
 
 find "$DEST" -type f -print0 | while IFS= read -r -d '' f; do
     sed -i -e "s/\[SYSTEM\]/$SYSTEM/g" -e "s/\[CHIP\]/$CHIP/g" "$f"
@@ -30,4 +31,5 @@ chmod +x "$DEST"/platform/scripts/*.sh
 
 [[ -d $ROOT/llvm-$CHIP ]] || echo "NOTE: llvm-$CHIP does not exist yet; create it with ./scripts/new_llvm_target.sh $CHIP"
 echo "==> done. Next: fill system/$SYSTEM/README.md and platform/memory_map.md, add a row to system/README.md,"
+echo "    fill emulator/spec/spec.md (chip cores, machine contract) before replacing the placeholder core in emulator/src/lib.rs,"
 echo "    then ./scripts/new_software.sh $SYSTEM <software>"
