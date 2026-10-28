@@ -47,5 +47,24 @@ evidence. The oracle's prior RTL cross-check is recorded in the
 [oracle provenance](../firmware/oracle/README.md). See
 [testplan](plans/testplan.md) for the verification scope.
 
+Beyond the manual examples, a seeded random corpus
+([random_calculator_tests.json](../firmware/oracle/random_calculator_tests.json),
+1000 mixed-operation programs) is cross-checked the same way: expected tapes
+are computed by the firmware host core, which shares no code with this crate.
+
+```bash
+BUSICOM_ROM=/path/to/rom_141pf_combined.bin \
+  cargo test --manifest-path system/busicom_141pf/emulator/Cargo.toml \
+  --test random_replay random_corpus_replays_original_rom -- --ignored
+# CLI equivalent for the same corpus (a few minutes):
+py system/busicom_141pf/platform/scripts/build_schedule.py \
+  system/busicom_141pf/firmware/oracle/random_calculator_tests.json \
+  -o /tmp/busicom_random.schedule
+system/busicom_141pf/emulator/target/release/busicom-emulator.exe \
+  /path/to/rom_141pf_combined.bin /tmp/busicom_random.schedule > /tmp/busicom_random.trace
+py system/busicom_141pf/platform/scripts/compare_oracle.py \
+  /tmp/busicom_random.trace system/busicom_141pf/firmware/oracle/random_calculator_tests.json
+```
+
 The [verification record](report/verification.md) records the completed
 42/42 original-ROM replay and exact release-CLI trace comparison.
