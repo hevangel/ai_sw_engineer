@@ -1,0 +1,19 @@
+[package]
+name = "i8086-ld"
+version = "0.1.0"
+edition = "2021"
+description = "Linker and image packager for llvm-i8086 (ELF32 relocatable objects, a linker-script subset)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "i8086_ld"
+path = "src/lib.rs"
+
+[[bin]]
+name = "i8086-ld"
+path = "src/main.rs"
+
+# Host tool: `std` is allowed. No dependencies: the ELF reader and writer are
+# here, so the tool builds anywhere the Rust toolchain does.
+[dependencies]

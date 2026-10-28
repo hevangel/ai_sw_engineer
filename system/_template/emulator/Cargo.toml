@@ -1,0 +1,23 @@
+[package]
+name = "[SYSTEM]-emulator"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Rust system emulator for [SYSTEM]"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across systems.
+name = "system_emulator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "[SYSTEM]-emulator"
+path = "src/main.rs"
+
+# Host crate: `std` is allowed. Pin any chip-core dependency by path to a
+# submodule in external/ (never edit it in place) and record it in spec/spec.md.
+[dependencies]
+
+[profile.test]
+opt-level = 2

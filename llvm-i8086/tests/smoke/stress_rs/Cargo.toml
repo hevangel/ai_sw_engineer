@@ -1,0 +1,20 @@
+[package]
+name = "stress_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Differential Rust program for llvm-i8086: the same checks run on the 8088 and on the host"
+license = "MIT"
+publish = false
+
+[dependencies]
+ibm_pc_hal = { path = "../../../../system/ibm_pc/platform/hal" }
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

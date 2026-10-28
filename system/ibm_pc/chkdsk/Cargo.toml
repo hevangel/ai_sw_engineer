@@ -1,0 +1,37 @@
+[package]
+name = "chkdsk"
+version = "0.1.0"
+edition = "2021"
+description = "chkdsk for ibm_pc, reimplemented in Rust"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across titles.
+name = "software"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chkdsk"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+# On the target only: the DOS runtime of the platform (see src/main.rs).
+[target.'cfg(target_os = "none")'.dependencies]
+ibm_pc_dos = { path = "../platform/dos" }
+
+[dev-dependencies]
+# The Rust emulator the target test runs DOS and the .COM on, and the disk tool that adds it to the DOS disk.
+system_emulator = { package = "ibm_pc-emulator", path = "../emulator" }
+pcdisk = { path = "../platform/tools/pcdisk" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false

@@ -1,0 +1,20 @@
+[package]
+name = "hello_com"
+version = "0.1.0"
+edition = "2021"
+description = "Rust smoke program for llvm-i8086: a PC DOS .COM that prints through INT 21h"
+license = "MIT"
+publish = false
+
+[dependencies]
+ibm_pc_dos = { path = "../../../../system/ibm_pc/platform/dos" }
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

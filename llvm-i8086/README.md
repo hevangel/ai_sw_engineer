@@ -1,0 +1,50 @@
+# llvm-i8086
+
+| | |
+|---|---|
+| Chip | Intel 8086 / 8088 (same instruction set; 16-bit vs 8-bit external bus). Introduction years (1978 and 1979 as commonly cited) are to be sourced from Intel material before they are stated as fact |
+| Word / address width | 16-bit data, 20-bit physical addresses formed from 16-bit segment and offset |
+| Strategy | a new LLVM target (`target/lib/Target/I8086`) overlaid on `external/llvm-project`, real-mode 8086 instructions only |
+| Rust target | `i8086-unknown-none` in a rustc built against this LLVM (`rust/README.md`, `rust/patches/`) |
+| Status | **assembler, disassembler, object writer, integer code generation, runtime library, linker, image packager and Rust programs done** (milestones 2 to 7): `llc` compiles integer code, `rt/` supplies the rest, `i8086-ld` links and packs a bootable floppy, and Rust programs (with `core`) built through the msp430 route boot on the original BIOS; all verified on the 8088 core |
+
+## Strategy
+
+No usable 16-bit real-mode backend exists. LLVM's x86 `-m16` mode emits 386+ opcodes and 32-bit operand overrides, which an 8088 cannot execute (AGENTS rule, [spec/llvm-backends.md](../spec/llvm-backends.md)), so this is a new target rather than a configuration of X86. It follows the pattern of `llvm-i8008` and `llvm-i4004`: pseudo-instructions selected over a small allocatable register set, a documented ABI before code, and a runtime library for operations the chip lacks.
+
+The first model is the tiny/small model: one 64 KiB segment (CS = DS = ES = SS), 16-bit near pointers, so the 8086's segment registers are set once at entry and not allocated. Programs that need more than 64 KiB use far pointers, far calls and several segments (`spec/abi.md` D7 to D9); the compiler has no large-model switch, the program says which pointers are far.
+
+In scope (done): the machine-code layer: `llvm-mc -triple=i8086` assembles and disassembles the whole 8086 integer instruction set in Intel syntax, relaxes branches, and writes ELF objects with the relocations of `spec/abi.md`; `llvm-objdump` and `llvm-readobj` read them. Verified against a hand-written opcode table and the physical-chip instruction corpus (`tests/`).
+
+In scope (done): `llc -mtriple=i8086` selects integer code at 8 and 16 bits (32/64-bit by the generic legalizer with add/adc chains), native 16-bit multiply and divide, `rep movs`/`stos`, calls and stack frames (`spec/codegen.md`, `spec/abi.md`).
+
+In scope (done): the runtime library `rt/` (32-bit divide, remainder and shifts, the 64-bit operations, `mem*`).
+
+In scope (done): the linker and bootable-image packager `asm/` (`i8086-ld`).
+
+In scope (done): Rust (`core`, `no_std`) through `rust/`.
+
+In scope (done): variadic functions and `byval` (`spec/abi.md` D3a), interrupt handlers in C-like IR and in Rust (D5), static archives and `.COM` output in `i8086-ld`, a first real title (`system/ibm_pc/chkdsk`).
+
+Done in the last round: floating point and `i128`, branchless booleans, `loop`/`jcxz`, `-r`, `.EXE` (tiny model), the manual page index, far data pointers (`ptr addrspace(1)`, `spec/abi.md` D7), inline assembly with register constraints.
+
+Not done, and why: `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none).
+
+The tiny model is the default program model; programs with several segments use far data pointers (D7), far calls (D8, `cc 1000`) and segment relocations (D9).
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| [spec/isa.md](spec/isa.md) | instruction set, encodings (8086 subset, 186+ excluded) |
+| [spec/abi.md](spec/abi.md) | data layout string, register classes, calling convention, frames, relocations |
+| [spec/codegen.md](spec/codegen.md) | how `llc` selects instructions: registers, addressing modes, control flow, arithmetic |
+| [spec/asm_syntax.md](spec/asm_syntax.md) | assembler syntax and directives |
+| [plans/](plans/implementation_plan.md) | implementation plan, [test plan](plans/testplan.md) |
+| `target/` | LLVM `lib/Target/I8086` sources or patches applied onto `external/llvm-project` |
+| `rust/` | Rust target JSON, build-std notes, linker wrapper |
+| [asm/](asm/README.md) | `i8086-ld`, the linker and image packager (a Rust crate, with its tests) |
+| [rt/](rt/README.md) | the runtime library: 32-bit divide and shifts, 64-bit operations, `mem*` |
+| `tests/` | `codegen/` lit+FileCheck, `mc/` encode tests, `run/` programs run on the emulator, `smoke/` simulator programs |
+| `scripts/` | `build_llvm.sh`, `build_rustc.sh`, `build_image.sh`, `link_image.sh`, `build_rt.sh`, `gen_run_objects.sh`, `run_tests.sh` |
+| [report/](report/final_report.md) | final report |
