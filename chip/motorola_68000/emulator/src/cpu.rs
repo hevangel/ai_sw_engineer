@@ -786,20 +786,24 @@ impl Mc68000 {
     }
 
     fn group_immediate_inner(&mut self, bus: &mut impl Bus, op: u16) -> Option<bool> {
-        // Static bit ops: 0000 10 00/01/10/11 11 modereg with 8-bit imm
-        // (0x0800-0x087F BTST, 0x0840-0x08BF BCHG, 0x0880-0x08FF BSET,
-        // 0x08C0-0x08FF BCLR — decoded by kind = bits 7-6).
-        if op & 0xFB00 == 0x0800 {
-            let kind = (op >> 6) & 3;
+        // Static bit ops: 0000 1kkk ss 11 modereg with 8-bit imm, ss = 11.
+        // The kind sits in bits 11-8: 08/09 BTST, 0B BCHG, 0D BSET, 0F
+        // BCLR (suite-derived; the 08/09 pair shares BTST).
+        if (op & 0x00C0) == 0x00C0 && matches!(op >> 8, 0x08 | 0x09 | 0x0B | 0x0D | 0x0F) {
+            let kind = match op >> 8 {
+                0x08 | 0x09 => 0u16,
+                0x0B => 1,
+                0x0D => 2,
+                _ => 3,
+            };
             let mode = (op >> 3) & 7;
             let reg = op & 7;
             let bit = u32::from(self.fetch16(bus) & 0xFF);
             return Some(self.bit_op(bus, kind, mode, reg, bit));
         }
-        // Dynamic bit ops: 0000 rrr 1 kk 01 mmm rrr (bit register in rrr,
-        // kind kk at bits 7-6). MOVEP modes 5/6 with bits 5-4 == 00 are
-        // handled below; everything else with bit 8 set here is dynamic.
-        if op & 0x0100 != 0 && op & 0x0080 == 0 && (op & 0x0030 != 0 || (op >> 3) & 7 < 5) {
+        // Dynamic bit ops: 0000 rrr 1 kk modereg (bit register in bits
+        // 11-9, kind kk at bits 7-6); rows 01/03/05/07xx.
+        if op & 0x0100 == 0x0100 && (op & 0x0E00) == 0x0000 {
             let kind = (op >> 6) & 3;
             let mode = (op >> 3) & 7;
             let reg = op & 7;
@@ -807,18 +811,20 @@ impl Mc68000 {
             let bit = self.d[bit_reg as usize] & 63;
             return Some(self.bit_op(bus, kind, mode, reg, bit));
         }
-        // MOVEP: 000 rrr 1 0 1/0 mmm rrr with mode 5/6 (0x0100-0x018F).
-        if op & 0x0100 != 0 && op & 0x0080 == 0 {
+        // MOVEP (suite-derived): 0000 rrr 1 dir sz x x 1 An x with the
+        // effective address (d16,An) where An = bits 3-1; dir = bit 7,
+        // size = bit 6, no flags, no address-register stepping. The
+        // suite sweeps the whole 0000 1rrr space and the silicon treats
+        // every row as MOVEP.
+        if op & 0x0100 == 0x0100 {
             let reg = ((op >> 9) & 7) as usize;
-            let mode = (op >> 3) & 7;
-            let r2 = op & 7;
-            let long = op & 0x0040 != 0;
-            let to_mem = op & 0x0020 != 0;
-            if mode != 5 && mode != 6 {
-                self.exception(bus, VEC_ILL);
-                return Some(true);
-            }
-            let addr = self.ea_addr(bus, mode, r2, Size::Word).unwrap_or(0);
+            let an = ((op >> 1) & 7) as usize;
+            let long = op & 0x0040 == 0x0040;
+            let to_mem = op & 0x0080 == 0x0000;
+            let addr = match self.ea_addr(bus, 5, an as u16, Size::Word) {
+                Some(a) => a,
+                None => return Some(true),
+            };
             if to_mem {
                 let v = self.d[reg];
                 if long {
@@ -830,18 +836,16 @@ impl Mc68000 {
                     self.wr8(bus, addr, (v >> 8) as u8);
                     self.wr8(bus, addr.wrapping_add(2), v as u8);
                 }
+            } else if long {
+                let b0 = u32::from(self.rd8(bus, addr));
+                let b1 = u32::from(self.rd8(bus, addr.wrapping_add(2)));
+                let b2 = u32::from(self.rd8(bus, addr.wrapping_add(4)));
+                let b3 = u32::from(self.rd8(bus, addr.wrapping_add(6)));
+                self.d[reg] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
             } else {
-                if long {
-                    let b0 = u32::from(self.rd8(bus, addr));
-                    let b1 = u32::from(self.rd8(bus, addr.wrapping_add(2)));
-                    let b2 = u32::from(self.rd8(bus, addr.wrapping_add(4)));
-                    let b3 = u32::from(self.rd8(bus, addr.wrapping_add(6)));
-                    self.d[reg] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
-                } else {
-                    let b0 = u32::from(self.rd8(bus, addr));
-                    let b1 = u32::from(self.rd8(bus, addr.wrapping_add(2)));
-                    self.d[reg] = (b0 << 8) | b1;
-                }
+                let b0 = u32::from(self.rd8(bus, addr));
+                let b1 = u32::from(self.rd8(bus, addr.wrapping_add(2)));
+                self.d[reg] = (b0 << 8) | b1;
             }
             return Some(false);
         }
