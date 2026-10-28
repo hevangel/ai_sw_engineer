@@ -1634,15 +1634,17 @@ impl Mc68000 {
             if mem_form {
                 let (ay, ax) = if src == dst {
                     // same register: the silicon steps once
-                    let a = self.aget(src).wrapping_sub(if src == 7 { 2 } else { 1 });
+                    let a = self.aget(src).wrapping_sub(self.step_for_reg(Size::Byte, src as u16));
                     self.aset(src, a);
                     (a, a)
                 } else {
-                    let ay_step = if src == 7 { 2 } else { 1 };
-                    let ax_step = if dst == 7 { 2 } else { 1 };
-                    let ay = self.aget(src).wrapping_sub(ay_step);
+                    let ay = self
+                        .aget(src)
+                        .wrapping_sub(self.step_for_reg(Size::Byte, src as u16));
                     self.aset(src, ay);
-                    let ax = self.aget(dst).wrapping_sub(ax_step);
+                    let ax = self
+                        .aget(dst)
+                        .wrapping_sub(self.step_for_reg(Size::Byte, dst as u16));
                     self.aset(dst, ax);
                     (ay, ax)
                 };
@@ -1719,7 +1721,7 @@ impl Mc68000 {
     fn group_sub_suba_subx_divs(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
-        if op & 0x0180 == 0x0100 && op & 0x0030 == 0x0000 {
+        if op & 0x0100 == 0x0100 && op & 0x00C0 != 0x00C0 && op & 0x0030 == 0x0000 {
             // SUBX (opmodes 4-6 with bits 5:4 = 00)
             let size = self.size_from_bits((op >> 6) & 3);
             let mem_form = op & 0x0008 != 0;
@@ -2104,7 +2106,7 @@ impl Mc68000 {
     fn group_add_adda_addx(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
-        if op & 0x0180 == 0x0100 && op & 0x0030 == 0x0000 {
+        if op & 0x0100 == 0x0100 && op & 0x00C0 != 0x00C0 && op & 0x0030 == 0x0000 {
             // ADDX (opmodes 4-6 with bits 5:4 = 00)
             let size = self.size_from_bits((op >> 6) & 3);
             let mem_form = op & 0x0008 != 0;
