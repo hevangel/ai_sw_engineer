@@ -78,7 +78,7 @@ See [system/README.md](system/README.md), [llvm-_template/README.md](llvm-_templ
 
 | System | CPU | LLVM backend | Status |
 |---|---|---|---|
-| Busicom 141-PF calculator | Intel 4004 | `llvm-i4004` (new) | **runs on the 4004**: Rust firmware (with hand-written BCD and driver routines in `asm/`) compiles through `llvm-i4004` to a flat **4,095 B** ROM (4,096 B max, 3.2× the 1,280 B original) and prints the original ROM's tape **42/42 on the ai_hw_engineer RTL and on external/chips**; host tests 42/42 — see `system/busicom_141pf/firmware/report/final_report.md` |
+| Busicom 141-PF calculator | Intel 4004 | `llvm-i4004` (new) | **runs on the 4004**: Rust firmware (with hand-written BCD and driver routines in `asm/`) compiles through `llvm-i4004` to a flat **4,095 B** ROM (4,096 B max, 3.2× the 1,280 B original) and prints the original ROM's tape **42/42 on the ai_hw_engineer RTL and on external/chips**; host tests 42/42 — see `system/busicom_141pf/firmware/report/final_report.md`. Reproducible per-machine compiler profile and verification: `system/busicom_141pf/toolchain/` |
 | Micral N | Intel 8008 | `llvm-i8008` (new) | **runs on the 8008 RTL**: boot ROM, MIC 01 monitor (in its 2 KiB ROM), Shooting Stars and SCELBAL BASIC rewritten in Rust; the last two match the originals byte for byte — see `system/micral_n/README.md` |
 | Apple II / IIe | MOS 6502 | `llvm-mos6502` (llvm-mos) | planned |
 | Atari 2600 | MOS 6507 | `llvm-mos6502` (llvm-mos) | planned |
