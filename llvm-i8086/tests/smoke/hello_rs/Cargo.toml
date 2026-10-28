@@ -1,0 +1,21 @@
+[package]
+name = "hello_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust smoke program for llvm-i8086: prints computed values on the IBM PC screen"
+license = "MIT"
+publish = false
+
+[dependencies]
+ibm_pc_hal = { path = "../../../../system/ibm_pc/platform/hal" }
+
+# One module, small, no unwinding: the settings every i8086 program uses.
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

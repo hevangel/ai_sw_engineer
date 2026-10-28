@@ -1,0 +1,269 @@
+//! Rust `.COM` programs under PC DOS 1.00.
+//!
+//! `llvm-i8086/tests/smoke/hello_com` is a `no_std` Rust program built by
+//! llvm-i8086 and linked with `platform/link_com.ld` and `runtime/crt0_com.s`
+//! into a `.COM` file. `oracle/dos/hello_com.txt` was recorded from the
+//! hardware project's RTL by `chkdsk/scripts/rtl_oracle.sh`: the original IBM
+//! BIOS boots the unchanged PC DOS 1.00, whose drive A also holds `HELLO.COM`
+//! (put there by `pcdisk`), and the command `hello` runs the program.
+//!
+//! Always run: the layout of the `.COM` file.
+//! With `--ignored` and the original BIOS and DOS disk: the disk built here is
+//! byte for byte the one the RTL ran (SHA-256 in the transcript), and the Rust
+//! emulator shows the same screen.
+//!
+//! Run: `cargo test --release --test i8086_dos -- --include-ignored --nocapture`
+
+use std::path::{Path, PathBuf};
+
+use system_emulator::machine::Machine;
+use system_emulator::session;
+use system_emulator::sha256;
+
+const BIOS_SHA256: &str = "a259306c47b43e14ef6378d7bdeff67331a2519d363bc36b3f354bc91a6874c8";
+const BASIC_SHA256: &str = "2452b03b4b724b5b81e8cc367809c521144f5fe4e0425caee42ac71240b9b102";
+const DOS_SHA256: &str = "29a4c5eb355b2bfb1dbbece96d91eabc5c1331c6299437d00dd8d862ac126eb2";
+
+fn backend() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../llvm-i8086")
+}
+
+fn platform() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../platform")
+}
+
+fn object(path: &Path) -> i8086_ld::Object {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    i8086_ld::parse_object(&path.to_string_lossy(), &bytes).unwrap()
+}
+
+/// The `.COM` file for the Rust program `smoke_crate`: the loaded sections of
+/// `link_com.ld`, which start at offset 100h.
+fn link_com(smoke_crate: &str) -> (u32, Vec<u8>) {
+    let mut objects = vec![
+        object(&platform().join("runtime/crt0_com.o")),
+        object(&platform().join("runtime/dos.o")),
+        object(&backend().join(format!("tests/smoke/{smoke_crate}/{smoke_crate}.o"))),
+    ];
+    let mut rt: Vec<_> = std::fs::read_dir(backend().join("rt/obj"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "o"))
+        .collect();
+    rt.sort();
+    objects.extend(rt.iter().map(|p| object(p)));
+    let script =
+        i8086_ld::parse_script(&std::fs::read_to_string(platform().join("link_com.ld")).unwrap())
+            .unwrap();
+    i8086_ld::link(&objects, &script, &i8086_ld::Options::default())
+        .unwrap()
+        .flat_binary()
+}
+
+/// The tiny-model `.EXE` of the same program: an MZ header around the `.COM` image.
+fn link_exe(smoke_crate: &str) -> Vec<u8> {
+    let mut objects = vec![
+        object(&platform().join("runtime/crt0_com.o")),
+        object(&platform().join("runtime/dos.o")),
+        object(&backend().join(format!("tests/smoke/{smoke_crate}/{smoke_crate}.o"))),
+    ];
+    let lib = i8086_ld::parse_archive(
+        "librt.a",
+        &std::fs::read(backend().join("rt/librt.a")).unwrap(),
+    )
+    .unwrap();
+    let (objects, _) =
+        i8086_ld::select_members(std::mem::take(&mut objects), vec![lib], &["_start".into()]);
+    let script =
+        i8086_ld::parse_script(&std::fs::read_to_string(platform().join("link_com.ld")).unwrap())
+            .unwrap();
+    let linked = i8086_ld::link(&objects, &script, &i8086_ld::Options::default()).unwrap();
+    let (load, flat) = linked.flat_binary();
+    // what follows the file's bytes: .bss and a 4 KiB stack (as `i8086-ld --exe` asks)
+    let bss = linked.symbols["__bss_end"] - (load + flat.len() as u32);
+    i8086_ld::exe(
+        &flat,
+        load,
+        linked.entry.expect("an entry point"),
+        bss + 4096,
+    )
+    .unwrap()
+}
+
+/// The two-segment `.EXE` (`tests/smoke_ir/seg_exe.ll`, `platform/link_exe_seg.ld`).
+fn link_seg_exe() -> Vec<u8> {
+    let objects = vec![object(&backend().join("tests/smoke_ir/seg_exe.o"))];
+    let script = i8086_ld::parse_script(
+        &std::fs::read_to_string(platform().join("link_exe_seg.ld")).unwrap(),
+    )
+    .unwrap();
+    let linked = i8086_ld::link(&objects, &script, &i8086_ld::Options::default()).unwrap();
+    let (load, flat) = linked.flat_binary();
+    i8086_ld::exe_segmented(
+        &flat,
+        load,
+        linked.entry.expect("an entry point"),
+        0,
+        Some(linked.symbols["__stack_top"] as u16),
+        &linked.segment_relocs,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_two_segment_exe_has_a_relocation_for_each_segment_value() {
+    let exe = link_seg_exe();
+    let w = |at: usize| u16::from_le_bytes([exe[at], exe[at + 1]]);
+    assert_eq!(&exe[..2], b"MZ");
+    // msg_far@seg in far_print (a mov imm16) and the two `call seg:off` in _start
+    // (far_print and far_twice): three words hold a segment
+    let n = usize::from(w(6));
+    assert_eq!(n, 3, "relocation count");
+    let far_seg = w(512 + usize::from(w(0x1C + 2)) * 16 + usize::from(w(0x1C)));
+    for i in 0..n {
+        let at = 512 + usize::from(w(0x1C + 4 * i + 2)) * 16 + usize::from(w(0x1C + 4 * i));
+        assert_eq!(w(at), far_seg, "every segment value is the far segment");
+    }
+    // stored relative to the load module (PSP + 10h): the far segment follows
+    // the first one's contents, a few paragraphs above 0x10
+    assert!(far_seg < 0x100, "{far_seg:#x}");
+    assert_eq!(w(16), exe_sp(&exe), "SP is the program's __stack_top");
+}
+
+fn exe_sp(exe: &[u8]) -> u16 {
+    u16::from_le_bytes([exe[16], exe[17]])
+}
+
+#[test]
+fn the_exe_is_an_mz_header_around_the_com_image() {
+    let exe = link_exe("hello_com");
+    let (_, com) = link_com("hello_com");
+    assert_eq!(&exe[..2], b"MZ");
+    // a one-sector header (PC DOS 1.00 loads in whole sectors), then the .COM image
+    assert_eq!(&exe[512..], &com[..]);
+    // CS = SS = load segment - 10h, IP = 0100h: crt0_com starts it as it starts the .COM
+    assert_eq!(u16::from_le_bytes([exe[0x16], exe[0x17]]), 0xFFF0);
+    assert_eq!(u16::from_le_bytes([exe[0x14], exe[0x15]]), 0x0100);
+}
+
+#[test]
+fn the_com_file_starts_at_100h_with_the_runtime_entry() {
+    let (load, com) = link_com("hello_com");
+    assert_eq!(load, 0x100, "DOS loads a .COM at offset 100h");
+    // crt0_com keeps AX (mov bx, ax), clears the direction flag, then reads the top of memory
+    // from the PSP (mov ax, [2]) to place the stack
+    assert_eq!(&com[..6], &[0x89, 0xC3, 0xFC, 0xA1, 0x02, 0x00]);
+    assert!(
+        com.len() < 0xFE00,
+        "{} bytes do not fit in a segment",
+        com.len()
+    );
+    assert!(com.windows(2).any(|w| w == [0xCD, 0x20]));
+}
+
+fn rom_dir() -> Option<PathBuf> {
+    [
+        std::env::var_os("IBM_PC_ROMS").map(PathBuf::from),
+        std::env::var_os("AI_HW_ENGINEER")
+            .map(|p| PathBuf::from(p).join("system/ibm_pc/work/reference")),
+        Some(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../../ai_hw_engineer/system/ibm_pc/work/reference"),
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.join("bios.bin").exists())
+}
+
+fn checked(dir: &Path, name: &str, sha: &str) -> Vec<u8> {
+    let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert_eq!(sha256::hex(&bytes), sha, "{name} is not the original image");
+    bytes
+}
+
+/// The screen rows (`|...`) and the `# <key> sha256` values of an RTL oracle transcript.
+fn screen_rows(transcript: &str) -> Vec<String> {
+    transcript
+        .lines()
+        .filter_map(|l| l.strip_prefix('|').map(str::to_string))
+        .collect()
+}
+
+/// Boots DOS with `contents` on the DOS disk as `file`, types `command`, and compares the
+/// screen with the RTL's transcript `oracle/dos/<transcript>.txt` (and the DOS disk with
+/// the one the RTL ran).
+fn dos_runs(file: &str, contents: &[u8], command: &str, transcript: &str) {
+    dos_runs_showing(file, contents, command, transcript, "Rust under DOS");
+}
+
+fn dos_runs_showing(file: &str, contents: &[u8], command: &str, transcript: &str, marker: &str) {
+    let dir = rom_dir().expect("firmware not found: set IBM_PC_ROMS or AI_HW_ENGINEER");
+    let bios = checked(&dir, "bios.bin", BIOS_SHA256);
+    let basic = checked(&dir, "basic.bin", BASIC_SHA256);
+    let mut disk = pcdisk::Disk::from_bytes(checked(&dir, "pcdos100.img", DOS_SHA256)).unwrap();
+    disk.add(file, contents).unwrap();
+
+    let transcript = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("oracle/dos/{transcript}.txt")),
+    )
+    .unwrap();
+    let want_sha = transcript
+        .lines()
+        .find_map(|l| l.strip_prefix("# dos image sha256 "))
+        .expect("transcript has the image hash");
+    assert_eq!(
+        sha256::hex(disk.bytes()),
+        want_sha,
+        "the DOS disk with {file} built here is not the one the RTL ran"
+    );
+
+    // `\r` below is the two characters the session format uses for Enter
+    let script = [
+        "boot".to_string(),
+        "until contains Enter today's date".to_string(),
+        r"type 10-14-81\r".to_string(),
+        "until endswith A>".to_string(),
+        format!(r"type {command}\r"),
+        "until endswith A>".to_string(),
+    ]
+    .join("\n");
+    let steps = session::parse(&script).unwrap();
+    let mut m = Machine::new(64);
+    m.load_firmware(&bios, Some(&basic)).unwrap();
+    m.mount(0, disk.into_bytes(), true).unwrap();
+    m.mount(1, std::fs::read(dir.join("workdisk.img")).unwrap(), false)
+        .unwrap();
+    let got = session::run(&mut m, &steps).unwrap();
+    let got_rows = screen_rows(&got);
+    // the last screen of the replay is the last 25 rows
+    let last = &got_rows[got_rows.len() - 25..];
+    let want = screen_rows(&transcript);
+    assert_eq!(last, &want[..], "screen differs from the RTL's:\n{got}");
+    assert!(want.iter().any(|r| r == marker));
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_rust_com_program_and_shows_what_the_rtl_showed() {
+    let (_, com) = link_com("hello_com");
+    dos_runs("HELLO.COM", &com, "hello", "hello_com");
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_rust_exe_program_and_shows_what_the_rtl_showed() {
+    dos_runs("HELLOX.EXE", &link_exe("hello_com"), "hellox", "hello_exe");
+}
+
+#[test]
+#[ignore = "needs the original IBM BIOS, Cassette BASIC and PC DOS 1.00 disk (see replay.rs)"]
+fn dos_runs_the_two_segment_exe_and_shows_what_the_rtl_showed() {
+    dos_runs_showing(
+        "SEGX.EXE",
+        &link_seg_exe(),
+        "segx",
+        "seg_exe",
+        "Far segment!",
+    );
+}

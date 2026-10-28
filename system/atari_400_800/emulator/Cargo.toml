@@ -1,0 +1,16 @@
+[package]
+name = "atari-400-800-emulator"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic Rust Atari 400/800 whole-system emulator"
+license = "MIT"
+publish = false
+
+[dependencies]
+mos6502 = { path = "../../../external/mos6502" }
+
+# The functional suites execute tens of millions of instructions; keep the
+# pinned CPU core optimized in dev/test builds (the crate under test stays
+# debuggable).
+[profile.dev.package.mos6502]
+opt-level = 3

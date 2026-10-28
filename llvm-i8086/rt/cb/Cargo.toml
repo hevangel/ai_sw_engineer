@@ -1,0 +1,7 @@
+[package]
+name = "cb"
+version = "0.1.0"
+edition = "2021"
+description = "Empty crate: building it with -Z build-std makes rustc compile compiler_builtins, whose IR build_compiler_builtins.sh takes"
+license = "MIT"
+publish = false

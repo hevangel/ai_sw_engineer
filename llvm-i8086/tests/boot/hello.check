@@ -1,0 +1,20 @@
+; FileCheck input for the disassembly (llvm-objdump -d) of tests/boot/hello.o
+; linked with system/ibm_pc/platform/link.ld: an independent decoder reads the
+; linker's output and the relocated operands are what the script placed.
+; Run by scripts/run_tests.sh.
+
+; CHECK: Disassembly of section .boot:
+; CHECK: 00007c00 <_start>:
+; CHECK: mov sp, 0x7c00
+; CHECK: mov bx, 0x7e00
+; CHECK: int 0x13
+; CHECK: jmp near 0x7e00
+; CHECK: Disassembly of section .text:
+; CHECK: 00007e00 <stage2>:
+; CHECK: call 0x7e21
+; CHECK: call 0x7e21
+; CHECK: call 0x7e21
+; CHECK: mov si, 0x7e26
+; CHECK: 00007e21 <bump>:
+; CHECK: inc word ptr [0x500]
+; CHECK-NOT: 0xdead
