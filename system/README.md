@@ -1,12 +1,13 @@
 # Systems
 
-One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. The [Busicom emulator](busicom_141pf/emulator/README.md) provides the first library and CLI; emulators for the other listed systems remain planned.
+One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. Working emulators: [Busicom 141-PF](busicom_141pf/emulator/README.md) and the [Atari 400/800 first slice](atari_400_800/emulator/README.md); emulators for the other listed systems remain planned.
 
 | System | Year | CPU | LLVM backend | HW simulator in ai_hw_engineer | Software titles | Folder |
 |---|---|---|---|---|---|---|
 | Busicom 141-PF calculator | 1971 | Intel 4004 | `llvm-i4004` | `system/busicom_141pf` (4004/4001/4002/4003 RTL) | [firmware](busicom_141pf/firmware/) (M5: 4,095 B ROM, 42/42 on RTL and chips) | [busicom_141pf/](busicom_141pf/) |
 | Micral N | 1973 | Intel 8008 | `llvm-i8008` | `system/micral_n` (8008 RTL; our Micral N harness in `platform/sim`) | [boot](micral_n/boot/) (241 B), [monitor](micral_n/monitor/) (2 KiB ROM, 7/7), [shooting_stars](micral_n/shooting_stars/) (4/4), [basic](micral_n/basic/) (SCELBAL, 10/10) | [micral_n/](micral_n/) |
 | Apple II | 1977 | MOS 6502 | `llvm-mos6502` | `system/apple_ii` (in progress), `design/mos_6502` | — | planned |
+| Atari 400/800 | 1979 | MOS 6502 (Atari "SALLY" 6502C) | `llvm-mos6502` | `design/mos_6502` (CPU only; whole machine planned, [ai_engineer#355](https://github.com/hevangel/ai_engineer/issues/355)) | — | [atari_400_800/](atari_400_800/) (emulator first slice: CPU passes Klaus Dormann via its bus; no video/audio/DMA yet) |
 | Atari 2600 (VCS) | 1977 | MOS 6507 | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |
 | IBM PC 5150 | 1981 | Intel 8088 | `llvm-i8086` | `system/ibm_pc`, `system/ibm_pc_xt_5160` | — | planned |
 | Commodore 64 | 1982 | MOS 6510 | `llvm-mos6502` | `design/mos_6502` (CPU only) | — | planned |
