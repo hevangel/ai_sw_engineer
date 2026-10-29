@@ -1572,9 +1572,10 @@ impl Mc68000 {
     fn group_addq_scc(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
-        if op & 0x0100 != 0 && op & 0x00C0 != 0x00C0 {
-            // ADDQ/SUBQ: 0101 dnn 1 ss modereg (bit 8 is always set;
-            // the field encodes 1-7 directly, 0 means 8)
+        if op & 0x00C0 != 0x00C0 {
+            // ADDQ/SUBQ: 0101 dnn d ss modereg (bit 8 picks ADDQ when
+            // clear and SUBQ when set; the field encodes 1-7 directly,
+            // 0 means 8)
             let field = ((op >> 9) & 7) as u32;
             let data = if field == 0 { 8 } else { field };
             let size = self.size_from_bits((op >> 6) & 3);
@@ -1794,10 +1795,11 @@ impl Mc68000 {
                 }
             }
         }
-        if op & 0x01C0 == 0x0100 {
-            // SBCD Dy,Dx (register) or -(Ay),-(Ax): dst = bits 11-9,
-            // src = bits 2-0; byte accesses step the address register
-            // by 2 through A7 and by 1 otherwise, once per access.
+        if op & 0x01C0 == 0x0100 && op & 0x0030 == 0x0000 {
+            // SBCD Dy,Dx (register, mode 000) or -(Ay),-(Ax) (mode 001):
+            // dst = bits 11-9, src = bits 2-0; byte accesses step the
+            // address register by 2 through A7 and by 1 otherwise, once
+            // per access. Other modes of this opmode are OR Dn,<ea>.
             let mem_form = op & 0x0008 != 0;
             let sreg = (op & 7) as usize;
             let dreg = ((op >> 9) & 7) as usize;
@@ -1866,13 +1868,12 @@ impl Mc68000 {
             }
             4 | 5 | 6 => {
                 let d = self.d[(op >> 9) as usize & 7];
-                let r = d | { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
+                let loc = match self.ea_loc(bus, mode, reg, size, false) {
+                    Some(l) => l,
                     None => return true,
-                } };
-                if self.ea_write_checked(bus, mode, reg, size, r).is_none() {
-                    return true;
-                }
+                };
+                let r = d | self.read_loc(bus, loc, size);
+                self.write_loc(bus, loc, size, r);
                 self.cc_logic(r, size);
                 false
             }
@@ -1883,6 +1884,54 @@ impl Mc68000 {
         }
     }
 
+    /// ADDX/SUBX pre-decrement stepping. Byte and word forms decrement
+    /// once per register and fault on an odd word address with the
+    /// register already stepped; the long form decrements in two word
+    /// steps per register (both committed before the destination's
+    /// parity check), so an odd source base faults with the source at
+    /// two steps and the destination untouched. Returns the (lo, hi)
+    /// access addresses of each operand — equal for byte/word, one
+    /// word apart for long.
+    fn addx_subx_mem_addrs(
+        &mut self,
+        bus: &mut impl Bus,
+        sreg: usize,
+        dreg: usize,
+        size: Size,
+    ) -> Option<((u32, u32), (u32, u32))> {
+        let dec = |s: &mut Self, r: usize| match size {
+            Size::Long => s.aget(r).wrapping_sub(2),
+            other => s.aget(r).wrapping_sub(s.step_for_reg(other, r as u16)),
+        };
+        let say = dec(self, sreg);
+        self.aset(sreg, say);
+        if size != Size::Byte && say & 1 != 0 {
+            self.addr_error_hw(bus, say, 0x15, self.pc.wrapping_sub(2));
+            return None;
+        }
+        let say2 = if size == Size::Long {
+            let a = say.wrapping_sub(2);
+            self.aset(sreg, a);
+            a
+        } else {
+            say
+        };
+        let dax = dec(self, dreg);
+        self.aset(dreg, dax);
+        if size != Size::Byte && dax & 1 != 0 {
+            self.addr_error_hw(bus, dax, 0x15, self.pc.wrapping_sub(2));
+            return None;
+        }
+        let dax2 = if size == Size::Long {
+            let a = dax.wrapping_sub(2);
+            self.aset(dreg, a);
+            a
+        } else {
+            dax
+        };
+        Some(((say, say2), (dax, dax2)))
+    }
+
     /// 9xxx: SUB, SUBA, SUBX, DIVS.
     fn group_sub_suba_subx_divs(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
@@ -1891,48 +1940,36 @@ impl Mc68000 {
             // SUBX (opmodes 4-6 with bits 5:4 = 00)
             let size = self.size_from_bits((op >> 6) & 3);
             let mem_form = op & 0x0008 != 0;
-            let (av, bv, wr) = if mem_form {
+            let (av, bv, wr, wr2) = if mem_form {
                 let sreg = (op & 7) as usize;
                 let dreg = ((op >> 9) & 7) as usize;
-                let (ay, ax) = {
-                    let ay = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(size, sreg as u16));
-                    self.aset(sreg, ay);
-                    // A long or word access at an odd post-decrement
-                    // address raises an address error with the register
-                    // already stepped.
-                    if size != Size::Byte && ay & 1 != 0 {
-                        self.addr_error_hw(bus, ay, 0x15, self.pc.wrapping_sub(2));
-                        return true;
+                let ((say, say2), (dax, dax2)) =
+                    match self.addx_subx_mem_addrs(bus, sreg, dreg, size) {
+                        Some(a) => a,
+                        None => return true,
+                    };
+                let av = match size {
+                    Size::Byte => u32::from(self.rd8(bus, say)),
+                    Size::Word => u32::from(self.rd16(bus, say)),
+                    Size::Long => {
+                        (u32::from(self.rd16(bus, say2)) << 16)
+                            | u32::from(self.rd16(bus, say))
                     }
-                    let ax = self
-                        .aget(dreg)
-                        .wrapping_sub(self.step_for_reg(size, dreg as u16));
-                    self.aset(dreg, ax);
-                    if size != Size::Byte && ax & 1 != 0 {
-                        self.addr_error_hw(bus, ax, 0x15, self.pc.wrapping_sub(2));
-                        return true;
-                    }
-                    (ay, ax)
                 };
-                (
-                    match size {
-                        Size::Byte => u32::from(self.rd8(bus, ay)),
-                        Size::Word => u32::from(self.rd16(bus, ay)),
-                        Size::Long => self.rd32(bus, ay),
-                    },
-                    match size {
-                        Size::Byte => u32::from(self.rd8(bus, ax)),
-                        Size::Word => u32::from(self.rd16(bus, ax)),
-                        Size::Long => self.rd32(bus, ax),
-                    },
-                    ax,
-                )
+                let bv = match size {
+                    Size::Byte => u32::from(self.rd8(bus, dax)),
+                    Size::Word => u32::from(self.rd16(bus, dax)),
+                    Size::Long => {
+                        (u32::from(self.rd16(bus, dax2)) << 16)
+                            | u32::from(self.rd16(bus, dax))
+                    }
+                };
+                (av, bv, dax, dax2)
             } else {
                 (
                     self.d[(op & 7) as usize],
                     self.d[((op >> 9) & 7) as usize],
+                    0,
                     0,
                 )
             };
@@ -1945,7 +1982,7 @@ impl Mc68000 {
                 match size {
                     Size::Byte => self.wr8(bus, wr, res as u8),
                     Size::Word => self.wr16(bus, wr, res as u16),
-                    Size::Long => self.wr32(bus, wr, res),
+                    Size::Long => self.wr32(bus, wr2, res),
                 }
             } else {
                 let rn = ((op >> 9) & 7) as usize;
@@ -2290,48 +2327,36 @@ impl Mc68000 {
             // ADDX (opmodes 4-6 with bits 5:4 = 00)
             let size = self.size_from_bits((op >> 6) & 3);
             let mem_form = op & 0x0008 != 0;
-            let (av, bv, wr) = if mem_form {
+            let (av, bv, wr, wr2) = if mem_form {
                 let sreg = (op & 7) as usize;
                 let dreg = ((op >> 9) & 7) as usize;
-                let (ay, ax) = {
-                    let ay = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(size, sreg as u16));
-                    self.aset(sreg, ay);
-                    // A long or word access at an odd post-decrement
-                    // address raises an address error with the register
-                    // already stepped.
-                    if size != Size::Byte && ay & 1 != 0 {
-                        self.addr_error_hw(bus, ay, 0x15, self.pc.wrapping_sub(2));
-                        return true;
+                let ((say, say2), (dax, dax2)) =
+                    match self.addx_subx_mem_addrs(bus, sreg, dreg, size) {
+                        Some(a) => a,
+                        None => return true,
+                    };
+                let av = match size {
+                    Size::Byte => u32::from(self.rd8(bus, say)),
+                    Size::Word => u32::from(self.rd16(bus, say)),
+                    Size::Long => {
+                        (u32::from(self.rd16(bus, say2)) << 16)
+                            | u32::from(self.rd16(bus, say))
                     }
-                    let ax = self
-                        .aget(dreg)
-                        .wrapping_sub(self.step_for_reg(size, dreg as u16));
-                    self.aset(dreg, ax);
-                    if size != Size::Byte && ax & 1 != 0 {
-                        self.addr_error_hw(bus, ax, 0x15, self.pc.wrapping_sub(2));
-                        return true;
-                    }
-                    (ay, ax)
                 };
-                (
-                    match size {
-                        Size::Byte => u32::from(self.rd8(bus, ay)),
-                        Size::Word => u32::from(self.rd16(bus, ay)),
-                        Size::Long => self.rd32(bus, ay),
-                    },
-                    match size {
-                        Size::Byte => u32::from(self.rd8(bus, ax)),
-                        Size::Word => u32::from(self.rd16(bus, ax)),
-                        Size::Long => self.rd32(bus, ax),
-                    },
-                    ax,
-                )
+                let bv = match size {
+                    Size::Byte => u32::from(self.rd8(bus, dax)),
+                    Size::Word => u32::from(self.rd16(bus, dax)),
+                    Size::Long => {
+                        (u32::from(self.rd16(bus, dax2)) << 16)
+                            | u32::from(self.rd16(bus, dax))
+                    }
+                };
+                (av, bv, dax, dax2)
             } else {
                 (
                     self.d[(op & 7) as usize],
                     self.d[((op >> 9) & 7) as usize],
+                    0,
                     0,
                 )
             };
@@ -2344,7 +2369,7 @@ impl Mc68000 {
                 match size {
                     Size::Byte => self.wr8(bus, wr, res as u8),
                     Size::Word => self.wr16(bus, wr, res as u16),
-                    Size::Long => self.wr32(bus, wr, res),
+                    Size::Long => self.wr32(bus, wr2, res),
                 }
             } else {
                 let rn = ((op >> 9) & 7) as usize;
