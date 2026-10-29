@@ -740,19 +740,43 @@ impl Mc68000 {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
                 } };
-        let dst = match self.ea_loc(bus, dst_mode, dst_reg, size, true) {
-            Some(d) => d,
-            None => return true,
-        };
-        if matches!(dst, EaLoc::RegA(_)) && size == Size::Word {
+        if dst_mode == 1 && size == Size::Word {
             // MOVEA.w sign-extends into the address register; no flags
             v = ((v as u16) as i16 as i32) as u32;
         }
-        self.write_loc(bus, dst, size, v);
+        if dst_mode != 1 {
+            // The flags update before the destination resolves: the
+            // golden's fault frame and live SR carry the post-update
+            // CCR when the store faults.
+            self.cc_logic(v, size);
+        }
+        // The (An)+ destination resolves without stepping: the access
+        // uses the original register value and the step commits only
+        // after a successful write (the golden rolls it back on a
+        // store fault).
+        let dst = match dst_mode {
+            3 => Some(EaLoc::Mem(self.aget(dst_reg as usize))),
+            _ => self.ea_loc(bus, dst_mode, dst_reg, size, true),
+        };
+        let dst = match dst {
+            Some(d) => d,
+            None => return true,
+        };
         if matches!(dst, EaLoc::RegA(_)) {
             // MOVEA: no CCR update
+            self.write_loc(bus, dst, size, v);
         } else {
-            self.cc_logic(v, size);
+            if let EaLoc::Mem(a) = dst {
+                if dst_mode == 3 && size != Size::Byte && a & 1 != 0 {
+                    self.addr_error_hw(bus, a, 0x05, self.pc);
+                    return true;
+                }
+            }
+            self.write_loc(bus, dst, size, v);
+            if dst_mode == 3 {
+                let st = self.step_for_reg(size, dst_reg);
+                self.aset(dst_reg as usize, self.aget(dst_reg as usize).wrapping_add(st));
+            }
         }
         false
     }
@@ -1379,12 +1403,19 @@ impl Mc68000 {
                 false
             }
             _ if op & 0xFFF8 == 0x4E50 => {
-                // LINK
+                // LINK. A7 saves the decremented stack pointer (real
+                // silicon's quirk); other registers save their original
+                // value.
                 let disp = self.fetch16(bus) as i16 as i32;
-                self.push32(bus, self.aget(reg as usize));
-                self.aset(reg as usize, self.a7());
-                let sp2 = self.a7().wrapping_add(disp as u32);
-                self.set_a7(sp2);
+                if reg == 7 {
+                    let sp = self.a7().wrapping_sub(4);
+                    self.push32(bus, sp);
+                    self.set_a7(self.a7().wrapping_add(disp as u32));
+                } else {
+                    self.push32(bus, self.aget(reg as usize));
+                    self.aset(reg as usize, self.a7());
+                    self.set_a7(self.a7().wrapping_add(disp as u32));
+                }
                 false
             }
             _ if op & 0xFFF8 == 0x4E58 => {
