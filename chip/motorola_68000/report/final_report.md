@@ -2,7 +2,7 @@
 
 ## Result
 
-**970,952 / 1,000,060 SingleStepTests vectors pass (97.1%).** The
+**994,065 / 1,000,060 SingleStepTests vectors pass (99.4%).** The
 target is zero mismatches (PR #269 states "do not merge until the
 replay reaches zero mismatches"); the core is not mergeable yet.
 
@@ -36,15 +36,20 @@ both executors — reproducing the LLVM flag-clobber miscompile
   register back on a parity fault), trace sampling at instruction
   start, exception entry keeping the interrupt mask.
 
-## Gaps (roughly 29,108 rows)
+## Gaps (roughly 5,995 rows)
 
 | Class | Rows (approx) | Blocker |
 | --- | --- | --- |
-| ADD/ADDX/SUBX/OR families | ~13,400 | per-row golden quirks not yet swept (likely fault frames and flag corners like the CMP family) |
+| ABCD / NBCD | ~950 | X/C flag and decimal-result corners of the fitted formulas |
 | MOVEM.w/l residue | ~1,860 | pre-dec store slot/register order and fault-frame corners |
-| MOVE.l / LINK | ~2,980 | unswept |
-| ABCD / NBCD | ~950 | per-row corners |
-| Bcc / DBcc | ~209 | small residues |
+| MOVE.l/w residue | ~1,450 | both-EA-extension rows carry a second disp word the streams lack; golden decoder quirks |
+| Bcc / DBcc GT rows | ~210 | suite self-contradiction: the DBcc majority needs the swapped GT table, these rows need the canonical one |
+
+Everything else in the suite passes: DIVU/DIVS, the to-SR family,
+RTE, MOVE-from-SR, the whole CMP/CMPA family, MOVEP, ADD/ADDA/ADDQ,
+SUB/SUBA/SUBQ, AND, OR, EOR, NOT/TST/NOP/PEA/LEA, all shifts and
+rotates, ADDX/SUBX/ABCD/SBCD word and long forms, MOVEM basics, LINK,
+MULU/MULS, and the fitted fault/exception semantics.
 
 ## Verification commands
 
