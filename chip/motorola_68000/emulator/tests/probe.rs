@@ -84,7 +84,7 @@ fn probe() {
             sr: t.sr,
         };
         cpu.set_state(regs);
-        cpu.step(&mut mem);
+        common::step_vector(&mut cpu, &mut mem);
         total += 1;
         let (fregs, fpc, fsr) = v.final_state(i);
         let got = cpu.regs();

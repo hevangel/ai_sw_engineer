@@ -55,7 +55,7 @@ fn full_vector_replay() {
             sr: t.sr,
         };
         cpu.set_state(regs);
-        cpu.step(&mut mem);
+        common::step_vector(&mut cpu, &mut mem);
         // compare
         let (fregs, fpc, fsr) = v.final_state(i);
         let mut err = None;

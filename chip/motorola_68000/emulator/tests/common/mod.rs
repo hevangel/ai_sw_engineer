@@ -226,9 +226,20 @@ impl Vectors {
     }
 }
 
+/// Run one instruction; the suite's vectors also cover the address error
+/// a completing instruction triggers when it leaves an odd fetch
+/// address, so follow a step that lands on an odd pc with its fault.
+pub fn step_vector(cpu: &mut motorola_68000::Mc68000, mem: &mut Mem) {
+    cpu.step(mem);
+    if cpu.regs().pc & 1 != 0 {
+        cpu.step(mem);
+    }
+}
+
 /// Compare the final map against the memory model: every final patch must
 /// match, and every byte the core wrote must either match the final patch
 /// at that address or be zero (the final list covers all non-zero bytes).
+/// All mismatches are reported, not just the first.
 pub fn compare_memory(
     fin: &[(u32, u8)],
     writes: &[u32],
@@ -237,13 +248,14 @@ pub fn compare_memory(
 ) -> Result<(), String> {
     let fin_map: HashMap<u32, u8> = fin.iter().copied().collect();
     let excl: Vec<usize> = exclude.iter().map(|&a| (a & 0x00FF_FFFF) as usize).collect();
+    let mut diffs = String::new();
     for &(a, v) in fin {
         if excl.contains(&(a as usize)) {
             continue;
         }
         let got = mem.mem[a as usize];
         if got != v {
-            return Err(format!("mem {:06X}: got {:02X} want {:02X}", a, got, v));
+            diffs.push_str(&format!("mem {:06X}: got {:02X} want {:02X}; ", a, got, v));
         }
     }
     for &a in writes {
@@ -253,11 +265,15 @@ pub fn compare_memory(
         }
         let expect = fin_map.get(&(a as u32)).copied().unwrap_or(0);
         if mem.mem[a] != expect {
-            return Err(format!(
-                "extra write {:06X}: got {:02X} want {:02X}",
+            diffs.push_str(&format!(
+                "extra write {:06X}: got {:02X} want {:02X}; ",
                 a, mem.mem[a], expect
             ));
         }
     }
-    Ok(())
+    if diffs.is_empty() {
+        Ok(())
+    } else {
+        Err(diffs)
+    }
 }

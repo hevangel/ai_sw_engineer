@@ -48,6 +48,8 @@ pub struct Regs {
 enum EaLoc {
     RegD(usize),
     RegA(usize),
+    /// Mode 7 register 4: the operand is the fetched immediate itself.
+    Imm(u32),
     Mem(u32),
 }
 
@@ -100,8 +102,12 @@ pub struct Mc68000 {
     /// frames).
     instr_pc: u32,
     /// The opcode word currently executing (goes into address-error
-    /// frames as the IIRD and internal-information words).
+    /// frames as the internal-information word).
     op: u16,
+    /// The instruction-code register the suite reports as the IIRD of a
+    /// fault taken on the NEXT fetch: the opcode of the current
+    /// instruction, or the first word read by a completing RTS/RTR.
+    iird: u16,
 }
 
 impl Default for Mc68000 {
@@ -125,6 +131,7 @@ impl Mc68000 {
             fnz: 0,
             instr_pc: 0,
             op: 0,
+            iird: 0,
         }
     }
 
@@ -303,11 +310,26 @@ impl Mc68000 {
     /// opcode (IIRD), the SR and the faulting PC.
     fn addr_error_hw(&mut self, bus: &mut impl Bus, addr: u32, ssw: u16, fault_pc: u32) {
         let op = self.op;
+        self.addr_error_hw_iird(bus, addr, ssw, fault_pc, op);
+    }
+
+    /// Push the suite's 14-byte address-error frame. `iird` is the
+    /// opcode for instruction-fetch faults and the first word of the
+    /// faulting data access otherwise.
+    fn addr_error_hw_iird(
+        &mut self,
+        bus: &mut impl Bus,
+        addr: u32,
+        ssw: u16,
+        fault_pc: u32,
+        iird: u16,
+    ) {
+        let op = self.op;
         let sr = self.sr();
         self.sri |= SR_S;
         self.push32(bus, fault_pc);
         self.push16(bus, sr);
-        self.push16(bus, op);
+        self.push16(bus, iird);
         self.push16(bus, addr as u16);
         self.push16(bus, (addr >> 16) as u16);
         self.push16(bus, (op & 0xFFE0) | ssw);
@@ -494,6 +516,12 @@ impl Mc68000 {
         match mode {
             0 => Some(EaLoc::RegD(reg as usize)),
             1 => Some(EaLoc::RegA(reg as usize)),
+            // Immediate: the value is the extension word(s) themselves.
+            7 if reg == 4 && !write => Some(match size {
+                Size::Byte => EaLoc::Imm(u32::from(self.fetch16(bus) & 0xFF)),
+                Size::Word => EaLoc::Imm(u32::from(self.fetch16(bus))),
+                Size::Long => EaLoc::Imm(self.fetch32(bus)),
+            }),
             _ => {
                 let addr = self.odd_ea(bus, mode, reg, size, write)?;
                 Some(EaLoc::Mem(addr))
@@ -505,6 +533,7 @@ impl Mc68000 {
         match loc {
             EaLoc::RegD(i) => self.mask(self.d[i], size),
             EaLoc::RegA(i) => self.mask(self.aget(i), size),
+            EaLoc::Imm(v) => v,
             EaLoc::Mem(a) => match size {
                 Size::Byte => u32::from(self.rd8(bus, a)),
                 Size::Word => u32::from(self.rd16(bus, a)),
@@ -517,6 +546,9 @@ impl Mc68000 {
         match loc {
             EaLoc::RegD(i) => self.d[i] = self.merge(self.d[i], v, size),
             EaLoc::RegA(i) => self.aset(i, v),
+            // Read-modify-write through the immediate EA is not an
+            // encoding; the suite expects the illegal exception.
+            EaLoc::Imm(_) => self.exception(bus, VEC_ILL),
             EaLoc::Mem(a) => match size {
                 Size::Byte => self.wr8(bus, a, v as u8),
                 Size::Word => self.wr16(bus, a, v as u16),
@@ -534,12 +566,16 @@ impl Mc68000 {
     pub fn step(&mut self, bus: &mut impl Bus) -> StepInfo {
         if self.pc & 1 != 0 {
             self.instr_pc = self.pc;
-            self.addr_error_hw(bus, self.pc, 0x1E, self.pc.wrapping_sub(4));
+            // Standard 14-byte frame at the post-pop stack pointer:
+            // fault pc = address minus four, IIRD = the completed
+            // instruction's opcode.
+            self.addr_error_hw_iird(bus, self.pc, 0x1E, self.pc.wrapping_sub(4), self.op);
             return StepInfo { pc: self.instr_pc, exception: true };
         }
         self.instr_pc = self.pc;
         let op = self.fetch16(bus);
         self.op = op;
+        self.iird = op;
         let exception = self.dispatch(bus, op);
         // Trace fires after a retired instruction if T is set.
         if !exception && self.sri & SR_T != 0 {
@@ -742,14 +778,29 @@ impl Mc68000 {
         size: Size,
         v: u32,
     ) -> Option<()> {
-        if mode >= 2 && self.odd_ea(bus, mode, reg, size, true).is_none() {
+        if mode == 7 && reg == 4 {
+            // Writing through the immediate EA is not an encoding; the
+            // suite expects the illegal-instruction exception.
+            self.exception(bus, VEC_ILL);
             return None;
         }
-        self.write_ea(bus, mode, reg, size, v);
+        if mode < 2 {
+            self.write_ea(bus, mode, reg, size, v);
+            return Some(());
+        }
+        // Compute the address once: ea_addr for modes 3/4 changes the
+        // address register, so odd_ea and write_ea would step twice.
+        let addr = self.odd_ea(bus, mode, reg, size, true)?;
+        match size {
+            Size::Byte => self.wr8(bus, addr, v as u8),
+            Size::Word => self.wr16(bus, addr, v as u16),
+            Size::Long => self.wr32(bus, addr, v),
+        }
         Some(())
     }
 
-    /// Dynamic/static bit operations shared by the 0000 and 01E0 groups.
+    /// Bit operations shared by the 0x08xx static and 0000-row dynamic
+    /// forms (suite-derived: kind 0 BTST, 1 BCHG, 2 BCLR, 3 BSET).
     fn bit_op(&mut self, bus: &mut impl Bus, kind: u16, mode: u16, reg: u16, bit: u32) -> bool {
         let (size, bit) = if mode == 0 {
             (Size::Long, bit & 31)
@@ -763,14 +814,14 @@ impl Mc68000 {
         let v = self.read_loc(bus, loc, size);
         let mask = 1u32 << bit;
         let z = v & mask == 0;
-        self.set_c(false);
-        self.set_v(false);
-        self.set_nz(if z { 0 } else { 1 }, Size::Byte);
+        // The suite touches Z only; N, C, V and X keep their values
+        // for both register and memory destinations.
+        self.fnz = (self.fnz & 0x8) | if z { 0 } else { 0x40 };
         match kind {
             0 => {}
             1 => self.write_loc(bus, loc, size, v ^ mask),
-            2 => self.write_loc(bus, loc, size, v | mask),
-            3 => self.write_loc(bus, loc, size, v & !mask),
+            2 => self.write_loc(bus, loc, size, v & !mask),
+            3 => self.write_loc(bus, loc, size, v | mask),
             _ => {}
         }
         false
@@ -786,24 +837,19 @@ impl Mc68000 {
     }
 
     fn group_immediate_inner(&mut self, bus: &mut impl Bus, op: u16) -> Option<bool> {
-        // Static bit ops: 0000 1kkk ss 11 modereg with 8-bit imm, ss = 11.
-        // The kind sits in bits 11-8: 08/09 BTST, 0B BCHG, 0D BSET, 0F
-        // BCLR (suite-derived; the 08/09 pair shares BTST).
-        if (op & 0x00C0) == 0x00C0 && matches!(op >> 8, 0x08 | 0x09 | 0x0B | 0x0D | 0x0F) {
-            let kind = match op >> 8 {
-                0x08 | 0x09 => 0u16,
-                0x0B => 1,
-                0x0D => 2,
-                _ => 3,
-            };
+        // Static bit ops: 0000 1000 tt modereg with the 8-bit immediate
+        // fetched as a word at pc+2; kind from bits 7-6 (the suite's
+        // bit-2 land is BCLR, bit-3 BSET).
+        if op >> 8 == 0x08 {
+            let kind = (op >> 6) & 3;
             let mode = (op >> 3) & 7;
             let reg = op & 7;
             let bit = u32::from(self.fetch16(bus) & 0xFF);
             return Some(self.bit_op(bus, kind, mode, reg, bit));
         }
         // Dynamic bit ops: 0000 rrr 1 kk modereg (bit register in bits
-        // 11-9, kind kk at bits 7-6); rows 01/03/05/07xx.
-        if op & 0x0100 == 0x0100 && (op & 0x0E00) == 0x0000 {
+        // 11-9, kind kk at bits 7-6). Mode-1 rows belong to MOVEP below.
+        if op & 0x0100 == 0x0100 && (op >> 3) & 7 != 1 {
             let kind = (op >> 6) & 3;
             let mode = (op >> 3) & 7;
             let reg = op & 7;
@@ -811,16 +857,15 @@ impl Mc68000 {
             let bit = self.d[bit_reg as usize] & 63;
             return Some(self.bit_op(bus, kind, mode, reg, bit));
         }
-        // MOVEP (suite-derived): 0000 rrr 1 dir sz x x 1 An x with the
-        // effective address (d16,An) where An = bits 3-1; dir = bit 7,
-        // size = bit 6, no flags, no address-register stepping. The
-        // suite sweeps the whole 0000 1rrr space and the silicon treats
-        // every row as MOVEP.
+        // MOVEP (suite-derived): 0000 rrr 1 dir sz 0 0 1 An with the
+        // effective address (d16,An) where An = bits 2-0; dir = bit 7
+        // (1 = Dn to memory), size = bit 6 (1 = long), no flags and no
+        // address-register stepping.
         if op & 0x0100 == 0x0100 {
             let reg = ((op >> 9) & 7) as usize;
-            let an = ((op >> 1) & 7) as usize;
+            let an = (op & 7) as usize;
             let long = op & 0x0040 == 0x0040;
-            let to_mem = op & 0x0080 == 0x0000;
+            let to_mem = op & 0x0080 == 0x0080;
             let addr = match self.ea_addr(bus, 5, an as u16, Size::Word) {
                 Some(a) => a,
                 None => return Some(true),
@@ -915,8 +960,8 @@ impl Mc68000 {
     fn group_misc(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
-        if op & 0x01C0 == 0x01C0 && op >> 8 & 1 == 1 && (0x41..=0x4D).contains(&(op >> 8)) {
-            // LEA <ea>,An (41C0/43C0/45C0/47C0/49C0/4BC0/4DC0): the
+        if op & 0x01C0 == 0x01C0 && op >> 8 & 1 == 1 && (0x41..=0x4F).contains(&(op >> 8)) {
+            // LEA <ea>,An (41C0/43C0/45C0/47C0/49C0/4BC0/4DC0/4FC0): the
             // destination An sits in bits 11-9.
             let addr = match self.ea_addr(bus, mode, reg, Size::Long) {
                 Some(a) => a,
@@ -925,42 +970,59 @@ impl Mc68000 {
             self.aset(((op >> 9) & 7) as usize, addr);
             return false;
         }
+        // CHK.W <ea>,Dn (rows 4180-4FFF odd, ss = 10; every destination
+        // register in bits 11-9). The bound is signed; the exception
+        // pushes the pc after the EA extension words.
+        if op >> 12 == 4 && op & 0x01C0 == 0x0180 {
+            let bound = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                    Some(l) => self.read_loc(bus, l, Size::Word),
+                    None => return true,
+                } } as u16 as i16 as i32;
+            let d = self.d[((op >> 9) & 7) as usize] as u16 as i16 as i32;
+            self.fv = 0;
+            self.fc &= !0x100;
+            if d < 0 || d > bound {
+                self.fnz = (self.fnz & !0x8) | if d < 0 { 0x8 } else { 0 };
+                self.fnz |= 0x40;
+                self.exception_at(bus, VEC_CHK, self.pc);
+                return true;
+            }
+            self.fnz &= !0x8;
+            return false;
+        }
         match op >> 8 {
             // 40C0-40FF MOVE SR,<ea> ; 40C0 only for the full map, but
             // 4000-40BF would be NEGX (handled below at 0x40).
             0x40 | 0x41 | 0x42 | 0x43 => {
                 if op >> 8 == 0x40 && op & 0x01C0 == 0x00C0 {
-                    // MOVE SR,<ea> (40C0-40FF)
+                    // MOVE SR,<ea> (40C0-40FF). Suite-derived: memory
+                    // modes 3 and 4 are swapped — a 40D0-row writes
+                    // through (An)+ and a 40E0-row through -(An); the
+                    // faulting access is labelled a read (SSW 0x15).
                     let v = u32::from(self.sr());
-                    if self.ea_write_checked(bus, mode, reg, Size::Word, v).is_none() {
+                    let ea_mode = match mode {
+                        3 => 4,
+                        4 => 3,
+                        m => m,
+                    };
+                    if mode < 2 {
+                        self.write_ea(bus, ea_mode, reg, Size::Word, v);
+                        return false;
+                    }
+                    let addr = match self.ea_addr(bus, ea_mode, reg, Size::Word) {
+                        Some(a) => a,
+                        None => return true,
+                    };
+                    if addr & 1 != 0 {
+                        self.addr_error_hw(bus, addr, 0x15, self.pc.wrapping_sub(2));
                         return true;
                     }
-                    return false;
-                }
-                if op >> 8 == 0x41 && op & 0x01C0 == 0x0180 {
-                    // CHK <ea>,Dn (4180-41BF, word)
-                    let bound = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } } as u16 as i16 as i32;
-                    let rn = ((op >> 9) & 7) as usize;
-                    let d = self.d[rn] as u16 as i16 as i32;
-                    self.fv = 0;
-                self.fc &= !0x100;
-                    if d < 0 || d > bound {
-                        if d < 0 {
-                            self.fnz |= 0x8;
-                        } else {
-                            self.fnz &= !0x8;
-                        }
-                        self.exception_at(bus, VEC_CHK, self.instr_pc + 2);
-                        return true;
-                    }
-                    self.fnz &= !0x8;
+                    self.wr16(bus, addr, v as u16);
                     return false;
                 }
                 // NEGX (0x40xx) or CLR (0x42xx): bit 9 discriminates;
-                // sizes 00/01/10 in both rows.
+                // sizes 00/01/10 in both rows. (CHK, ss = 10/11 with
+                // bit 8 set, was handled at the top of group_misc.)
                 let szbits = (op >> 6) & 3;
                 let size = match szbits {
                     0 => Size::Byte,
@@ -1068,18 +1130,27 @@ impl Mc68000 {
                     };
                     let dst = self.read_loc(bus, loc, size) & 0xFF;
                     let x = i32::from(self.fx);
-                    let total = dst as i32 - 0 - x;
-                    let lo_sum = -((dst & 0xF) as i32) - x;
-                    let corf = if lo_sum < 0 { -6 } else { 0 };
-                    let res2 = total + corf;
-                    let borrow = res2 < 0;
-                    let res = ((if borrow { res2 + 0xA0 } else { res2 }) & 0xFF) as u32;
+                    // Suite-derived (SingleStepTests): dst = 0 - dst - X
+                    // with a decimal correction of 0x9A when the low
+                    // nibble of dst+X is nonzero, 0xA0 when it is zero,
+                    // and none when dst+X is zero. C/X follow the
+                    // borrow, Z clears only on a nonzero result, N is
+                    // bit 7 of the result and V is set for
+                    // 0x1B <= dst+X <= 0x80.
+                    let sum = dst as i32 + x;
+                    let res = if sum == 0 {
+                        0
+                    } else {
+                        let corr = if sum & 0xF != 0 { 0x9A } else { 0xA0 };
+                        ((0 - sum + corr) & 0xFF) as u32
+                    };
                     self.write_loc(bus, loc, size, res);
-                    self.set_xc(borrow);
-                    let t8 = ((total & 0xFF) as u8) as i8;
-                    self.set_v(t8 < 0 && res & 0x80 == 0);
+                    self.set_xc(sum != 0);
+                    self.set_v((0x1B..=0x80).contains(&sum));
+                    if res != 0 {
+                        self.fnz |= 0x40;
+                    }
                     self.fnz = (self.fnz & !0x8) | if res & 0x80 != 0 { 0x8 } else { 0 };
-                    self.fnz |= res;
                     return false;
                 }
                 if op & 0x01F8 == 0x0040 {
@@ -1209,17 +1280,43 @@ impl Mc68000 {
             }
             0x4E71 => false, // NOP
             0x4E75 => {
-                // RTS
+                // RTS. A return address at an odd address raises an
+                // address error whose IIRD is the first word being
+                // read (suite-derived).
                 let sp = self.a7();
-                self.pc = self.rd32(bus, sp);
+                if sp & 1 != 0 {
+                    let iird = self.rd16(bus, sp);
+                    self.iird = iird;
+                    self.addr_error_hw_iird(bus, sp, 0x15, self.pc.wrapping_sub(2), iird);
+                    return true;
+                }
+                let v = self.rd32(bus, sp);
+                self.iird = (v >> 16) as u16;
+                self.pc = v;
                 self.set_a7(sp.wrapping_add(4));
                 false
             }
             0x4E77 => {
-                // RTR
+                // RTR. The CCR word is read first, then the return
+                // address; an odd stack raises the address error on the
+                // first faulting access.
                 let sp = self.a7();
+                if sp & 1 != 0 {
+                    let iird = self.rd16(bus, sp);
+                    self.iird = iird;
+                    self.addr_error_hw_iird(bus, sp, 0x15, self.pc.wrapping_sub(2), iird);
+                    return true;
+                }
                 let ccr = self.rd16(bus, sp);
-                let pc = self.rd32(bus, sp.wrapping_add(2));
+                let pc_addr = sp.wrapping_add(2);
+                if pc_addr & 1 != 0 {
+                    let iird = self.rd16(bus, pc_addr);
+                    self.iird = iird;
+                    self.addr_error_hw_iird(bus, pc_addr, 0x15, self.pc.wrapping_sub(2), iird);
+                    return true;
+                }
+                let pc = self.rd32(bus, pc_addr);
+                self.iird = (pc >> 16) as u16;
                 self.set_sr((self.sr() & 0xFF00) | (ccr & 0xFF));
                 self.set_a7(sp.wrapping_add(6));
                 self.pc = pc;
@@ -1233,8 +1330,9 @@ impl Mc68000 {
                 }
                 false
             }
-            _ if op & 0xFFF8 == 0x4E40 => {
-                // TRAP #n
+            _ if op & 0xFFF0 == 0x4E40 => {
+                // TRAP #n: the suite preloads the trap vectors at
+                // 0x80 + 4*n and sweeps the whole 4E40-4E4F row.
                 let vector = VEC_TRAP_BASE + u32::from(op & 0xF) * 4;
                 self.exception_at(bus, vector, self.instr_pc + 2);
                 true
@@ -1425,9 +1523,9 @@ impl Mc68000 {
     fn group_addq_scc(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
-        if op & 0x0100 == 0 && op & 0x00C0 != 0x00C0 {
-            // ADDQ/SUBQ: 0101 dnn0/1 modereg
-            // quick data: the field encodes 1-7 directly, 0 means 8
+        if op & 0x0100 != 0 && op & 0x00C0 != 0x00C0 {
+            // ADDQ/SUBQ: 0101 dnn 1 ss modereg (bit 8 is always set;
+            // the field encodes 1-7 directly, 0 means 8)
             let field = ((op >> 9) & 7) as u32;
             let data = if field == 0 { 8 } else { field };
             let size = self.size_from_bits((op >> 6) & 3);
@@ -1455,11 +1553,15 @@ impl Mc68000 {
             self.write_loc(bus, loc, size, r);
             return false;
         }
-        if op & 0x0100 != 0 && op & 0x0038 == 0x0008 {
-            // DBcc: 0101 cccc 11001 rrr. The displacement word is always
+        if op & 0x00F8 == 0x00C8 {
+            // DBcc: 0101 cccc 11001 rrr (any condition — bit 8 is the
+            // low condition bit). The displacement word is always
             // fetched; the loop branch fires only when the condition is
-            // false and the counter is not yet -1.
+            // false and the counter is not yet -1. The suite branches
+            // relative to the displacement word's own address, and a
+            // faulting target fetch pushes that address as well.
             let cond = ((op >> 8) & 0xF) as usize;
+            let base = self.pc;
             let d = self.fetch16(bus) as i16 as i32;
             if !self.cond(cond) {
                 let mut w = (self.d[reg as usize] & 0xFFFF) as i16;
@@ -1467,7 +1569,7 @@ impl Mc68000 {
                 self.d[reg as usize] =
                     (self.d[reg as usize] & !0xFFFF) | (w as u16 as u32);
                 if w != -1 {
-                    let target = self.pc.wrapping_add(d as u32);
+                    let target = base.wrapping_add(d as u32);
                     if target & 1 != 0 {
                         self.addr_error_hw(bus, target, 0x1E, target.wrapping_sub(4));
                         return true;
@@ -1478,7 +1580,7 @@ impl Mc68000 {
             return false;
         }
         if op & 0x00C0 == 0x00C0 {
-            // Scc: 0101 cccc 11 modereg
+            // Scc: 0101 cccc 11 modereg (any condition)
             let cond = ((op >> 8) & 0xF) as usize;
             let v = if self.cond(cond) { 0xFF } else { 0x00 };
             if self.ea_write_checked(bus, mode, reg, Size::Byte, v).is_none() {
@@ -1494,20 +1596,23 @@ impl Mc68000 {
     fn group_branch(&mut self, bus: &mut impl Bus, op: u16) -> bool {
         let cond = ((op >> 8) & 0xF) as usize;
         if op & 0x0F00 == 0x0100 {
-            // BSR (cond 0001). The faulting target fetch takes the
-            // address error before the return address commits; the
-            // real 68000 then completes the interrupted push with the
-            // internal register word (observed on the suite).
+            // BSR (cond 0001). The return-address push commits before
+            // the target fetch, so an odd target faults with the
+            // return address on the stack and the standard frame
+            // pushed below it.
+            let disp_base = self.pc;
             let taken_disp = if op & 0x00FF == 0 {
                 let d16 = self.fetch16(bus) as i16 as i32;
-                Some(d16)
+                // The return address is the address after the whole
+                // instruction; the displacement base is the extension
+                // word's own address (opcode + 2).
+                Some(disp_base.wrapping_add(d16 as u32))
             } else {
                 None
             };
-            let base = self.pc;
             let target = match taken_disp {
-                Some(d) => base.wrapping_add(d as u32),
-                None => base.wrapping_add(
+                Some(t) => t,
+                None => disp_base.wrapping_add(
                     if op & 0x80 != 0 {
                         (op & 0xFF) as i32 - 0x100
                     } else {
@@ -1515,13 +1620,13 @@ impl Mc68000 {
                     } as u32,
                 ),
             };
+            let return_addr = self.pc;
             if target & 1 != 0 {
-                self.addr_error_hw(bus, target, 0x1E, target.wrapping_sub(4));
-                let junk = (u32::from(op & 0xFFE0) | 0x1E) << 16;
-                self.push32(bus, junk);
+                self.push32(bus, return_addr);
+                self.addr_error_hw_iird(bus, target, 0x1E, target.wrapping_sub(4), op);
                 return true;
             }
-            self.push32(bus, base);
+            self.push32(bus, return_addr);
             self.pc = target;
             return false;
         }
@@ -1530,7 +1635,10 @@ impl Mc68000 {
         if op & 0x00FF == 0 {
             let d16 = self.fetch16(bus) as i16 as i32;
             if taken {
-                let target = branch_target(self.pc, d16);
+                // The displacement base is the extension word's own
+                // address (opcode + 2), not the address after the
+                // instruction.
+                let target = branch_target(self.instr_pc + 2, d16);
                 if target & 1 != 0 {
                     self.addr_error_hw(bus, target, 0x1E, target.wrapping_sub(4));
                     return true;
@@ -1627,60 +1735,57 @@ impl Mc68000 {
         }
         if op & 0x01C0 == 0x0100 {
             // SBCD Dy,Dx (register) or -(Ay),-(Ax): dst = bits 11-9,
-            // src = bits 2-0; byte ops through A7 step by 2.
+            // src = bits 2-0; byte accesses step the address register
+            // by 2 through A7 and by 1 otherwise, once per access.
             let mem_form = op & 0x0008 != 0;
-            let src = (op & 7) as usize;
-            let dst = ((op >> 9) & 7) as usize;
-            if mem_form {
-                let (ay, ax) = if src == dst {
-                    // same register: the silicon steps once
-                    let a = self.aget(src).wrapping_sub(self.step_for_reg(Size::Byte, src as u16));
-                    self.aset(src, a);
-                    (a, a)
-                } else {
-                    let ay = self
-                        .aget(src)
-                        .wrapping_sub(self.step_for_reg(Size::Byte, src as u16));
-                    self.aset(src, ay);
-                    let ax = self
-                        .aget(dst)
-                        .wrapping_sub(self.step_for_reg(Size::Byte, dst as u16));
-                    self.aset(dst, ax);
-                    (ay, ax)
-                };
-            }
-            let a = if mode == 0 {
-                self.d[src] & 0xFF
+            let sreg = (op & 7) as usize;
+            let dreg = ((op >> 9) & 7) as usize;
+            let (b, a, wr) = if mem_form {
+                let ay = self
+                    .aget(sreg)
+                    .wrapping_sub(self.step_for_reg(Size::Byte, sreg as u16));
+                self.aset(sreg, ay);
+                let ax = self
+                    .aget(dreg)
+                    .wrapping_sub(self.step_for_reg(Size::Byte, dreg as u16));
+                self.aset(dreg, ax);
+                (
+                    u32::from(self.rd8(bus, ay)),
+                    u32::from(self.rd8(bus, ax)),
+                    ax,
+                )
             } else {
-                u32::from(self.rd8(bus, self.aget(src)))
+                (self.d[sreg] & 0xFF, self.d[dreg] & 0xFF, 0)
             };
-            let b = if mode == 0 {
-                self.d[dst] & 0xFF
-            } else {
-                u32::from(self.rd8(bus, self.aget(dst)))
-            };
-            // Suite-derived (SingleStepTests) SBCD: total = dst-src-x;
-            // nibble correction -6 when the low sum went negative; carry =
-            // corrected total < 0; result +$A0 when borrowed; V = the
-            // signed 8-bit binary total went negative while the BCD result
-            // is non-negative; Z accumulates; N from the result byte.
+            // Suite-derived (SingleStepTests) SBCD: nibble-serial decimal
+            // subtraction — a nibble borrow takes a -6 correction and
+            // feeds the next nibble. C is the high-nibble borrow or a
+            // corrected byte that sank below zero; Z clears only on a
+            // nonzero result; N is bit 7 of the result; V is set when
+            // the once-corrected intermediate lands in the silicon's
+            // overflow window.
             let x = i32::from(self.fx);
-            let total = dst as i32 - src as i32 - x;
-            let lo_sum = (dst & 0xF) as i32 - (src & 0xF) as i32 - x;
-            let corf = if lo_sum < 0 { -6 } else { 0 };
-            let res2 = total + corf;
-            let borrow = res2 < 0;
-            let res = ((if borrow { res2 + 0xA0 } else { res2 }) & 0xFF) as u32;
-            if mode == 0 {
-                self.d[dst] = (self.d[dst] & !0xFF) | res;
+            let t = a as i32 - b as i32 - x;
+            let b0 = (((a & 0xF) as i32) - ((b & 0xF) as i32) - x) < 0;
+            let b1 = (((a >> 4) as i32) - ((b >> 4) as i32) - i32::from(b0)) < 0;
+            let u = t - 6 * i32::from(b0);
+            let res = ((u - 0x60 * i32::from(b1)) & 0xFF) as u32;
+            if mem_form {
+                self.wr8(bus, wr, res as u8);
             } else {
-                self.wr8(bus, self.aget(dst & 7), res as u8);
+                self.d[dreg] = (self.d[dreg] & !0xFF) | res;
             }
-            self.set_xc(borrow);
-            let t8 = ((total & 0xFF) as u8) as i8;
-            self.set_v(t8 < 0 && res & 0x80 == 0);
+            self.set_xc(b1 || u < 0);
+            self.set_v(match (b0, b1) {
+                (false, false) => false,
+                (false, true) => (-128..=-34).contains(&u),
+                (true, false) => (123..=126).contains(&u),
+                (true, true) => (-132..=-33).contains(&u),
+            });
+            if res != 0 {
+                self.fnz |= 0x40;
+            }
             self.fnz = (self.fnz & !0x8) | if res & 0x80 != 0 { 0x8 } else { 0 };
-            self.fnz |= res;
             return false;
         }
         // OR: 1000 rrr opmode modereg
@@ -1728,22 +1833,26 @@ impl Mc68000 {
             let (av, bv, wr) = if mem_form {
                 let sreg = (op & 7) as usize;
                 let dreg = ((op >> 9) & 7) as usize;
-                let (ay, ax) = if sreg == dreg {
-                    // same register: the silicon steps once
-                    let a = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(size, sreg as u16));
-                    self.aset(sreg, a);
-                    (a, a)
-                } else {
+                let (ay, ax) = {
                     let ay = self
                         .aget(sreg)
                         .wrapping_sub(self.step_for_reg(size, sreg as u16));
                     self.aset(sreg, ay);
+                    // A long or word access at an odd post-decrement
+                    // address raises an address error with the register
+                    // already stepped.
+                    if size != Size::Byte && ay & 1 != 0 {
+                        self.addr_error_hw(bus, ay, 0x15, self.pc.wrapping_sub(2));
+                        return true;
+                    }
                     let ax = self
                         .aget(dreg)
                         .wrapping_sub(self.step_for_reg(size, dreg as u16));
                     self.aset(dreg, ax);
+                    if size != Size::Byte && ax & 1 != 0 {
+                        self.addr_error_hw(bus, ax, 0x15, self.pc.wrapping_sub(2));
+                        return true;
+                    }
                     (ay, ax)
                 };
                 (
@@ -1865,19 +1974,29 @@ impl Mc68000 {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
         let opmode = (op >> 6) & 7;
-        // CMPM: 1011 rrr 1 sz 001 rrr
+        // CMPM: 1011 rrr 1 sz 001 rrr — (An)+,(An)+: both registers
+        // step by the operand size.
         if opmode & 4 != 0 && op & 0x0008 != 0 {
             let size = self.size_from_bits((op >> 6) & 3);
+            let step = match size {
+                Size::Byte => 1,
+                Size::Word => 2,
+                Size::Long => 4,
+            };
+            let a1 = (op & 7) as usize;
+            let a2 = ((op >> 9) & 7) as usize;
             let av = match size {
-                Size::Byte => u32::from(self.rd8(bus, self.aget((op & 7) as usize))),
-                Size::Word => u32::from(self.rd16(bus, self.aget((op & 7) as usize))),
-                Size::Long => self.rd32(bus, self.aget((op & 7) as usize)),
+                Size::Byte => u32::from(self.rd8(bus, self.aget(a1))),
+                Size::Word => u32::from(self.rd16(bus, self.aget(a1))),
+                Size::Long => self.rd32(bus, self.aget(a1)),
             };
             let bv = match size {
-                Size::Byte => u32::from(self.rd8(bus, self.aget(((op >> 9) & 7) as usize))),
-                Size::Word => u32::from(self.rd16(bus, self.aget(((op >> 9) & 7) as usize))),
-                Size::Long => self.rd32(bus, self.aget(((op >> 9) & 7) as usize)),
+                Size::Byte => u32::from(self.rd8(bus, self.aget(a2))),
+                Size::Word => u32::from(self.rd16(bus, self.aget(a2))),
+                Size::Long => self.rd32(bus, self.aget(a2)),
             };
+            self.aset(a1, self.aget(a1).wrapping_add(step));
+            self.aset(a2, self.aget(a2).wrapping_add(step));
             let _ = self.do_sub_x(bv, av, size, false);
             return false;
         }
@@ -1951,7 +2070,9 @@ impl Mc68000 {
             11 => n,
             12 => n == v,
             13 => n != v,
-            14 => !z && n == v,
+            // Suite-derived (SingleStepTests): the silicon's GT is only
+            // true when C, V, N and Z are all clear.
+            14 => !z && !n && !v && !cflag,
             _ => z || n != v,
         }
     }
@@ -1962,27 +2083,17 @@ impl Mc68000 {
         if op & 0x0100 != 0 && op & 0x01C0 == 0x0100 && op & 0x0030 == 0 {
             // ABCD: memory form at bit 3
             let mem_form = op & 0x0008 != 0;
+            let sreg = (op & 7) as usize;
+            let dreg = ((op >> 9) & 7) as usize;
             let (av, bv, wr) = if mem_form {
-                let sreg = (op & 7) as usize;
-                let dreg = ((op >> 9) & 7) as usize;
-                let (ay, ax) = if sreg == dreg {
-                    // same register: the silicon steps once
-                    let a = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(Size::Byte, sreg as u16));
-                    self.aset(sreg, a);
-                    (a, a)
-                } else {
-                    let ay = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(Size::Byte, sreg as u16));
-                    self.aset(sreg, ay);
-                    let ax = self
-                        .aget(dreg)
-                        .wrapping_sub(self.step_for_reg(Size::Byte, dreg as u16));
-                    self.aset(dreg, ax);
-                    (ay, ax)
-                };
+                let ay = self
+                    .aget(sreg)
+                    .wrapping_sub(self.step_for_reg(Size::Byte, sreg as u16));
+                self.aset(sreg, ay);
+                let ax = self
+                    .aget(dreg)
+                    .wrapping_sub(self.step_for_reg(Size::Byte, dreg as u16));
+                self.aset(dreg, ax);
                 (
                     u32::from(self.rd8(bus, ay)),
                     u32::from(self.rd8(bus, ax)),
@@ -1995,33 +2106,47 @@ impl Mc68000 {
                     0,
                 )
             };
-            // Suite-derived (SingleStepTests) ABCD: total = src+dst+x;
-            // nibble correction +6 when the low sum exceeded 9; carry =
-            // corrected total > $9F; result -$A0 when carried; V = the
-            // signed 8-bit binary total stayed non-negative while the BCD
-            // result is negative; Z accumulates; N from the result byte.
+            // Suite-derived (SingleStepTests) ABCD: nibble-serial decimal
+            // addition — a nibble sum above 9 takes a +6 correction and
+            // its carry (which can exceed one for invalid digits) feeds
+            // the next nibble. C is the high-nibble carry; Z clears only
+            // on a nonzero result; N is bit 7 of the result; V is set
+            // when the corrected intermediate lands in the silicon's
+            // overflow window.
             let x = i32::from(self.fx);
-            let total = av as i32 + bv as i32 + x;
-            let lo_sum = (av & 0xF) as i32 + (bv & 0xF) as i32 + x;
-            let corf = if lo_sum > 9 { 6 } else { 0 };
-            let res2 = total + corf;
-            let carry = res2 > 0x9F;
-            let res = ((if carry { res2 - 0xA0 } else { res2 }) & 0xFF) as u32;
+            let t = av as i32 + bv as i32 + x;
+            let mut s0 = ((av & 0xF) as i32) + ((bv & 0xF) as i32) + x;
+            let c0 = s0 > 9;
+            if c0 {
+                s0 += 6;
+            }
+            let mut s1 = ((av >> 4) as i32) + ((bv >> 4) as i32) + (s0 >> 4);
+            let c1 = s1 > 9;
+            if c1 {
+                s1 += 6;
+            }
+            let res = (((s1 & 0xF) << 4) | (s0 & 0xF)) as u32;
             if mem_form {
                 self.wr8(bus, wr, res as u8);
             } else {
                 let rn = ((op >> 9) & 7) as usize;
                 self.d[rn] = (self.d[rn] & !0xFF) | res;
             }
-            self.set_xc(carry);
-            let t8 = ((total & 0xFF) as u8) as i8;
-            self.set_v(t8 >= 0 && res & 0x80 != 0);
+            self.set_xc(c1);
+            self.set_v(if c1 {
+                res & 0xC0 == 0x80
+            } else {
+                c0 && (0x80..=0x85).contains(&(t + 6))
+            });
+            if res != 0 {
+                self.fnz |= 0x40;
+            }
             self.fnz = (self.fnz & !0x8) | if res & 0x80 != 0 { 0x8 } else { 0 };
-            self.fnz |= res;
             return false;
         }
-        if (op >> 8) & 0xFE == 0xC0 && op & 0x00C0 == 0x00C0 {
-            // MULU (C0C0) / MULS (C1C0)
+        // MULU (C0C0) / MULS (C1C0) — any destination register in bits
+        // 11-9 (suite-derived; the suite always clears V).
+        if op & 0xF0C0 == 0xC0C0 {
             let signed = op & 0x0100 != 0;
             let m = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
                     Some(l) => self.read_loc(bus, l, Size::Word),
@@ -2113,22 +2238,26 @@ impl Mc68000 {
             let (av, bv, wr) = if mem_form {
                 let sreg = (op & 7) as usize;
                 let dreg = ((op >> 9) & 7) as usize;
-                let (ay, ax) = if sreg == dreg {
-                    // same register: the silicon steps once
-                    let a = self
-                        .aget(sreg)
-                        .wrapping_sub(self.step_for_reg(size, sreg as u16));
-                    self.aset(sreg, a);
-                    (a, a)
-                } else {
+                let (ay, ax) = {
                     let ay = self
                         .aget(sreg)
                         .wrapping_sub(self.step_for_reg(size, sreg as u16));
                     self.aset(sreg, ay);
+                    // A long or word access at an odd post-decrement
+                    // address raises an address error with the register
+                    // already stepped.
+                    if size != Size::Byte && ay & 1 != 0 {
+                        self.addr_error_hw(bus, ay, 0x15, self.pc.wrapping_sub(2));
+                        return true;
+                    }
                     let ax = self
                         .aget(dreg)
                         .wrapping_sub(self.step_for_reg(size, dreg as u16));
                     self.aset(dreg, ax);
+                    if size != Size::Byte && ax & 1 != 0 {
+                        self.addr_error_hw(bus, ax, 0x15, self.pc.wrapping_sub(2));
+                        return true;
+                    }
                     (ay, ax)
                 };
                 (
