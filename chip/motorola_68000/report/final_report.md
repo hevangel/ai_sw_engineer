@@ -1,8 +1,8 @@
-# MC68000 core — status report (2026-10-26/28)
+# MC68000 core — status report (2026-10-26/29)
 
 ## Result
 
-**919,487 / 1,000,060 SingleStepTests vectors pass (91.9%).** The
+**925,541 / 1,000,060 SingleStepTests vectors pass (92.6%).** The
 target is zero mismatches (PR #269 states "do not merge until the
 replay reaches zero mismatches"); the core is not mergeable yet.
 
@@ -29,14 +29,19 @@ both executors — reproducing the LLVM flag-clobber miscompile
   (SSW labels, IIRD latching), BSR fault sequence (return push commits
   before the frame), TRAP vectors at 0x80+4n, two-step fetch-fault
   semantics.
+- DIVU/DIVS word forms, fully passing (16,130 rows): remainder high
+  word / quotient low word, N and Z from the quotient alone, V forced
+  clear, C cleared, X preserved; overflow leaves the operands and all
+  other flags untouched with V set; divide-by-zero stacks the
+  instruction address and SR with N, Z and C cleared.
 
-## Gaps (roughly 80,573 rows)
+## Gaps (roughly 74,519 rows)
 
 | Class | Rows (approx) | Blocker |
 | --- | --- | --- |
 | to-SR family (MOVEtoSR/ORItoSR/EORItoSR) + CMP/CMPA mode-7 rows | ~19,000 | suite's reference memory holds non-zero bytes the vector init list does not provide (operands like 0x7F/0x80 appear in the expected state but nowhere in init) |
 | RTE | ~5,900 | odd-stack pops and format-fault frames need their own model |
-| DIVU / MOVEP.w / MOVEM.w / ORItoSR-EORItoSR-TRAP corner rows | ~11,000 | per-row corners, mostly flags and fault slots |
+| MOVEP.w / MOVEM.w / ORItoSR-EORItoSR-TRAP corner rows | ~7,000 | per-row corners, mostly flags and fault slots |
 | BCHG/BSET/BCLR/CHK/DBcc/Scc/CMP.b-mode-4 residues | ~1,600 | small per-row corners |
 
 ## Verification commands

@@ -291,12 +291,14 @@ impl Mc68000 {
 
     /// Exception with an explicit frame PC: group-2 exceptions (TRAP,
     /// TRAPV, CHK, divide by zero) report the instruction address + 2.
+    /// Entry forces supervisor mode and clears T; the interrupt mask is
+    /// kept (suite: an RTE format fault with a popped mask of 5 stays 5).
     fn exception_at(&mut self, bus: &mut impl Bus, vector: u32, pc: u32) {
         let sr = self.sr();
         self.sri |= SR_S;
         self.push32(bus, pc);
         self.push16(bus, sr);
-        self.sri = (self.sri | SR_I) & !SR_T;
+        self.sri &= !SR_T;
         let vec_addr = vector & !1;
         let new_pc = self.rd32(bus, vec_addr);
         self.pc = new_pc;
@@ -333,7 +335,7 @@ impl Mc68000 {
         self.push16(bus, addr as u16);
         self.push16(bus, (addr >> 16) as u16);
         self.push16(bus, (op & 0xFFE0) | ssw);
-        self.sri = (self.sri | SR_I) & !SR_T;
+        self.sri &= !SR_T;
         let new_pc = self.rd32(bus, VEC_ADDRERR);
         self.pc = new_pc;
     }
@@ -576,9 +578,12 @@ impl Mc68000 {
         let op = self.fetch16(bus);
         self.op = op;
         self.iird = op;
+        // Trace samples T as of the instruction START: an instruction
+        // that itself loads T=1 (ORI/EORI/MOVE to SR, RTE) completes
+        // without tracing (suite-fitted).
+        let trace_in = self.sri & SR_T != 0;
         let exception = self.dispatch(bus, op);
-        // Trace fires after a retired instruction if T is set.
-        if !exception && self.sri & SR_T != 0 {
+        if !exception && trace_in {
             self.exception(bus, VEC_TRACE);
             return StepInfo { pc: self.instr_pc, exception: true };
         }
@@ -995,23 +1000,30 @@ impl Mc68000 {
             // 4000-40BF would be NEGX (handled below at 0x40).
             0x40 | 0x41 | 0x42 | 0x43 => {
                 if op >> 8 == 0x40 && op & 0x01C0 == 0x00C0 {
-                    // MOVE SR,<ea> (40C0-40FF). Suite-derived: memory
-                    // modes 3 and 4 are swapped — a 40D0-row writes
-                    // through (An)+ and a 40E0-row through -(An); the
-                    // faulting access is labelled a read (SSW 0x15).
+                    // MOVE SR,<ea> (40C0-40FF). Canonical (An)+/-(An)
+                    // stepping; the register steps commit before a
+                    // faulting write and the fault address is the write
+                    // address, labelled a read (SSW 0x15).
                     let v = u32::from(self.sr());
-                    let ea_mode = match mode {
-                        3 => 4,
-                        4 => 3,
-                        m => m,
-                    };
                     if mode < 2 {
-                        self.write_ea(bus, ea_mode, reg, Size::Word, v);
+                        self.write_ea(bus, mode, reg, Size::Word, v);
                         return false;
                     }
-                    let addr = match self.ea_addr(bus, ea_mode, reg, Size::Word) {
-                        Some(a) => a,
-                        None => return true,
+                    let addr = match mode {
+                        3 => {
+                            let a = self.aget(reg as usize);
+                            self.aset(reg as usize, a.wrapping_add(2));
+                            a
+                        }
+                        4 => {
+                            let a = self.aget(reg as usize).wrapping_sub(2);
+                            self.aset(reg as usize, a);
+                            a
+                        }
+                        _ => match self.ea_addr(bus, mode, reg, Size::Word) {
+                            Some(a) => a,
+                            None => return true,
+                        },
                     };
                     if addr & 1 != 0 {
                         self.addr_error_hw(bus, addr, 0x15, self.pc.wrapping_sub(2));
@@ -1074,8 +1086,10 @@ impl Mc68000 {
                     self.set_sr((self.sr() & 0xFF00) | (v as u16 & 0xFF));
                     return false;
                 }
-                if op >> 8 == 0x46 && op & 0x01C0 == 0x01C0 {
-                    // MOVE <ea>,SR — privileged
+                if op >> 8 == 0x46 && op & 0x01C0 == 0x00C0 {
+                    // MOVE <ea>,SR (46C0-46FF) — privileged. The golden
+                    // masks the loaded SR to T|S|I|CCR (0xA71F); set_sr
+                    // already keeps exactly those bits.
                     if self.priv_check(bus) {
                         return true;
                     }
@@ -1274,6 +1288,16 @@ impl Mc68000 {
                 let sr = self.rd16(bus, sp);
                 let pc = self.rd32(bus, sp.wrapping_add(2));
                 self.set_a7(sp.wrapping_add(6));
+                if pc & 1 != 0 {
+                    // RTE to an odd address: the fault frame's internal
+                    // word is 0x1E while the popped SR keeps supervisor
+                    // mode and 0x1A once the RTE would have dropped to
+                    // user mode; the fault address is the popped PC.
+                    self.set_sr(sr);
+                    let ssw = if sr & SR_S != 0 { 0x1E } else { 0x1A };
+                    self.addr_error_hw_iird(bus, pc, ssw, pc.wrapping_sub(4), self.op);
+                    return true;
+                }
                 self.set_sr(sr);
                 self.pc = pc;
                 false
@@ -1668,45 +1692,58 @@ impl Mc68000 {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
         if op & 0x01C0 == 0x00C0 {
-            // DIVU <ea>,Dn
+            // DIVU <ea>,Dn: dividend is Dq (bits 11-9); on success the
+            // high word holds the remainder and the low word the quotient.
+            let dq = ((op >> 9) & 7) as usize;
             let size = Size::Word;
             let divisor = { match self.ea_loc(bus, mode, reg, size, false) {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
                 } } as u16;
             if divisor == 0 {
-                self.exception_at(bus, VEC_DIV0, self.instr_pc + 2);
+                // Suite: the divide-by-zero frame stacks the instruction
+                // address and SR with N, Z and C cleared; X and V keep
+                // their values.
+                self.fnz = (self.fnz | 0x40) & !0x8;
+                self.fc &= !0x100;
+                self.exception_at(bus, VEC_DIV0, self.instr_pc);
                 return true;
             }
-            let dividend = self.d[reg as usize];
+            let dividend = self.d[dq];
             let q = dividend / u32::from(divisor);
             let rem = dividend % u32::from(divisor);
             if q > 0xFFFF {
-                // overflow: operands unaffected, N cleared, V set
-                self.fnz &= !0x8;
+                // overflow: operands unaffected, V set, C cleared, all
+                // other flags keep their values
                 self.set_v(true);
                 self.fc &= !0x100;
                 return false;
             }
-            self.d[reg as usize] = (q << 16) | (rem & 0xFFFF);
-            let out = q | rem;
-            self.set_nz(out, Size::Word);
+            self.d[dq] = (rem << 16) | q;
+            // N and Z come from the quotient alone; V is forced clear
+            // and X keeps its value.
+            self.set_nz(q, Size::Word);
             self.fv = 0;
             self.fc &= !0x100;
             return false;
         }
         if op & 0x01C0 == 0x01C0 {
-            // DIVS <ea>,Dn: 32-bit signed dividend, 16-bit signed
-            // divisor, quotient in the high word.
+            // DIVS <ea>,Dn: signed 32-bit dividend, 16-bit signed
+            // divisor, remainder in the high word, quotient in the low
+            // word.
+            let dq = ((op >> 9) & 7) as usize;
             let divisor = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
                     Some(l) => self.read_loc(bus, l, Size::Word),
                     None => return true,
                 } } as u16 as i16;
             if divisor == 0 {
-                self.exception_at(bus, VEC_DIV0, self.instr_pc + 2);
+                // Same divide-by-zero frame rule as DIVU.
+                self.fnz = (self.fnz | 0x40) & !0x8;
+                self.fc &= !0x100;
+                self.exception_at(bus, VEC_DIV0, self.instr_pc);
                 return true;
             }
-            let dividend = self.d[reg as usize] as i32;
+            let dividend = self.d[dq] as i32;
             match dividend.checked_div(i32::from(divisor)) {
                 None => {
                     // $80000000 / -1 overflows
@@ -1716,17 +1753,16 @@ impl Mc68000 {
                 }
                 Some(q) => {
                     let rem = dividend % i32::from(divisor);
-                    let q = q as i32;
                     if q < -0x8000 || q > 0x7FFF {
-                        // overflow: operands unaffected
+                        // overflow: operands unaffected, V set, C
+                        // cleared, other flags keep their values
                         self.set_v(true);
                         self.fc &= !0x100;
                         return false;
                     }
-                    self.d[reg as usize] =
-                        (((q as u16) as u32) << 16) | ((rem as i16) as u16) as u32;
-                    let out = (q as u16 as u32) | ((rem as i16) as u16) as u32;
-                    self.set_nz(out, Size::Word);
+                    self.d[dq] =
+                        (((rem as i16) as u16 as u32) << 16) | (q as u16 as u32);
+                    self.set_nz(q as u32, Size::Word);
                     self.fv = 0;
                     self.fc &= !0x100;
                     return false;
@@ -1974,29 +2010,23 @@ impl Mc68000 {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
         let opmode = (op >> 6) & 7;
-        // CMPM: 1011 rrr 1 sz 001 rrr — (An)+,(An)+: both registers
-        // step by the operand size.
-        if opmode & 4 != 0 && op & 0x0008 != 0 {
+        // CMPM: 1011 rrr 1 sz 001 rrr — the suite only maps opmodes 5/6
+        // (word/long-shaped byte rows) to CMPM; opmode 7 with bits 5:3
+        // = 001 is CMPA.L with an address-register-direct operand.
+        // Reads go through ea_loc so an odd (An)+ faults with the step
+        // already committed.
+        if (op & 0x01C0 == 0x0140 || op & 0x01C0 == 0x0180) && op & 0x0038 == 0x0008 {
             let size = self.size_from_bits((op >> 6) & 3);
-            let step = match size {
-                Size::Byte => 1,
-                Size::Word => 2,
-                Size::Long => 4,
-            };
             let a1 = (op & 7) as usize;
             let a2 = ((op >> 9) & 7) as usize;
-            let av = match size {
-                Size::Byte => u32::from(self.rd8(bus, self.aget(a1))),
-                Size::Word => u32::from(self.rd16(bus, self.aget(a1))),
-                Size::Long => self.rd32(bus, self.aget(a1)),
-            };
-            let bv = match size {
-                Size::Byte => u32::from(self.rd8(bus, self.aget(a2))),
-                Size::Word => u32::from(self.rd16(bus, self.aget(a2))),
-                Size::Long => self.rd32(bus, self.aget(a2)),
-            };
-            self.aset(a1, self.aget(a1).wrapping_add(step));
-            self.aset(a2, self.aget(a2).wrapping_add(step));
+            let av = { match self.ea_loc(bus, 3, a1 as u16, size, false) {
+                    Some(l) => self.read_loc(bus, l, size),
+                    None => return true,
+                } };
+            let bv = { match self.ea_loc(bus, 3, a2 as u16, size, false) {
+                    Some(l) => self.read_loc(bus, l, size),
+                    None => return true,
+                } };
             let _ = self.do_sub_x(bv, av, size, false);
             return false;
         }
@@ -2018,7 +2048,7 @@ impl Mc68000 {
                 } };
                 let v = ((v as u16) as i16 as i32) as u32;
                 let rn = ((op >> 9) & 7) as usize;
-                let _ = self.do_sub(self.aget(rn), v, Size::Long);
+                let _ = self.do_sub_x(self.aget(rn), v, Size::Long, false);
                 false
             }
             4 | 5 | 6 => {
@@ -2040,7 +2070,7 @@ impl Mc68000 {
                     None => return true,
                 } };
                 let rn = ((op >> 9) & 7) as usize;
-                let _ = self.do_sub(self.aget(rn), v, Size::Long);
+                let _ = self.do_sub_x(self.aget(rn), v, Size::Long, false);
                 false
             }
             _ => {

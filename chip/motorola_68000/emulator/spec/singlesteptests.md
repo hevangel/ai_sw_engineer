@@ -15,13 +15,29 @@ manual.
 
 ## Current replay state
 
-919,487 / 1,000,060 passing (91.9%). Remaining classes: the to-SR
+925,541 / 1,000,060 passing (92.6%). Remaining classes: the to-SR
 family and the CMP/CMPA mode-7 rows (both read operands from the
 suite's non-zero reference memory — bytes exist in the reference
 final state but not in the vector init list), RTE (odd-stack and
-format faults), DIVU, MOVEP.w, MOVEM.w, ORItoSR/EORItoSR, and small
+format faults), MOVEP.w, MOVEM.w, ORItoSR/EORItoSR, and small
 residues (CHK 490, BCHG/BSET/BCLR ~300 each, DBcc 94, Scc 92, CMP.b
 mode-4 rows 122).
+
+## Fitted this round (session 3)
+
+- **DIVU/DIVS word forms** (both files now fully pass): remainder in
+  the high word, quotient in the low word of Dq (bits 11-9); N = bit
+  15 of the quotient, Z = quotient word zero, V forced clear, C
+  cleared, X preserved. Overflow (quotient out of 16 bits, or
+  $80000000/−1 for DIVS) leaves the operands and N/Z/X untouched with
+  V set and C cleared. Divide-by-zero stacks the **instruction
+  address** (not pc+2) and SR with **N, Z and C cleared** (X, V
+  preserved); only one memory-operand divzero row exists per DIV
+  file, and register-divisor divzero rows don't occur at all.
+- The suite's "divzero-looking" rows at handler 0x1400 are actually
+  **address-error rows** (out-of-range or odd EAs) — distinguish by
+  the actual zero divisor read in the transaction list, not by the
+  handler address.
 
 ## Fitted this round (session 2)
 
