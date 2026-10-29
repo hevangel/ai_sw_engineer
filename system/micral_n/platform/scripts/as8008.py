@@ -19,6 +19,7 @@ Accepted syntax (the subset these sources use):
     `RST n`, `INP n`, `OUT n`, ...).
 The output covers the lowest to the highest address written.
 """
+import pathlib
 import re
 import sys
 
@@ -222,6 +223,15 @@ class Asm:
         return mem, listing
 
 
+def safe_out(path):
+    """CLI output path: relative paths must stay inside the working
+    directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"refusing relative output outside the working directory: {path}")
+    return p
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
@@ -237,9 +247,9 @@ def main():
     lo = a.origin if a.origin is not None else min(mem)
     hi = max(mem) + 1
     img = bytes(mem.get(i, 0) for i in range(lo, hi))
-    open(a.out, "wb").write(img)
+    safe_out(a.out).write_bytes(img)
     if a.listing:
-        open(a.listing, "w").write("\n".join(listing) + "\n")
+        safe_out(a.listing).write_text("\n".join(listing) + "\n")
     print(f"as8008: {a.out}: {len(img)} B at 0x{lo:04X}")
 
 

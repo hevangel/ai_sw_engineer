@@ -8,6 +8,7 @@ body, and copies D1's four nibbles into RAM chip0 reg0 chars 0..3 so run_fn's
 `result16` reconstructs the 16-bit value. Compared against the host.
 """
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -19,6 +20,15 @@ LLC = os.environ.get("LLC", os.path.join(BIN, "llc"))
 LLVM_MC = os.environ.get("LLVM_MC", os.path.join(BIN, "llvm-mc"))
 LLVM_OBJDUMP = os.environ.get("LLVM_OBJDUMP", os.path.join(BIN, "llvm-objdump"))
 XCHECK = os.path.join(ROOT, "tools", "chips_xcheck")
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 
 def run(cmd, **kw):
@@ -87,9 +97,8 @@ def build_rom(body, x, y):
     asm += ["halt:", "    jun halt"]
     src_text = "\n".join(asm) + "\n"
     with tempfile.TemporaryDirectory() as d:
-        sp, op = os.path.join(d, "d.s"), os.path.join(d, "d.o")
-        with open(sp, "w") as f:
-            f.write(src_text)
+        sp, op = contained(d, "d.s"), contained(d, "d.o")
+        sp.write_text(src_text)
         run([LLVM_MC, "-triple=i4004", "-filetype=obj", sp, "-o", op])
         dump = run([LLVM_OBJDUMP, "-s", "-j", ".text", op]).stdout
     return parse_objdump_text(dump)

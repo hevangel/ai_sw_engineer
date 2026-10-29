@@ -9,7 +9,17 @@ instantiates sixteen 4001s and $readmemh-loads every mask slot); high chips with
 no image bytes are written as all-zero masks.
 """
 import os
+import pathlib
 import sys
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 
 
 def main():
@@ -33,9 +43,8 @@ def main():
     for chip in range(chips):
         seg = data[chip * 256:(chip + 1) * 256]
         seg = seg + bytes(256 - len(seg))
-        path = os.path.join(out_dir, f"rom_4001_{chip}.hex")
-        with open(path, "w", newline="\n") as fh:
-            fh.write("".join("%02x\n" % b for b in seg))
+        path = contained(out_dir, f"rom_4001_{chip}.hex")
+        path.write_text("".join("%02x\n" % b for b in seg), newline="\n")
     print(f"split {len(data)} bytes into {chips} x 4001 mask hex files in {out_dir}")
 
 

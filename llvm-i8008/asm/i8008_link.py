@@ -33,6 +33,7 @@ __bss_start and __bss_end.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import struct
 import sys
 from dataclasses import dataclass, field
@@ -40,6 +41,16 @@ from dataclasses import dataclass, field
 EM_I8008 = 0x8008
 SHT_PROGBITS, SHT_SYMTAB, SHT_RELA, SHT_NOBITS = 1, 2, 4, 8
 SHF_ALLOC = 0x2
+
+
+def safe_out(path):
+    """CLI output path: relative paths must stay inside the working
+    directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"i8008_link: refusing relative output outside the "
+                         f"working directory: {path}")
+    return p
 SHN_UNDEF, SHN_ABS, SHN_COMMON = 0, 0xFFF1, 0xFFF2
 R_NONE, R_16, R_LO8, R_HI8, R_8 = 0, 1, 2, 3, 4
 STT_FUNC = 2
@@ -628,9 +639,9 @@ def main(argv=None):
     except LinkError as e:
         print(f"i8008_link: error: {e}", file=sys.stderr)
         return 1
-    open(a.output, "wb").write(img)
+    safe_out(a.output).write_bytes(img)
     if a.map:
-        open(a.map, "w").write(lk.map_text())
+        safe_out(a.map).write_text(lk.map_text())
     print(f"i8008_link: {a.output}: {len(img)} B at 0x{lk.lay.code[0]:04x}, "
           f"code {lk.code_end - lk.lay.code[0]} B, RAM to 0x{lk.frames_end:04x}, "
           f"depth {lk.worst}/{lk.lay.depth}")

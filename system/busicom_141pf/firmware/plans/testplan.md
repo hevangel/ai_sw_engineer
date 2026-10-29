@@ -10,6 +10,7 @@ scores 42/42 on the ai_hw_engineer RTL, on both the stock and the xl board.
 | Unit | BCD primitives, key buffer, lamps, row formatting | hand-checked values | `cargo test --lib` |
 | BCD properties | `add`/`mul`/`div`/`sqrt`/`round` on random operands; division truncation against exact decimal arithmetic; regressions (division scale shortfall); the new RAM-register core against the pre-issue-#18 core (`tests/legacy/bcd_old.rs`) | exact arithmetic + the old core | `cargo test --test bcd_equivalence` |
 | Manual replay | 42 examples, 135 checkpoints, recovered-ROM profile | `oracle/manual_examples.json` | `cargo test --test manual_examples -- --nocapture` |
+| Random corpus | 1000 seeded mixed-operation programs (add/subtract chains, constants, powers, EX, percent, sqrt, memory, capacity overflows) | `oracle/random_calculator_tests.json` — expected tapes computed by this crate's host core (dump tool in `tests/random_calculator_tests.rs`); the same corpus cross-checks the core against the original ROM on the system emulator | `cargo test --test random_calculator_tests` |
 | Port level (M3) | drivers + core on the host board model | same JSON | `cargo test --test port_level -- --nocapture` |
 | Exact tape (M3) | every printed row (value, both symbol columns, red) and the 4-bit lamp nibble per step | `oracle/rom_port_trace.txt` | `cargo test --test port_trace` |
 | Assembly routines (issue #18) | each `asm/num.s` routine linked by the real packer and run on external/chips with random inputs, against its Rust twin (`examples/num_twin.rs`) | the Rust twin (itself held to exact arithmetic above) | `python3 scripts/exec_num.py 200` (4,600 cases) |
@@ -31,4 +32,10 @@ Rules:
   failure note.
 
 Known gaps: type-ahead while the target is busy is not tested (spec M3-K3).
-The full-image tests cover only the 42 manual examples.
+The full-image tests cover only the 42 manual examples. The random corpus
+excludes the regions where this crate's core still disagrees with the
+original ROM (FL result widths, width-14 exact products, zero-result
+scaling, sqrt of a non-DP-scaled radicand, `M±` entries with more decimals
+than DP — see
+`failure_notes/2026-10-25-busicom-141pf-random-corpus-divergences.md`);
+each exclusion shrinks back to nothing as the core is corrected.

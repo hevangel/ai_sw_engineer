@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import os
+import pathlib
 import struct
 import sys
 from dataclasses import dataclass, field
@@ -2605,6 +2606,16 @@ def parse_memory_from_ld(path):
     return regions
 
 
+def safe_out(path):
+    """Validate an output path from argv: relative paths must stay inside the
+    working directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"i4004_pack: refusing relative output outside the "
+                         f"working directory: {path}")
+    return p
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="i4004 ELF -> ROM image packer/linker")
     ap.add_argument("objects", nargs="+", help="ELF32 relocatable objects (from llvm-mc)")
@@ -2723,8 +2734,7 @@ def main(argv=None):
             ln._place_rom()
             ln._place_ram()
             ln._linker_defined()
-            with open(args.emit_trampolines, "w") as fh:
-                fh.write(ln.emit_trampolines_source())
+            safe_out(args.emit_trampolines).write_text(ln.emit_trampolines_source())
             n = len(ln.cross_bank_callees())
             print(f"wrote {args.emit_trampolines}: {n} cross-bank trampolines",
                   file=sys.stderr)
@@ -2736,11 +2746,9 @@ def main(argv=None):
         ln.link()
         pad_to = args.pad
         binimg = ln.rom_bin(pad_to=pad_to)
-        with open(args.output, "wb") as fh:
-            fh.write(binimg)
+        safe_out(args.output).write_bytes(binimg)
         if args.mapfile:
-            with open(args.mapfile, "w") as fh:
-                fh.write(ln.mapfile())
+            safe_out(args.mapfile).write_text(ln.mapfile())
         print(f"wrote {args.output}: {len(binimg)} bytes", file=sys.stderr)
     except LinkError as e:
         print(f"i4004_pack: link error: {e}", file=sys.stderr)

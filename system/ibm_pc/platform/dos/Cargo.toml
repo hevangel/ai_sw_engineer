@@ -1,0 +1,12 @@
+[package]
+name = "ibm_pc_dos"
+version = "0.1.0"
+edition = "2021"
+description = "PC DOS 1.x function calls (INT 21h) for programs built with llvm-i8086"
+license = "MIT"
+publish = false
+
+[features]
+# Define #[panic_handler] (on by default; one per program).
+default = ["panic-handler"]
+panic-handler = []

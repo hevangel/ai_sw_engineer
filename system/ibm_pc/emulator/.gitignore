@@ -1,0 +1,3 @@
+
+# floppy images linked for the RTL boot oracle (rebuilt by scripts/rtl_boot_images.sh)
+oracle/boot/images/

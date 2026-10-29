@@ -1,0 +1,14 @@
+# RUN: llvm-mc --disassemble -triple=i8086 %s 2>%t.err | FileCheck %s
+# RUN: FileCheck %s --check-prefix=ERR < %t.err
+#
+# Bytes that are not 8086 instructions are rejected one byte at a time and
+# decoding resumes: POP CS (0F), the 80186 PUSHA (60) and ENTER (C8), the
+# undocumented SALC (D6), and MOV to CS (8E /1, which also leaves C8 behind).
+# Each is followed by a NOP to show the decoder resynchronises.
+0x0f 0x90
+0x60 0x90
+0xd6 0x90
+0xc8 0x90
+0x8e 0xc8 0x90
+# CHECK-COUNT-5: nop
+# ERR-COUNT-6: warning: invalid instruction encoding

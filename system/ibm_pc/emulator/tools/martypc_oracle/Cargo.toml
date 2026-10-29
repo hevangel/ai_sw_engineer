@@ -1,0 +1,16 @@
+[package]
+name = "martypc_oracle"
+version = "0.1.0"
+edition = "2021"
+description = "Boots a floppy image on MartyPC's cycle-accurate IBM PC model (validated against real 8088 hardware) and prints the screen: a third, independent oracle for the boot images"
+license = "MIT"
+publish = false
+
+# MartyPC (external/martypc, MIT) is used as a library, unmodified.
+[dependencies]
+marty_core = { path = "../../../../../external/martypc/crates/lib/marty_core" }
+anyhow = "1"
+marty_common = { path = "../../../../../external/martypc/crates/lib/marty_common" }
+
+# not part of the emulator's workspace: MartyPC pulls in its own dependency tree
+[workspace]

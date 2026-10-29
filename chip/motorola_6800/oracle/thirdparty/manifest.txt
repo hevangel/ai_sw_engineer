@@ -1,0 +1,1 @@
+adc adcsbc add arithmetic asl asl2 asr bge bgt bhi ble bls blt branch branchback bsr bvc bvs carry clear cmp com com2_test complex conditions cpx dec dex flags inc incdecadd incs indexed insdes inx jmpidx jsr jump loadstore logic lsr momulator neg sbc stack stack2 stack3 sub swi tst
