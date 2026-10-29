@@ -2257,7 +2257,9 @@ impl Mc68000 {
             }
             self.set_xc(c1);
             self.set_v(if c1 {
-                res & 0xC0 == 0x80
+                // The golden sets V for corrected results 0x80-0xEF and
+                // leaves it clear for 0xF0-0xFF.
+                (res & 0x80) != 0 && (res & 0xF0) != 0xF0
             } else {
                 c0 && (0x80..=0x85).contains(&(t + 6))
             });
