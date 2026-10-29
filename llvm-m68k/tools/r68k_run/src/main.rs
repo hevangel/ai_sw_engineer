@@ -24,7 +24,14 @@ const INPUT_BYTES: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
 /// Canonicalize the CLI-provided image path and refuse anything that climbs
 /// out of the working directory (SAST path-traversal guard).
 fn load_image(arg: &str) -> std::io::Result<Vec<u8>> {
-    let p = PathBuf::from(arg).canonicalize()?;
+    let mut p = PathBuf::from(arg).canonicalize()?;
+    // Windows canonicalize returns a verbatim (\\?\) path; strip it so
+    // the containment check compares like with like.
+    if let Some(s) = p.to_str() {
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            p = PathBuf::from(stripped);
+        }
+    }
     let cwd = std::env::current_dir()?;
     if !p.starts_with(&cwd) {
         return Err(std::io::Error::new(
@@ -40,8 +47,22 @@ fn load_image(arg: &str) -> std::io::Result<Vec<u8>> {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let arg = args.next().expect("usage: r68k-run <smoke.bin> [window_bytes]");
+    let arg = args.next().expect(
+        "usage: r68k-run <smoke.bin> [window_bytes] [start_pc] [input_addr] [output_addr] [done_addr]",
+    );
     let window_bytes: u32 = args.next().map_or(32, |s| s.parse().expect("window byte count"));
+    let start_pc: u32 = args.next().map_or(IMAGE_BASE, |s| {
+        u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("start pc hex address")
+    });
+    let input_addr: u32 = args.next().map_or(INPUT_ADDR, |s| {
+        u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("input address")
+    });
+    let output_addr: u32 = args.next().map_or(0x1100, |s| {
+        u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("output address")
+    });
+    let done_addr: u32 = args.next().map_or(DONE_ADDR, |s| {
+        u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("done address")
+    });
     let image = load_image(&arg).expect("read image");
 
     let mut mem = PagedMem::new(0);
@@ -50,10 +71,10 @@ fn main() {
     }
     // Reset vector: longword SSP at $0, longword PC at $4.
     mem.write_long(SUPERVISOR_DATA, 0x0000_0000, SSP);
-    mem.write_long(SUPERVISOR_DATA, 0x0000_0004, IMAGE_BASE);
+    mem.write_long(SUPERVISOR_DATA, 0x0000_0004, start_pc);
     // Stimulus.
     for (i, b) in INPUT_BYTES.iter().enumerate() {
-        mem.write_byte(SUPERVISOR_DATA, INPUT_ADDR + i as u32, *b as u32);
+        mem.write_byte(SUPERVISOR_DATA, input_addr + i as u32, *b as u32);
     }
 
     let mut cpu = ConfiguredCore::new_with(0, AutoInterruptController::new(), mem);
@@ -64,7 +85,7 @@ fn main() {
     loop {
         cpu.execute(10_000);
         executed += 10_000;
-        if cpu.read_data_byte(DONE_ADDR).unwrap_or(0) == 0x5A {
+        if cpu.read_data_byte(done_addr).unwrap_or(0) == 0x5A {
             break;
         }
         if executed >= cap {
@@ -76,7 +97,7 @@ fn main() {
     }
 
     for i in 0..window_bytes {
-        println!("{:02x}", cpu.read_data_byte(0x1100 + i).unwrap_or(0));
+        println!("{:02x}", cpu.read_data_byte(output_addr + i).unwrap_or(0));
     }
     eprintln!("cycles ~{executed} pc={:06x}", cpu.pc());
 }

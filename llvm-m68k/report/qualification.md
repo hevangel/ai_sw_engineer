@@ -56,7 +56,26 @@ instructions between a flag-setting compare/subtract and its conditional
 branch (or must re-test). Until then, `m68k-unknown-none-elf` miscompiles
 ordinary Rust comparison code.
 
-## Defect 2 — r68k 0.2.2 misexecutes correct code (blocks the executor)
+**2026-10-28 re-run (own MC68000 executor): CONFIRMED.** The mini was
+rebuilt at O0/O1/O2/Os on the pinned `nightly-2026-10-15` with
+`binutils-m68k-linux-gnu` and executed on `tools/m68000_run` (the
+repository's SingleStepTests-validated MC68000 core) with the windows
+relocated to 0x10000/0x11000/0x12000 (the O0 image's `.text` spans
+0x400-0x1484 and would otherwise overlap the old 0x1100 window).
+Results, byte-exact against `scripts/mini_expected.py`:
+
+| build | own core | r68k (same image) |
+| --- | --- | --- |
+| mini -O0 | **PASS (48/48 bytes)** | PASS |
+| mini -O1 | slot 9 only: got `12345678` want `9abcdef0` | slot 9 only, same bytes |
+| mini -O2 | slot 9 only, same bytes | slot 9 only, same bytes |
+| mini -Os | slot 9 only, same bytes | slot 9 only, same bytes |
+
+Two independent executors diverge from the oracle in exactly the same
+four bytes at every opt level ≥ 1 — the defect is in the compiler, not
+in an executor.
+
+## Defect 2 — r68k 0.2.2 misexecutes correct code (RESOLVED — not reproducible)
 
 At `-O0` the emitted select sequence is architecturally correct — the
 compare `sub.l` and `bhi` are adjacent (verified in the disassembly; spill
@@ -72,13 +91,15 @@ braw   112a
 movel  %d0,%sp@(124)       ; result = b  ← correct semantics
 ```
 
-A conforming 68000 produces `b` (`0x9ABCDEF0`); r68k produces `a`
-(`0x12345678`). Since the instruction sequence is correct by the PRM, the
-defect is in r68k 0.2.2 (isolated to the flag/branch or MOVEM path here;
-the pair-load MOVEM elsewhere in the same binary executes correctly).
-r68k is the executor candidate of record, so this blocks execution-based
-qualification until fixed or replaced (upstream Musashi, or the
-SingleStepTests-vector route, or the completed MC68000 RTL).
+A conforming 68000 produces `b` (`0x9ABCDEF0`); the 2026-10-28 re-run
+could **not** reproduce this: with correctly-built images (real
+`_start` entry, windows clear of `.text`) r68k 0.2.2 and the own
+MC68000 core agree with the oracle on the O0 image. The original
+divergence is attributed to the scratch harness entering the image at
+$400 regardless of where `_start` was placed. **The executor no longer
+blocks anything**: r68k and the own core produce identical, oracle-
+matching results at O0, and identical slot-9 divergences at O1+ (the
+compiler defect).
 
 ## Acceptance mapping (issue #64)
 
@@ -90,8 +111,9 @@ SingleStepTests-vector route, or the completed MC68000 RTL).
 
 ## Limits
 
-- Execution oracle is user-level (r68k); the MC68000 RTL is still a WIP
-  skeleton and becomes the primary executor once complete.
+- Execution oracles: r68k 0.2.2 and the repository's own MC68000 core
+  (`tools/m68000_run`, chip/motorola-68000 branch); both now agree on
+  every image. The MC68000 RTL remains the long-term primary executor.
 - Only the plain-M68000 ISA at `target-cpu=M68000` was exercised; FPU/MMU
   and later-CPU profiles are out of scope.
 - The main 32-slot smoke cannot pass until Defect 1 is fixed (slot-select

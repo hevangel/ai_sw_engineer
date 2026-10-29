@@ -1,0 +1,16 @@
+[package]
+name = "m68000-run"
+version = "0.1.0"
+edition = "2021"
+description = "Executor for the llvm-m68k qualification smoke image on the repo's own MC68000 core (chip/motorola_68000)"
+license = "MIT"
+
+[dependencies]
+motorola_68000 = { path = "B:/sw_wt/m68000/chip/motorola_68000/emulator" }
+
+[[bin]]
+name = "m68000-run"
+path = "src/main.rs"
+
+[profile.release]
+overflow-checks = false

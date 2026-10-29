@@ -2,13 +2,16 @@
 //! computed from the INPUT words so nothing folds, stored sequentially
 //! starting at OUTPUT, then the DONE sentinel. Python mirror in
 //! scripts/mini_expected.py; first divergent slot names the broken op.
+//!
+//! The windows live at 0x1xxxx so the O0 image (whose .text spans
+//! 0x400-0x1484) cannot overlap them.
 #![no_std]
 #![no_main]
 use core::ptr;
 
-const INPUT: *const u8 = 0x1000 as *const u8;
-const OUTPUT: *mut u32 = 0x1100 as *mut u32;
-const DONE: *mut u8 = 0x1200 as *mut u8;
+const INPUT: *const u8 = 0x1_0000 as *const u8;
+const OUTPUT: *mut u32 = 0x1_1000 as *mut u32;
+const DONE: *mut u8 = 0x1_2000 as *mut u8;
 
 fn inw(i: usize) -> u32 {
     unsafe {
