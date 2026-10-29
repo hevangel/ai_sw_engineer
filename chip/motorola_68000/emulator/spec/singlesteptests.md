@@ -15,13 +15,10 @@ manual.
 
 ## Current replay state
 
-925,541 / 1,000,060 passing (92.6%). Remaining classes: the to-SR
-family and the CMP/CMPA mode-7 rows (both read operands from the
-suite's non-zero reference memory — bytes exist in the reference
-final state but not in the vector init list), RTE (odd-stack and
-format faults), MOVEP.w, MOVEM.w, ORItoSR/EORItoSR, and small
-residues (CHK 490, BCHG/BSET/BCLR ~300 each, DBcc 94, Scc 92, CMP.b
-mode-4 rows 122).
+970,952 / 1,000,060 passing (97.1%). Remaining classes: the
+ADD/ADDX/SUBX/OR families (~13,400 rows, unswept golden quirks),
+MOVEM.w/l residue (~1,860: pre-dec store slot order and fault
+corners), MOVE.l / LINK (~2,980), ABCD/NBCD (~950), Bcc/DBcc (209).
 
 ## Fitted this round (session 3)
 
@@ -38,6 +35,34 @@ mode-4 rows 122).
   **address-error rows** (out-of-range or odd EAs) — distinguish by
   the actual zero divisor read in the transaction list, not by the
   handler address.
+- **MOVE <ea>,SR decode**: the arm must test bits 7:6 = 11
+  (0x46C0-FF), not bits 8:6 = 111 — the latter never matches and the
+  rows fall into NOT. The golden's loaded SR = source & 0xA71F (T, S,
+  bits 10:8, CCR kept) — set_sr's implicit mask already does this.
+- **Trace samples T at instruction start**: an instruction that
+  loads T=1 (ORI/EORI/MOVE to SR, RTE) completes without tracing.
+- **Exception entry keeps the interrupt mask** (S forced, T cleared,
+  I untouched) — visible only on RTE format faults with a popped
+  I-field below 7.
+- **RTE to an odd address**: the frame's internal word is 0x1E while
+  the popped SR keeps supervisor mode and 0x1A once the RTE would
+  have dropped to user mode; the fault address is the popped PC and
+  the register steps commit before the fault.
+- **MOVE SR,<ea>** uses canonical (An)+/-(An) stepping (write at the
+  original An, register steps by 2 even on the faulting write).
+- **CMPM gate = opmode 5/6 with bits 5:3 = 001**: opmode 7 with bits
+  5:3 = 001 is CMPA.L with an address-register-direct operand. CMPM
+  reads go through odd_ea so an odd (An)+ faults with the step
+  committed; the golden's CMPM fault rows read the bits-11:9 register
+  first when the bits-5:3 register is even.
+- **CMP/CMPA never touch X** (do_sub_x with update_x = false) and
+  never write the destination register.
+- **MOVEM**: word loads replace the whole destination register with
+  the sign-extended value; the pre-dec forms step by the transfer
+  size (pass Word/Long, not a fixed Long, to the EA helper) and roll
+  the register back on a parity fault (store faults at reg-2 with the
+  write label, load at the block base with the read label); the
+  (An)+ load form ends the register at orig + step x popcount.
 
 ## Fitted this round (session 2)
 

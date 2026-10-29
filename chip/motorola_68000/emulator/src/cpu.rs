@@ -895,7 +895,8 @@ impl Mc68000 {
             } else {
                 let b0 = u32::from(self.rd8(bus, addr));
                 let b1 = u32::from(self.rd8(bus, addr.wrapping_add(2)));
-                self.d[reg] = (b0 << 8) | b1;
+                // The .w form keeps the destination's high word.
+                self.d[reg] = (self.d[reg] & 0xFFFF0000) | (b0 << 8) | b1;
             }
             return Some(false);
         }
@@ -1439,8 +1440,16 @@ impl Mc68000 {
             }
         }
         if mode == 4 {
-            // predecrement: scan mask 15..0, addresses descend
-            let mut addr = self.a7();
+            // Predecrement store: the first write lands at reg-2; an odd
+            // register faults there before anything is written and the
+            // register keeps its value.
+            let orig = self.aget(reg as usize);
+            let first = orig.wrapping_sub(step);
+            if first & 1 != 0 {
+                self.addr_error_hw(bus, first, 0x05, self.pc.wrapping_sub(2));
+                return true;
+            }
+            let mut addr = orig;
             for i in (0..16).rev() {
                 if mask & (1 << i) != 0 {
                     addr = addr.wrapping_sub(step);
@@ -1452,9 +1461,10 @@ impl Mc68000 {
                     }
                 }
             }
-            self.set_a7(addr);
+            self.aset(reg as usize, orig.wrapping_sub(step * count));
         } else {
-            let mut addr = match self.odd_ea(bus, mode, reg, Size::Long, true) {
+            let acc = if long { Size::Long } else { Size::Word };
+            let mut addr = match self.odd_ea(bus, mode, reg, acc, true) {
                 Some(a) => a,
                 None => return true,
             };
@@ -1482,10 +1492,19 @@ impl Mc68000 {
         let long = op & 0x0040 != 0;
         let step: u32 = if long { 4 } else { 2 };
         if mode == 4 {
-            let base = self.aget(reg as usize).wrapping_sub(step * 16);
+            // Predecrement load: the register drops by step x mask-pop
+            // up front, reads ascend from there, and the register is
+            // restored to its original value afterwards; an odd base
+            // faults before anything is read.
+            let count = mask.count_ones();
             let orig = self.aget(reg as usize);
+            let base = orig.wrapping_sub(step * count);
+            if base & 1 != 0 {
+                self.addr_error_hw(bus, base, 0x15, self.pc.wrapping_sub(2));
+                return true;
+            }
             let mut addr = base;
-            for i in (0..16).rev() {
+            for i in 0..16u32 {
                 if mask & (1 << i) != 0 {
                     let v = if long {
                         self.rd32(bus, addr)
@@ -1499,7 +1518,10 @@ impl Mc68000 {
             }
             self.aset(reg as usize, orig);
         } else {
-            let mut addr = match self.odd_ea(bus, mode, reg, Size::Long, false) {
+            let acc = if long { Size::Long } else { Size::Word };
+            let orig = self.aget(reg as usize);
+            let count = mask.count_ones();
+            let mut addr = match self.odd_ea(bus, mode, reg, acc, false) {
                 Some(a) => a,
                 None => return true,
             };
@@ -1514,6 +1536,11 @@ impl Mc68000 {
                     self.movem_set_reg(i as usize, v, long);
                     addr = addr.wrapping_add(step);
                 }
+            }
+            // The (An)+ form ends the register at orig + step x pop
+            // (ea_addr only applied the single EA-resolution step).
+            if mode == 3 {
+                self.aset(reg as usize, orig.wrapping_add(step * count));
             }
         }
         false
@@ -1533,11 +1560,9 @@ impl Mc68000 {
 
     fn movem_set_reg(&mut self, i: usize, v: u32, long: bool) {
         if i < 8 {
-            if long {
-                self.d[i] = v;
-            } else {
-                self.d[i] = (self.d[i] & !0xFFFF) | (v & 0xFFFF);
-            }
+            // Word loads replace the whole register with the
+            // sign-extended value (suite: D0 24D5 -> 000024D5).
+            self.d[i] = v;
         } else {
             self.aset(i - 8, v);
         }
