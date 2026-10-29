@@ -109,6 +109,10 @@ fn probe() {
             first_field_fail.entry("usp").or_insert(i - lo);
             err.push_str(&format!("usp:{:08X}/{:08X} ", got.usp, fregs[15]));
         }
+        if got.ssp != fregs[16] {
+            first_field_fail.entry("ssp").or_insert(i - lo);
+            err.push_str(&format!("ssp:{:08X}/{:08X} ", got.ssp, fregs[16]));
+        }
         if got.pc != fpc {
             first_field_fail.entry("pc").or_insert(i - lo);
             err.push_str(&format!("pc:{:06X}/{:06X} ", got.pc, fpc));

@@ -2103,12 +2103,11 @@ impl Mc68000 {
         let mode = (op >> 3) & 7;
         let reg = op & 7;
         let opmode = (op >> 6) & 7;
-        // CMPM: 1011 rrr 1 sz 001 rrr — the suite only maps opmodes 5/6
-        // (word/long-shaped byte rows) to CMPM; opmode 7 with bits 5:3
-        // = 001 is CMPA.L with an address-register-direct operand.
-        // Reads go through ea_loc so an odd (An)+ faults with the step
-        // already committed.
-        if (op & 0x01C0 == 0x0140 || op & 0x01C0 == 0x0180) && op & 0x0038 == 0x0008 {
+        // CMPM: 1011 rrr 1 sz 001 rrr — bit 8 set, size nonzero, and
+        // bits 5:3 exactly 001 (opmode 7 with this shape is CMPA.L
+        // with an address-register-direct operand). Reads go through
+        // ea_loc so an odd (An)+ faults with the step committed.
+        if op & 0x0100 != 0 && op & 0x00C0 != 0x00C0 && op & 0x0038 == 0x0008 {
             let size = self.size_from_bits((op >> 6) & 3);
             let a1 = (op & 7) as usize;
             let a2 = ((op >> 9) & 7) as usize;
@@ -2193,9 +2192,11 @@ impl Mc68000 {
             11 => n,
             12 => n == v,
             13 => n != v,
-            // Suite-derived (SingleStepTests): the silicon's GT is only
-            // true when C, V, N and Z are all clear.
-            14 => !z && !n && !v && !cflag,
+            // Suite-derived (SingleStepTests): the golden's GT is the
+            // canonical !Z && N==V, with C and X ignored.
+            14 => !z && n == v,
+            _ => z || n != v,
+            _ => z || n != v,
             _ => z || n != v,
         }
     }
