@@ -5,7 +5,6 @@
 //! with full before/after state) is the validation oracle, so where the
 //! two could disagree the suite decides.
 
-
 /// Flat bus: byte/word/long reads and writes. Word and long accesses
 /// use big-endian byte order; the core raises an address error on odd
 /// word/long accesses itself.
@@ -85,8 +84,7 @@ const VEC_TRAP_BASE: u32 = 0x080;
 
 /// Debug hook: the last address-error frame PC the core pushed (probe
 /// diagnostics only).
-pub static LAST_FAULT_PC: core::sync::atomic::AtomicU32 =
-    core::sync::atomic::AtomicU32::new(0);
+pub static LAST_FAULT_PC: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 pub struct Mc68000 {
     d: [u32; 8],
@@ -188,9 +186,9 @@ impl Mc68000 {
         self.sri = v & (SR_T | SR_S | SR_I);
         self.fc = u32::from(v & SR_C) << 8;
         self.fx = v & SR_X != 0;
-        self.fv = u32::from(v & SR_V) << 1;              // 0x02 -> 0x4
+        self.fv = u32::from(v & SR_V) << 1; // 0x02 -> 0x4
         self.fnz = if v & SR_Z != 0 { 0 } else { 0x40 }; // SR.Z set = zero = not-z clear
-        self.fnz |= u32::from(v & SR_N);      // N -> 0x8
+        self.fnz |= u32::from(v & SR_N); // N -> 0x8
     }
 
     fn s(&self) -> bool {
@@ -238,13 +236,12 @@ impl Mc68000 {
 
     fn rd16(&self, bus: &mut impl Bus, addr: u32) -> u16 {
         let a = addr & 0x00FF_FFFF;
-        ((u16::from(bus.read8(a)) << 8) | u16::from(bus.read8(a.wrapping_add(1)))) as u16
+        (u16::from(bus.read8(a)) << 8) | u16::from(bus.read8(a.wrapping_add(1)))
     }
 
     fn rd32(&self, bus: &mut impl Bus, addr: u32) -> u32 {
         let a = addr & 0x00FF_FFFF;
-        (u32::from(self.rd16(bus, a)) << 16)
-            | u32::from(self.rd16(bus, a.wrapping_add(2)))
+        (u32::from(self.rd16(bus, a)) << 16) | u32::from(self.rd16(bus, a.wrapping_add(2)))
     }
 
     fn wr8(&self, bus: &mut impl Bus, addr: u32, v: u8) {
@@ -350,13 +347,7 @@ impl Mc68000 {
 
     /// Resolve an <ea> for data reads; returns the address (or the
     /// register class marker).
-    fn ea_addr(
-        &mut self,
-        bus: &mut impl Bus,
-        mode: u16,
-        reg: u16,
-        size: Size,
-    ) -> Option<u32> {
+    fn ea_addr(&mut self, bus: &mut impl Bus, mode: u16, reg: u16, size: Size) -> Option<u32> {
         Some(match mode {
             0 | 1 => return None, // register direct handled by caller
             2 => self.aget(reg as usize),
@@ -419,9 +410,11 @@ impl Mc68000 {
     /// Brief-extension (d8,An,Xn) — 68000 form: 8-bit signed displacement
     /// or 0, index register full value (no suppression on the 68000).
     fn indexed(&mut self, _bus: &mut impl Bus, base: u32, ext: u16) -> u32 {
-        let disp = (ext & 0x80 != 0)
-            .then(|| (ext & 0xFF) as i32 - 0x100)
-            .unwrap_or((ext & 0xFF) as i32);
+        let disp = if ext & 0x80 != 0 {
+            (ext & 0xFF) as i32 - 0x100
+        } else {
+            (ext & 0xFF) as i32
+        };
         let idx_reg = ((ext >> 12) & 0x0F) as usize;
         let val = if ext & 0x8000 != 0 {
             self.aget(idx_reg & 7)
@@ -436,51 +429,16 @@ impl Mc68000 {
         base.wrapping_add(disp as u32).wrapping_add(val as u32)
     }
 
-    /// Read an operand through an <ea>.
-    fn read_ea(
-        &mut self,
-        bus: &mut impl Bus,
-        mode: u16,
-        reg: u16,
-        size: Size,
-    ) -> u32 {
-        match mode {
-            0 => self.mask(self.d[reg as usize], size),
-            1 => self.mask(self.aget(reg as usize), size),
-            _ => {
-                let addr = self
-                    .ea_addr(bus, mode, reg, size)
-                    .unwrap_or(0);
-                match size {
-                    Size::Byte => u32::from(self.rd8(bus, addr)),
-                    Size::Word => u32::from(self.rd16(bus, addr)),
-                    Size::Long => self.rd32(bus, addr),
-                }
-            }
-        }
-    }
-
     /// Write an operand through an <ea> (register direct writes the
     /// register; -(A7) in supervisor mode uses SSP via a7).
-    fn write_ea(
-        &mut self,
-        bus: &mut impl Bus,
-        mode: u16,
-        reg: u16,
-        size: Size,
-        v: u32,
-    ) {
+    fn write_ea(&mut self, bus: &mut impl Bus, mode: u16, reg: u16, size: Size, v: u32) {
         match mode {
-            0 => {
-                self.d[reg as usize] = self.merge(self.d[reg as usize], v, size)
-            }
+            0 => self.d[reg as usize] = self.merge(self.d[reg as usize], v, size),
             1 => {
                 self.aset(reg as usize, v); // full 32-bit write for An
             }
             _ => {
-                let addr = self
-                    .ea_addr(bus, mode, reg, size)
-                    .unwrap_or(0);
+                let addr = self.ea_addr(bus, mode, reg, size).unwrap_or(0);
                 match size {
                     Size::Byte => self.wr8(bus, addr, v as u8),
                     Size::Word => self.wr16(bus, addr, v as u16),
@@ -504,8 +462,7 @@ impl Mc68000 {
             Size::Word => (old & !0xFFFF) | (v & 0xFFFF),
             Size::Long => v,
         }
-}
-
+    }
 
     // ------------------------------------------------------------------
     // Resolve-once EA handling: memory operands must resolve their
@@ -578,7 +535,10 @@ impl Mc68000 {
             // fault pc = address minus four, IIRD = the completed
             // instruction's opcode.
             self.addr_error_hw_iird(bus, self.pc, 0x1E, self.pc.wrapping_sub(4), self.op);
-            return StepInfo { pc: self.instr_pc, exception: true };
+            return StepInfo {
+                pc: self.instr_pc,
+                exception: true,
+            };
         }
         self.instr_pc = self.pc;
         let op = self.fetch16(bus);
@@ -591,9 +551,15 @@ impl Mc68000 {
         let exception = self.dispatch(bus, op);
         if !exception && trace_in {
             self.exception(bus, VEC_TRACE);
-            return StepInfo { pc: self.instr_pc, exception: true };
+            return StepInfo {
+                pc: self.instr_pc,
+                exception: true,
+            };
         }
-        StepInfo { pc: self.instr_pc, exception }
+        StepInfo {
+            pc: self.instr_pc,
+            exception,
+        }
     }
 
     fn dispatch(&mut self, bus: &mut impl Bus, op: u16) -> bool {
@@ -676,7 +642,7 @@ impl Mc68000 {
     fn do_add(&mut self, a: u32, b: u32, size: Size) -> u32 {
         let bits = size.bits();
         let m = (1u64 << bits) - 1;
-        let r = (u64::from(a & m as u32) + u64::from(b & m as u32)) as u64;
+        let r = u64::from(a & m as u32) + u64::from(b & m as u32);
         let res = (r & m) as u32;
         let carry = r > m;
         let sign = 1u32 << (bits - 1);
@@ -696,7 +662,7 @@ impl Mc68000 {
     fn do_sub_x(&mut self, a: u32, b: u32, size: Size, update_x: bool) -> u32 {
         let bits = size.bits();
         let m = (1u64 << bits) - 1;
-        let r = (i64::from(a & m as u32) - i64::from(b & m as u32)) as i64;
+        let r = i64::from(a & m as u32) - i64::from(b & m as u32);
         let res = (r as u64 & m) as u32;
         let borrow = r < 0;
         let sign = 1u32 << (bits - 1);
@@ -750,10 +716,12 @@ impl Mc68000 {
             7 => src_reg <= 3,
             _ => true,
         };
-        let mut v = { match self.ea_loc(bus, src_mode, src_reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+        let mut v = {
+            match self.ea_loc(bus, src_mode, src_reg, size, false) {
+                Some(l) => self.read_loc(bus, l, size),
+                None => return true,
+            }
+        };
         if dst_mode == 1 && size == Size::Word {
             // MOVEA.w sign-extends into the address register; no flags
             v = ((v as u16) as i16 as i32) as u32;
@@ -838,7 +806,10 @@ impl Mc68000 {
             self.write_loc(bus, dst, size, v);
             if dst_mode == 3 {
                 let st = self.step_for_reg(size, dst_reg);
-                self.aset(dst_reg as usize, self.aget(dst_reg as usize).wrapping_add(st));
+                self.aset(
+                    dst_reg as usize,
+                    self.aget(dst_reg as usize).wrapping_add(st),
+                );
             }
         }
         false
@@ -922,10 +893,7 @@ impl Mc68000 {
     /// Immediate group: ORI/ANDI/SUBI/ADDI/EORI/CMPI + static bit ops +
     /// MOVEP + the 0x0840-0x08FF static bit forms.
     fn group_immediate(&mut self, bus: &mut impl Bus, op: u16) -> bool {
-        match self.group_immediate_inner(bus, op) {
-            Some(r) => r,
-            None => true,
-        }
+        self.group_immediate_inner(bus, op).unwrap_or(true)
     }
 
     fn group_immediate_inner(&mut self, bus: &mut impl Bus, op: u16) -> Option<bool> {
@@ -1025,11 +993,11 @@ impl Mc68000 {
                 let loc = self.ea_loc(bus, mode, reg, size, false)?;
                 let v = self.read_loc(bus, loc, size);
                 let r = match kind {
-                    0 => v | imm,   // ORI
-                    1 => v & imm,   // ANDI
+                    0 => v | imm,                   // ORI
+                    1 => v & imm,                   // ANDI
                     2 => self.do_sub(v, imm, size), // SUBI
                     3 => self.do_add(v, imm, size), // ADDI
-                    5 => v ^ imm,   // EORI
+                    5 => v ^ imm,                   // EORI
                     _ => {
                         // CMPI: no writeback, no X update
                         let _ = self.do_sub_x(v, imm, size, false);
@@ -1067,10 +1035,12 @@ impl Mc68000 {
         // register in bits 11-9). The bound is signed; the exception
         // pushes the pc after the EA extension words.
         if op >> 12 == 4 && op & 0x01C0 == 0x0180 {
-            let bound = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
+            let bound = {
+                match self.ea_loc(bus, mode, reg, Size::Word, false) {
                     Some(l) => self.read_loc(bus, l, Size::Word),
                     None => return true,
-                } } as u16 as i16 as i32;
+                }
+            } as u16 as i16 as i32;
             let d = self.d[((op >> 9) & 7) as usize] as u16 as i16 as i32;
             self.fv = 0;
             self.fc &= !0x100;
@@ -1087,7 +1057,7 @@ impl Mc68000 {
         match op >> 8 {
             // 40C0-40FF MOVE SR,<ea> ; 40C0 only for the full map, but
             // 4000-40BF would be NEGX (handled below at 0x40).
-            0x40 | 0x41 | 0x42 | 0x43 => {
+            0x40..=0x43 => {
                 if op >> 8 == 0x40 && op & 0x01C0 == 0x00C0 {
                     // MOVE SR,<ea> (40C0-40FF). Canonical (An)+/-(An)
                     // stepping; the register steps commit before a
@@ -1155,7 +1125,11 @@ impl Mc68000 {
                         self.fnz |= 0x40;
                     }
                     self.fnz = (self.fnz & !0x8)
-                        | if res & (1u32 << (bits - 1)) != 0 { 0x8 } else { 0 };
+                        | if res & (1u32 << (bits - 1)) != 0 {
+                            0x8
+                        } else {
+                            0
+                        };
                 } else if op >> 8 == 0x42 {
                     // CLR
                     self.write_loc(bus, loc, size, 0);
@@ -1166,13 +1140,15 @@ impl Mc68000 {
                 }
                 false
             }
-            0x44 | 0x45 | 0x46 | 0x47 => {
+            0x44..=0x47 => {
                 if op >> 8 == 0x44 && op & 0x01C0 == 0x00C0 {
                     // MOVE <ea>,CCR (44C0+, word, low byte)
-                    let v = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } };
+                    let v = {
+                        match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                            Some(l) => self.read_loc(bus, l, Size::Word),
+                            None => return true,
+                        }
+                    };
                     self.set_sr((self.sr() & 0xFF00) | (v as u16 & 0xFF));
                     return false;
                 }
@@ -1183,10 +1159,12 @@ impl Mc68000 {
                     if self.priv_check(bus) {
                         return true;
                     }
-                    let v = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } };
+                    let v = {
+                        match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                            Some(l) => self.read_loc(bus, l, Size::Word),
+                            None => return true,
+                        }
+                    };
                     self.set_sr(v as u16);
                     return false;
                 }
@@ -1314,13 +1292,15 @@ impl Mc68000 {
                 }
                 // TST
                 let size = self.size_from_bits((op >> 6) & 3);
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 self.set_nz(v, size);
                 self.fc &= !0x100;
-        self.fv = 0;
+                self.fv = 0;
                 false
             }
             0x4A => {
@@ -1340,13 +1320,15 @@ impl Mc68000 {
                     return false;
                 }
                 let size = self.size_from_bits((op >> 6) & 3);
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 self.set_nz(v, size);
                 self.fc &= !0x100;
-        self.fv = 0;
+                self.fv = 0;
                 false
             }
             0x4C => {
@@ -1357,9 +1339,7 @@ impl Mc68000 {
                 self.exception(bus, VEC_ILL);
                 true
             }
-            0x4E => {
-                self.group_misc_4e(bus, op)
-            }
+            0x4E => self.group_misc_4e(bus, op),
             _ => {
                 self.exception(bus, VEC_ILL);
                 true
@@ -1635,7 +1615,7 @@ impl Mc68000 {
                         let w = self.rd16(bus, addr);
                         (w as i16 as i32) as u32
                     };
-                    self.movem_set_reg(i as usize, v, long);
+                    self.movem_set_reg(i as usize, v);
                     addr = addr.wrapping_add(step);
                 }
             }
@@ -1661,7 +1641,7 @@ impl Mc68000 {
                         let w = self.rd16(bus, addr);
                         (w as i16 as i32) as u32
                     };
-                    self.movem_set_reg(i as usize, v, long);
+                    self.movem_set_reg(i as usize, v);
                     addr = addr.wrapping_add(step);
                 }
             }
@@ -1680,7 +1660,7 @@ impl Mc68000 {
                         let w = self.rd16(bus, addr);
                         (w as i16 as i32) as u32
                     };
-                    self.movem_set_reg(i as usize, v, long);
+                    self.movem_set_reg(i as usize, v);
                     addr = addr.wrapping_add(step);
                 }
             }
@@ -1700,7 +1680,7 @@ impl Mc68000 {
         }
     }
 
-    fn movem_set_reg(&mut self, i: usize, v: u32, long: bool) {
+    fn movem_set_reg(&mut self, i: usize, v: u32) {
         if i < 8 {
             // Word loads replace the whole register with the
             // sign-extended value (suite: D0 24D5 -> 000024D5).
@@ -1758,8 +1738,7 @@ impl Mc68000 {
             if !self.cond(cond) {
                 let mut w = (self.d[reg as usize] & 0xFFFF) as i16;
                 w = w.wrapping_sub(1);
-                self.d[reg as usize] =
-                    (self.d[reg as usize] & !0xFFFF) | (w as u16 as u32);
+                self.d[reg as usize] = (self.d[reg as usize] & !0xFFFF) | (w as u16 as u32);
                 if w != -1 {
                     let target = base.wrapping_add(d as u32);
                     if target & 1 != 0 {
@@ -1775,7 +1754,10 @@ impl Mc68000 {
             // Scc: 0101 cccc 11 modereg (any condition)
             let cond = ((op >> 8) & 0xF) as usize;
             let v = if self.cond(cond) { 0xFF } else { 0x00 };
-            if self.ea_write_checked(bus, mode, reg, Size::Byte, v).is_none() {
+            if self
+                .ea_write_checked(bus, mode, reg, Size::Byte, v)
+                .is_none()
+            {
                 return true;
             }
             return false;
@@ -1804,13 +1786,11 @@ impl Mc68000 {
             };
             let target = match taken_disp {
                 Some(t) => t,
-                None => disp_base.wrapping_add(
-                    if op & 0x80 != 0 {
-                        (op & 0xFF) as i32 - 0x100
-                    } else {
-                        (op & 0xFF) as i32
-                    } as u32,
-                ),
+                None => disp_base.wrapping_add(if op & 0x80 != 0 {
+                    (op & 0xFF) as i32 - 0x100
+                } else {
+                    (op & 0xFF) as i32
+                } as u32),
             };
             let return_addr = self.pc;
             if target & 1 != 0 {
@@ -1864,10 +1844,12 @@ impl Mc68000 {
             // high word holds the remainder and the low word the quotient.
             let dq = ((op >> 9) & 7) as usize;
             let size = Size::Word;
-            let divisor = { match self.ea_loc(bus, mode, reg, size, false) {
+            let divisor = {
+                match self.ea_loc(bus, mode, reg, size, false) {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
-                } } as u16;
+                }
+            } as u16;
             if divisor == 0 {
                 // Suite: the divide-by-zero frame stacks the instruction
                 // address and SR with N, Z and C cleared; X and V keep
@@ -1900,10 +1882,12 @@ impl Mc68000 {
             // divisor, remainder in the high word, quotient in the low
             // word.
             let dq = ((op >> 9) & 7) as usize;
-            let divisor = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
+            let divisor = {
+                match self.ea_loc(bus, mode, reg, Size::Word, false) {
                     Some(l) => self.read_loc(bus, l, Size::Word),
                     None => return true,
-                } } as u16 as i16;
+                }
+            } as u16 as i16;
             if divisor == 0 {
                 // Same divide-by-zero frame rule as DIVU.
                 self.fnz = (self.fnz | 0x40) & !0x8;
@@ -1921,15 +1905,14 @@ impl Mc68000 {
                 }
                 Some(q) => {
                     let rem = dividend % i32::from(divisor);
-                    if q < -0x8000 || q > 0x7FFF {
+                    if !(-0x8000..=0x7FFF).contains(&q) {
                         // overflow: operands unaffected, V set, C
                         // cleared, other flags keep their values
                         self.set_v(true);
                         self.fc &= !0x100;
                         return false;
                     }
-                    self.d[dq] =
-                        (((rem as i16) as u16 as u32) << 16) | (q as u16 as u32);
+                    self.d[dq] = (((rem as i16) as u16 as u32) << 16) | (q as u16 as u32);
                     self.set_nz(q as u32, Size::Word);
                     self.fv = 0;
                     self.fc &= !0x100;
@@ -1997,18 +1980,20 @@ impl Mc68000 {
         let opmode = (op >> 6) & 7;
         let size = self.size_from_bits((op >> 6) & 3);
         match opmode {
-            0 | 1 | 2 => {
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+            0..=2 => {
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 let r = self.d[(op >> 9) as usize & 7] | v;
                 let rn = (op >> 9) & 7;
                 self.d[rn as usize] = self.merge(self.d[rn as usize], r, size);
                 self.cc_logic(r, size);
                 false
             }
-            4 | 5 | 6 => {
+            4..=6 => {
                 let d = self.d[(op >> 9) as usize & 7];
                 let loc = match self.ea_loc(bus, mode, reg, size, false) {
                     Some(l) => l,
@@ -2094,16 +2079,14 @@ impl Mc68000 {
                     Size::Byte => u32::from(self.rd8(bus, say)),
                     Size::Word => u32::from(self.rd16(bus, say)),
                     Size::Long => {
-                        (u32::from(self.rd16(bus, say2)) << 16)
-                            | u32::from(self.rd16(bus, say))
+                        (u32::from(self.rd16(bus, say2)) << 16) | u32::from(self.rd16(bus, say))
                     }
                 };
                 let bv = match size {
                     Size::Byte => u32::from(self.rd8(bus, dax)),
                     Size::Word => u32::from(self.rd16(bus, dax)),
                     Size::Long => {
-                        (u32::from(self.rd16(bus, dax2)) << 16)
-                            | u32::from(self.rd16(bus, dax))
+                        (u32::from(self.rd16(bus, dax2)) << 16) | u32::from(self.rd16(bus, dax))
                     }
                 };
                 (av, bv, dax, dax2)
@@ -2118,7 +2101,7 @@ impl Mc68000 {
             let x = u32::from(self.fx);
             let bits = size.bits();
             let m = (1u64 << bits) - 1;
-            let r = (i64::from(bv & m as u32) - i64::from(av & m as u32) - i64::from(x)) as i64;
+            let r = i64::from(bv & m as u32) - i64::from(av & m as u32) - i64::from(x);
             let res = (r as u64 & m) as u32;
             if mem_form {
                 match size {
@@ -2135,18 +2118,25 @@ impl Mc68000 {
             if res != 0 {
                 self.fnz |= 0x40;
             }
-            self.fnz = (self.fnz & !0x8) | if res & (1u32 << (bits - 1)) != 0 { 0x8 } else { 0 };
+            self.fnz = (self.fnz & !0x8)
+                | if res & (1u32 << (bits - 1)) != 0 {
+                    0x8
+                } else {
+                    0
+                };
             return false;
         }
         let opmode = (op >> 6) & 7;
         match opmode {
-            0 | 1 | 2 => {
+            0..=2 => {
                 // SUB <ea>,Dn (and SUBA word when 3)
                 let size = self.size_from_bits((op >> 6) & 3);
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 let r = self.do_sub(self.d[rn], v, size);
                 self.d[rn] = self.merge(self.d[rn], r, size);
@@ -2154,15 +2144,17 @@ impl Mc68000 {
             }
             3 => {
                 // SUBA word
-                let v = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } } as u16 as i16 as i32;
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Word),
+                        None => return true,
+                    }
+                } as u16 as i16 as i32;
                 let rn = ((op >> 9) & 7) as usize;
                 self.aset(rn, self.aget(rn).wrapping_sub(v as u32));
                 false
             }
-            4 | 5 | 6 => {
+            4..=6 => {
                 let size = self.size_from_bits((op >> 6) & 3);
                 let d = self.d[(op >> 9) as usize & 7];
                 let loc = match self.ea_loc(bus, mode, reg, size, false) {
@@ -2176,10 +2168,12 @@ impl Mc68000 {
             }
             7 => {
                 // SUBA long
-                let v = { match self.ea_loc(bus, mode, reg, Size::Long, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Long),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Long, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Long),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 self.aset(rn, self.aget(rn).wrapping_sub(v));
                 false
@@ -2222,39 +2216,47 @@ impl Mc68000 {
             let size = self.size_from_bits((op >> 6) & 3);
             let a1 = (op & 7) as usize;
             let a2 = ((op >> 9) & 7) as usize;
-            let av = { match self.ea_loc(bus, 3, a1 as u16, size, false) {
+            let av = {
+                match self.ea_loc(bus, 3, a1 as u16, size, false) {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
-                } };
-            let bv = { match self.ea_loc(bus, 3, a2 as u16, size, false) {
+                }
+            };
+            let bv = {
+                match self.ea_loc(bus, 3, a2 as u16, size, false) {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
-                } };
+                }
+            };
             let _ = self.do_sub_x(bv, av, size, false);
             return false;
         }
         match opmode {
-            0 | 1 | 2 => {
+            0..=2 => {
                 let size = self.size_from_bits((op >> 6) & 3);
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 let _ = self.do_sub_x(self.d[rn], v, size, false);
                 false
             }
             3 => {
-                let v = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Word),
+                        None => return true,
+                    }
+                };
                 let v = ((v as u16) as i16 as i32) as u32;
                 let rn = ((op >> 9) & 7) as usize;
                 let _ = self.do_sub_x(self.aget(rn), v, Size::Long, false);
                 false
             }
-            4 | 5 | 6 => {
+            4..=6 => {
                 let size = self.size_from_bits((op >> 6) & 3);
                 let d = self.d[(op >> 9) as usize & 7];
                 let loc = match self.ea_loc(bus, mode, reg, size, false) {
@@ -2268,10 +2270,12 @@ impl Mc68000 {
                 false
             }
             7 => {
-                let v = { match self.ea_loc(bus, mode, reg, Size::Long, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Long),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Long, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Long),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 let _ = self.do_sub_x(self.aget(rn), v, Size::Long, false);
                 false
@@ -2373,8 +2377,7 @@ impl Mc68000 {
             let t_low = (t as u32) & 0xFF;
             let res_hi = (res >> 4) & 0xF;
             self.set_v(if c1 {
-                (0x8..=0xD).contains(&res_hi)
-                    || (res_hi == 0xE && (0x7A..=0x7F).contains(&t_low))
+                (0x8..=0xD).contains(&res_hi) || (res_hi == 0xE && (0x7A..=0x7F).contains(&t_low))
             } else {
                 c0 && (0x7A..=0x7F).contains(&t_low)
             });
@@ -2388,10 +2391,12 @@ impl Mc68000 {
         // 11-9 (suite-derived; the suite always clears V).
         if op & 0xF0C0 == 0xC0C0 {
             let signed = op & 0x0100 != 0;
-            let m = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
+            let m = {
+                match self.ea_loc(bus, mode, reg, Size::Word, false) {
                     Some(l) => self.read_loc(bus, l, Size::Word),
                     None => return true,
-                } } as u16;
+                }
+            } as u16;
             let a = self.d[(op >> 9) as usize & 7] as u16;
             let prod = if signed {
                 (i32::from(a as i16) * i32::from(m as i16)) as u32
@@ -2415,9 +2420,7 @@ impl Mc68000 {
             };
             match form {
                 0 => {
-                    let t = self.d[r1];
-                    self.d[r1] = self.d[r2];
-                    self.d[r2] = t;
+                    self.d.swap(r1, r2);
                 }
                 1 => {
                     let t = self.aget(r1);
@@ -2437,18 +2440,20 @@ impl Mc68000 {
         let opmode = (op >> 6) & 7;
         let size = self.size_from_bits((op >> 6) & 3);
         match opmode {
-            0 | 1 | 2 => {
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+            0..=2 => {
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 let r = self.d[rn] & v;
                 self.d[rn] = self.merge(self.d[rn], r, size);
                 self.cc_logic(r, size);
                 false
             }
-            4 | 5 | 6 => {
+            4..=6 => {
                 let d = self.d[(op >> 9) as usize & 7];
                 let loc = match self.ea_loc(bus, mode, reg, size, false) {
                     Some(l) => l,
@@ -2487,16 +2492,14 @@ impl Mc68000 {
                     Size::Byte => u32::from(self.rd8(bus, say)),
                     Size::Word => u32::from(self.rd16(bus, say)),
                     Size::Long => {
-                        (u32::from(self.rd16(bus, say2)) << 16)
-                            | u32::from(self.rd16(bus, say))
+                        (u32::from(self.rd16(bus, say2)) << 16) | u32::from(self.rd16(bus, say))
                     }
                 };
                 let bv = match size {
                     Size::Byte => u32::from(self.rd8(bus, dax)),
                     Size::Word => u32::from(self.rd16(bus, dax)),
                     Size::Long => {
-                        (u32::from(self.rd16(bus, dax2)) << 16)
-                            | u32::from(self.rd16(bus, dax))
+                        (u32::from(self.rd16(bus, dax2)) << 16) | u32::from(self.rd16(bus, dax))
                     }
                 };
                 (av, bv, dax, dax2)
@@ -2511,7 +2514,7 @@ impl Mc68000 {
             let x = u32::from(self.fx);
             let bits = size.bits();
             let m = (1u64 << bits) - 1;
-            let r = (u64::from(bv & m as u32) + u64::from(av & m as u32) + u64::from(x)) as u64;
+            let r = u64::from(bv & m as u32) + u64::from(av & m as u32) + u64::from(x);
             let res = (r & m) as u32;
             if mem_form {
                 match size {
@@ -2528,33 +2531,42 @@ impl Mc68000 {
             if res != 0 {
                 self.fnz |= 0x40;
             }
-            self.fnz = (self.fnz & !0x8) | if res & (1u32 << (bits - 1)) != 0 { 0x8 } else { 0 };
+            self.fnz = (self.fnz & !0x8)
+                | if res & (1u32 << (bits - 1)) != 0 {
+                    0x8
+                } else {
+                    0
+                };
             return false;
         }
         let opmode = (op >> 6) & 7;
         match opmode {
-            0 | 1 | 2 => {
+            0..=2 => {
                 let size = self.size_from_bits((op >> 6) & 3);
-                let v = { match self.ea_loc(bus, mode, reg, size, false) {
-                    Some(l) => self.read_loc(bus, l, size),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, size, false) {
+                        Some(l) => self.read_loc(bus, l, size),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 let r = self.do_add(self.d[rn], v, size);
                 self.d[rn] = self.merge(self.d[rn], r, size);
                 false
             }
             3 => {
-                let v = { match self.ea_loc(bus, mode, reg, Size::Word, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Word),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Word, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Word),
+                        None => return true,
+                    }
+                };
                 let v = ((v as u16) as i16 as i32) as u32;
                 let rn = ((op >> 9) & 7) as usize;
                 self.aset(rn, self.aget(rn).wrapping_add(v));
                 false
             }
-            4 | 5 | 6 => {
+            4..=6 => {
                 let size = self.size_from_bits((op >> 6) & 3);
                 let d = self.d[(op >> 9) as usize & 7];
                 let loc = match self.ea_loc(bus, mode, reg, size, false) {
@@ -2567,10 +2579,12 @@ impl Mc68000 {
                 false
             }
             7 => {
-                let v = { match self.ea_loc(bus, mode, reg, Size::Long, false) {
-                    Some(l) => self.read_loc(bus, l, Size::Long),
-                    None => return true,
-                } };
+                let v = {
+                    match self.ea_loc(bus, mode, reg, Size::Long, false) {
+                        Some(l) => self.read_loc(bus, l, Size::Long),
+                        None => return true,
+                    }
+                };
                 let rn = ((op >> 9) & 7) as usize;
                 self.aset(rn, self.aget(rn).wrapping_add(v));
                 false
@@ -2589,8 +2603,6 @@ impl Mc68000 {
     /// type tt at bits 4-3: 00 AS, 01 LS, 10 ROX, 11 RO).
     /// Memory form: 1110 0 d 0 tt 1 1 modereg — one-step byte shifts.
     fn group_shift(&mut self, bus: &mut impl Bus, op: u16) -> bool {
-        let mode = (op >> 3) & 7;
-        let reg = op & 7;
         if (op >> 6) & 3 == 3 {
             // memory form: single shift. The real 68000 performs the
             // read-modify-write at word width (suite-derived): the EA
@@ -2630,7 +2642,11 @@ impl Mc68000 {
         let rn = (op & 7) as usize;
         let count = if op & 0x0020 == 0 {
             let n = u32::from((op >> 9) & 7);
-            if n == 0 { 8 } else { n }
+            if n == 0 {
+                8
+            } else {
+                n
+            }
         } else {
             self.d[((op >> 9) & 7) as usize] & 63
         };

@@ -23,6 +23,7 @@ fn full_vector_replay() {
     let mut failures: HashMap<u16, usize> = HashMap::new();
     let mut first_failures: Vec<String> = Vec::new();
     let mut pass = 0usize;
+    let mut known_corrupt = 0usize;
     let mut file_first: HashMap<u16, usize> = HashMap::new();
     let mut per_file_fail: HashMap<u16, Vec<String>> = HashMap::new();
     for i in 0..v.n {
@@ -47,8 +48,13 @@ fn full_vector_replay() {
         mem.writes.push(t.pc + 3);
         // state
         let regs = motorola_68000::Regs {
-            d: [t.regs[0], t.regs[1], t.regs[2], t.regs[3], t.regs[4], t.regs[5], t.regs[6], t.regs[7]],
-            a: [t.regs[8], t.regs[9], t.regs[10], t.regs[11], t.regs[12], t.regs[13], t.regs[14]],
+            d: [
+                t.regs[0], t.regs[1], t.regs[2], t.regs[3], t.regs[4], t.regs[5], t.regs[6],
+                t.regs[7],
+            ],
+            a: [
+                t.regs[8], t.regs[9], t.regs[10], t.regs[11], t.regs[12], t.regs[13], t.regs[14],
+            ],
             usp: t.regs[15],
             ssp: t.regs[16],
             pc: t.pc,
@@ -90,11 +96,29 @@ fn full_vector_replay() {
             err = Some(format!("sr: got {:04X} want {:04X}", got.sr, fsr));
         }
         if err.is_none() {
-            if let Err(e) = compare_memory(&t.fin, &mem.writes, &mem, &[t.pc, t.pc + 1, t.pc + 2, t.pc + 3]) {
+            if let Err(e) = compare_memory(
+                &t.fin,
+                &mem.writes,
+                &mem,
+                &[t.pc, t.pc + 1, t.pc + 2, t.pc + 3],
+            ) {
                 err = Some(e);
             }
         }
         file_first.entry(t.file).or_insert(i);
+        // Known-corrupt upstream vectors: two ASL.b rows whose golden
+        // final D2 differs from the initial D2 in all four bytes. A
+        // byte shift can only alter the low byte of Dn, so no 68000
+        // implementation can produce these finals (e.g. ASL.b #2,D2 of
+        // 0xBE cannot yield 0x04). They are upstream data corruption,
+        // documented in report/final_report.md.
+        if err.is_some()
+            && v.file_name(t.file) == "ASL.b"
+            && matches!(i - file_first[&t.file], 1582 | 1760)
+        {
+            known_corrupt += 1;
+            continue;
+        }
         if t.file == 30 && i - file_first[&t.file] == 0 {
             println!(
                 "DBG CMP.b[0]: op={:04X} sr_init={:04X} sr_got={:04X} err={:?}",
@@ -128,8 +152,11 @@ fn full_vector_replay() {
             }
         }
     }
-    let total_fail = v.n - pass;
-    println!("replay: {pass}/{} passed, {total_fail} failed", v.n);
+    let total_fail = v.n - pass - known_corrupt;
+    println!(
+        "replay: {pass}/{} passed, {known_corrupt} known-corrupt upstream, {total_fail} failed",
+        v.n
+    );
     let mut files: Vec<_> = failures.iter().collect();
     files.sort();
     for (f, n) in files {
@@ -139,8 +166,8 @@ fn full_vector_replay() {
         println!("  {f}");
     }
     for name in [
-        "ADD.b", "MOVE.b", "LEA", "TST.b", "BEQ", "MOVEQ", "BSR", "ADD.l",
-        "AND.l", "ABCD", "ADDX.l", "CMP.b", "DBcc", "DIVU", "LSL.b",
+        "ADD.b", "MOVE.b", "LEA", "TST.b", "BEQ", "MOVEQ", "BSR", "ADD.l", "AND.l", "ABCD",
+        "ADDX.l", "CMP.b", "DBcc", "DIVU", "LSL.b",
     ] {
         if let Some((fi, _)) = v.names.iter().enumerate().find(|(_, n)| *n == name) {
             if let Some(list) = per_file_fail.get(&(fi as u16)) {
@@ -150,5 +177,9 @@ fn full_vector_replay() {
             }
         }
     }
+    assert_eq!(
+        known_corrupt, 2,
+        "the documented corrupt-vector set changed"
+    );
     assert_eq!(total_fail, 0, "vector replay failures (see log above)");
 }

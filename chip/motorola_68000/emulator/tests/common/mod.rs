@@ -41,10 +41,9 @@ impl Vectors {
         let finals = std::fs::read(dir.join("m68k_final.bin")).unwrap();
         let prefetch = std::fs::read(dir.join("m68k_prefetch.bin"))
             .expect("m68k_prefetch.bin missing: re-run make_68000_vectors.py");
-        let names_json: String =
-            std::fs::read_to_string(dir.join("m68k_names.json")).unwrap();
+        let names_json: String = std::fs::read_to_string(dir.join("m68k_names.json")).unwrap();
         let mut index = Vec::with_capacity(index_bytes.len() / 4);
-        for c in index_bytes.chunks_exact(4) {
+        for c in index_bytes.as_chunks::<4>().0 {
             index.push(u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
         }
         // m68k_names.json: {"names": [...], "ranges": {"name (file N)":
@@ -74,7 +73,7 @@ fn extract_string_array(text: &str, key: &str) -> Vec<String> {
             let mut cur = String::new();
             let mut in_str = false;
             let mut escaped = false;
-            while let Some(c) = chars.next() {
+            for c in chars {
                 match c {
                     '"' if !escaped => {
                         if in_str {
@@ -247,7 +246,10 @@ pub fn compare_memory(
     exclude: &[u32],
 ) -> Result<(), String> {
     let fin_map: HashMap<u32, u8> = fin.iter().copied().collect();
-    let excl: Vec<usize> = exclude.iter().map(|&a| (a & 0x00FF_FFFF) as usize).collect();
+    let excl: Vec<usize> = exclude
+        .iter()
+        .map(|&a| (a & 0x00FF_FFFF) as usize)
+        .collect();
     let mut diffs = String::new();
     for &(a, v) in fin {
         if excl.contains(&(a as usize)) {
