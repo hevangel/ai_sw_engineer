@@ -1060,7 +1060,8 @@ impl Mc68000 {
                 self.exception_at(bus, VEC_CHK, self.pc);
                 return true;
             }
-            self.fnz &= !0x8;
+            // In-range: Z clears and N keeps its value (suite-fitted).
+            self.fnz |= 0x40;
             return false;
         }
         match op >> 8 {
@@ -1223,7 +1224,14 @@ impl Mc68000 {
                     let res = if sum == 0 {
                         0
                     } else {
-                        let corr = if sum & 0xF != 0 { 0x9A } else { 0xA0 };
+                        // A low nibble of F plus X=1 carries out of the
+                        // nibble and takes the 0x9A correction too.
+                        let ln = (dst as i32 & 0xF) + x;
+                        let corr = if ln & 0xF != 0 || ln > 0xF {
+                            0x9A
+                        } else {
+                            0xA0
+                        };
                         ((0 - sum + corr) & 0xFF) as u32
                     };
                     self.write_loc(bus, loc, size, res);
