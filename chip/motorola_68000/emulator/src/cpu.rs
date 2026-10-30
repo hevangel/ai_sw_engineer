@@ -1127,9 +1127,10 @@ impl Mc68000 {
                     let r = -i64::from(v & m as u32) - i64::from(x_in);
                     let res = (r as u64 & m) as u32;
                     self.write_loc(bus, loc, size, res);
-                    // X/C set on borrow; Z unchanged on non-zero result
+                    // X/C set on borrow; Z unchanged on non-zero result.
+                    // Suite-fitted V: operand 100...0 with X CLEAR.
                     self.set_xc(r < 0);
-                    self.set_v(v == 1u32 << (bits - 1) && x_in);
+                    self.set_v(v == 1u32 << (bits - 1) && !x_in);
                     if res != 0 {
                         self.fnz |= 0x40;
                     }
@@ -1959,7 +1960,7 @@ impl Mc68000 {
             self.set_v(match (b0, b1) {
                 (false, false) => false,
                 (false, true) => (-128..=-34).contains(&u),
-                (true, false) => (123..=126).contains(&u),
+                (true, false) => (123..=127).contains(&u),
                 (true, true) => (-132..=-33).contains(&u),
             });
             if res != 0 {
@@ -2343,12 +2344,17 @@ impl Mc68000 {
                 self.d[rn] = (self.d[rn] & !0xFF) | res;
             }
             self.set_xc(c1);
+            // Suite-fitted V: the corrected result 0x80-0xDF sets V;
+            // 0xF0-0xFF never does; the 0xE0-0xEF rows set V only when
+            // the raw sum's low byte sits in the 0x7A-0x7F window (the
+            // same window the c0-only rows use via t+6).
+            let t_low = (t as u32) & 0xFF;
+            let res_hi = (res >> 4) & 0xF;
             self.set_v(if c1 {
-                // The golden sets V for corrected results 0x80-0xEF and
-                // leaves it clear for 0xF0-0xFF.
-                (res & 0x80) != 0 && (res & 0xF0) != 0xF0
+                (0x8..=0xD).contains(&res_hi)
+                    || (res_hi == 0xE && (0x7A..=0x7F).contains(&t_low))
             } else {
-                c0 && (0x80..=0x85).contains(&(t + 6))
+                c0 && (0x7A..=0x7F).contains(&t_low)
             });
             if res != 0 {
                 self.fnz |= 0x40;
