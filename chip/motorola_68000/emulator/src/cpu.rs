@@ -1471,20 +1471,36 @@ impl Mc68000 {
             }
         }
         if mode == 4 {
-            // Predecrement store: the first write lands at reg-2; an odd
-            // register faults there before anything is written and the
-            // register keeps its value.
+            // Predecrement store. Suite quirk: the mask is scanned bit 0
+            // upward and each set bit k transfers the register with the
+            // CANONICAL index 15-k (bit 0 = A7, bit 15 = D0) — a
+            // bit-reversed mapping against the post-increment form.
+            // Addresses descend from the register; an odd register
+            // faults on the first write with nothing written and the
+            // register unchanged.
             let orig = self.aget(reg as usize);
-            let first = orig.wrapping_sub(step);
+            // The .l form writes word-at-a-time, so the first bus access
+            // targets reg-2 even for longs; an odd register faults there
+            // with nothing written and the register unchanged.
+            let first = orig.wrapping_sub(2);
             if first & 1 != 0 {
                 self.addr_error_hw(bus, first, 0x05, self.pc.wrapping_sub(2));
                 return true;
             }
             let mut addr = orig;
-            for i in (0..16).rev() {
-                if mask & (1 << i) != 0 {
+            for k in 0..16u32 {
+                if mask & (1 << k) != 0 {
                     addr = addr.wrapping_sub(step);
-                    let v = self.movem_reg(i as usize, long);
+                    let idx = (15 - k) as usize; // canonical D0..D7=0..7, A0..A7=8..15
+                    let v = if idx < 8 {
+                        if long {
+                            self.d[idx]
+                        } else {
+                            self.d[idx] & 0xFFFF
+                        }
+                    } else {
+                        self.aget(idx - 8)
+                    };
                     if long {
                         self.wr32(bus, addr, v);
                     } else {
@@ -1548,10 +1564,34 @@ impl Mc68000 {
                 }
             }
             self.aset(reg as usize, orig);
-        } else {
-            let acc = if long { Size::Long } else { Size::Word };
+        } else if mode == 3 {
+            // (An)+: the operand reads start at the register value and
+            // the golden steps word-at-a-time — a parity fault leaves
+            // only the first +2 committed; a completed transfer ends
+            // the register at orig + step x pop.
             let orig = self.aget(reg as usize);
             let count = mask.count_ones();
+            if orig & 1 != 0 {
+                self.aset(reg as usize, orig.wrapping_add(2));
+                self.addr_error_hw(bus, orig, 0x15, self.pc.wrapping_sub(2));
+                return true;
+            }
+            let mut addr = orig;
+            for i in 0..16u32 {
+                if mask & (1 << i) != 0 {
+                    let v = if long {
+                        self.rd32(bus, addr)
+                    } else {
+                        let w = self.rd16(bus, addr);
+                        (w as i16 as i32) as u32
+                    };
+                    self.movem_set_reg(i as usize, v, long);
+                    addr = addr.wrapping_add(step);
+                }
+            }
+            self.aset(reg as usize, orig.wrapping_add(step * count));
+        } else {
+            let acc = if long { Size::Long } else { Size::Word };
             let mut addr = match self.odd_ea(bus, mode, reg, acc, false) {
                 Some(a) => a,
                 None => return true,
@@ -1567,11 +1607,6 @@ impl Mc68000 {
                     self.movem_set_reg(i as usize, v, long);
                     addr = addr.wrapping_add(step);
                 }
-            }
-            // The (An)+ form ends the register at orig + step x pop
-            // (ea_addr only applied the single EA-resolution step).
-            if mode == 3 {
-                self.aset(reg as usize, orig.wrapping_add(step * count));
             }
         }
         false
