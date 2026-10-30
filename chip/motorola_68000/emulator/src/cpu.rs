@@ -753,9 +753,50 @@ impl Mc68000 {
         // The (An)+ destination resolves without stepping: the access
         // uses the original register value and the step commits only
         // after a successful write (the golden rolls it back on a
-        // store fault).
+        // store fault). The -(An) destination with an odd register
+        // faults at anI+2 with the register left there — a golden
+        // quirk — while even registers take the canonical path.
         let dst = match dst_mode {
             3 => Some(EaLoc::Mem(self.aget(dst_reg as usize))),
+            4 if size != Size::Byte => {
+                let orig = self.aget(dst_reg as usize);
+                if orig & 1 != 0 {
+                    // The -(An) destination's parity fault steps the
+                    // register by a single word (even for longs) and
+                    // faults on that address at the running pc.
+                    let fa = orig.wrapping_sub(2);
+                    self.aset(dst_reg as usize, fa);
+                    self.addr_error_hw(bus, fa, 0x05, self.pc);
+                    return true;
+                }
+                let a = orig.wrapping_sub(self.step_for_reg(size, dst_reg));
+                self.aset(dst_reg as usize, a);
+                Some(EaLoc::Mem(a))
+            }
+            // (xxx).l destination: two extension words. A parity fault
+            // records the address two words below the running pc —
+            // the first destination extension word's own address.
+            7 if dst_reg == 1 && size != Size::Byte => {
+                let a = self.fetch32(bus);
+                if a & 1 != 0 {
+                    self.addr_error_hw(bus, a, 0x05, self.pc.wrapping_sub(4));
+                    return true;
+                }
+                Some(EaLoc::Mem(a))
+            }
+            // (d8,PC,Xn) is not a writable <ea>; the golden still
+            // resolves it and faults at the running pc.
+            7 if dst_reg == 3 && size != Size::Byte => {
+                let a = match self.ea_addr(bus, 7, 3, size) {
+                    Some(a) => a,
+                    None => return true,
+                };
+                if a & 1 != 0 {
+                    self.addr_error_hw(bus, a, 0x05, self.pc);
+                    return true;
+                }
+                Some(EaLoc::Mem(a))
+            }
             _ => self.ea_loc(bus, dst_mode, dst_reg, size, true),
         };
         let dst = match dst {
@@ -768,7 +809,9 @@ impl Mc68000 {
         } else {
             if let EaLoc::Mem(a) = dst {
                 if dst_mode == 3 && size != Size::Byte && a & 1 != 0 {
-                    self.addr_error_hw(bus, a, 0x05, self.pc);
+                    // The (An)+ parity fault leaves the register
+                    // unchanged and records the faulting access address.
+                    self.addr_error_hw(bus, a, 0x05, self.pc.wrapping_sub(2));
                     return true;
                 }
             }
