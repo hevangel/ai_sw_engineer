@@ -16,3 +16,7 @@
 mod cpu;
 
 pub use cpu::{Bus, Mc68000, Regs, Size, StepInfo};
+
+/// Debug hook: the last address-error frame PC the core pushed (probe
+/// diagnostics only).
+pub use cpu::LAST_FAULT_PC;

@@ -115,6 +115,15 @@ fn probe() {
         }
         if got.pc != fpc {
             first_field_fail.entry("pc").or_insert(i - lo);
+            err.push_str(&format!(
+                "pc:{:06X}/{:06X} fpc={:06X} ",
+                got.pc,
+                fpc,
+                motorola_68000::LAST_FAULT_PC.load(core::sync::atomic::Ordering::Relaxed)
+            ));
+        }
+        if got.pc != fpc {
+            first_field_fail.entry("pc").or_insert(i - lo);
             err.push_str(&format!("pc:{:06X}/{:06X} ", got.pc, fpc));
         }
         if let Err(e) = compare_memory(&t.fin, &mem.writes, &mem, &[t.pc, t.pc + 1, t.pc + 2, t.pc + 3]) {
@@ -124,6 +133,10 @@ fn probe() {
         if err.is_empty() {
             continue;
         }
+        err.push_str(&format!(
+            "fpc={:06X} ",
+            motorola_68000::LAST_FAULT_PC.load(core::sync::atomic::Ordering::Relaxed)
+        ));
         bad += 1;
         if deep == Some(i - lo) {
             println!("  got:  pc={:06X} sr={:04X} d={:08X?} a={:08X?}", got.pc, got.sr, got.d, got.a);

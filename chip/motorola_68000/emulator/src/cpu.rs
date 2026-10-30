@@ -83,6 +83,11 @@ const VEC_LINE_A: u32 = 0x028;
 const VEC_LINE_F: u32 = 0x02C;
 const VEC_TRAP_BASE: u32 = 0x080;
 
+/// Debug hook: the last address-error frame PC the core pushed (probe
+/// diagnostics only).
+pub static LAST_FAULT_PC: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(0);
+
 pub struct Mc68000 {
     d: [u32; 8],
     a: [u32; 7],
@@ -329,6 +334,7 @@ impl Mc68000 {
         let op = self.op;
         let sr = self.sr();
         self.sri |= SR_S;
+        LAST_FAULT_PC.store(fault_pc, core::sync::atomic::Ordering::Relaxed);
         self.push32(bus, fault_pc);
         self.push16(bus, sr);
         self.push16(bus, iird);
@@ -736,6 +742,14 @@ impl Mc68000 {
         let src_reg = op & 7;
         let dst_mode = (op >> 6) & 7;
         let dst_reg = (op >> 9) & 7;
+        // The source's bus cycles advance the golden's prefetch: a
+        // memory source performs a read cycle, a register/immediate
+        // source does not.
+        let src_reads = match src_mode {
+            0 | 1 => false,
+            7 => src_reg <= 3,
+            _ => true,
+        };
         let mut v = { match self.ea_loc(bus, src_mode, src_reg, size, false) {
                     Some(l) => self.read_loc(bus, l, size),
                     None => return true,
@@ -773,13 +787,19 @@ impl Mc68000 {
                 self.aset(dst_reg as usize, a);
                 Some(EaLoc::Mem(a))
             }
-            // (xxx).l destination: two extension words. A parity fault
-            // records the address two words below the running pc —
-            // the first destination extension word's own address.
+            // (xxx).l destination: two extension words. The parity
+            // fault's frame PC sits two words below the running pc,
+            // minus one more word when the source performed a memory
+            // read cycle (its data cycle pushes the golden's prefetch).
             7 if dst_reg == 1 && size != Size::Byte => {
                 let a = self.fetch32(bus);
                 if a & 1 != 0 {
-                    self.addr_error_hw(bus, a, 0x05, self.pc.wrapping_sub(4));
+                    let fp = if src_reads {
+                        self.pc.wrapping_sub(4)
+                    } else {
+                        self.pc.wrapping_sub(2)
+                    };
+                    self.addr_error_hw(bus, a, 0x05, fp);
                     return true;
                 }
                 Some(EaLoc::Mem(a))
@@ -1237,7 +1257,11 @@ impl Mc68000 {
                     };
                     self.write_loc(bus, loc, size, res);
                     self.set_xc(sum != 0);
-                    self.set_v((0x1B..=0x80).contains(&sum));
+                    // Suite-fitted V: result-based, not sum-based — V is
+                    // set iff the corrected result lands in 0x1A-0x7F
+                    // (which also clears V for the dst=0x20/X=0 row whose
+                    // result is 0x80).
+                    self.set_v((0x1A..=0x7F).contains(&res));
                     if res != 0 {
                         self.fnz |= 0x40;
                     }
@@ -2282,8 +2306,6 @@ impl Mc68000 {
             // Suite-derived (SingleStepTests): the golden's GT is the
             // canonical !Z && N==V, with C and X ignored.
             14 => !z && n == v,
-            _ => z || n != v,
-            _ => z || n != v,
             _ => z || n != v,
         }
     }
