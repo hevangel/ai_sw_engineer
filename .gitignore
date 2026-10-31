@@ -52,6 +52,7 @@ Thumbs.db
 # Local agent state
 .kiro/
 .mimosa/
+.mimosa/
 
 # Git worktrees (see AGENTS.md: all worktrees live under worktrees/)
 /worktrees/
