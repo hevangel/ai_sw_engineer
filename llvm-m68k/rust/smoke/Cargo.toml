@@ -1,0 +1,22 @@
+[package]
+name = "smokem68k"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "smoke"
+path = "src/main.rs"
+
+[[bin]]
+name = "mini"
+path = "src/mini.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
