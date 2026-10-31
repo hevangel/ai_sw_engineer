@@ -1,0 +1,17 @@
+[package]
+name = "busicom-emulator-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WASM bindings for the Busicom 141-PF system emulator"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+busicom-emulator = { path = "../../emulator" }
+
+[profile.release]
+opt-level = "s"
+panic = "abort"

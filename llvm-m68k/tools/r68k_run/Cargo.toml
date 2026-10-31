@@ -1,0 +1,9 @@
+[package]
+name = "r68k-run"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+r68k = "=0.2.2"

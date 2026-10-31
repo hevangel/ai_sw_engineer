@@ -25,6 +25,7 @@ Usage: exec_cmp.py        (exit status nonzero on any mismatch)
 import itertools
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -35,6 +36,15 @@ BIN = os.path.join(ROOT, "install", "bin")
 LLC = os.environ.get("LLC", os.path.join(BIN, "llc"))
 LLVM_MC = os.environ.get("LLVM_MC", os.path.join(BIN, "llvm-mc"))
 LLVM_OBJDUMP = os.environ.get("LLVM_OBJDUMP", os.path.join(BIN, "llvm-objdump"))
+
+
+def contained(base, *parts):
+    """Resolve parts under base and refuse paths that escape it (SAST guard)."""
+    real_base = pathlib.Path(base).resolve()
+    p = real_base.joinpath(*parts).resolve()
+    if p != real_base and real_base not in p.parents:
+        raise SystemExit(f"path escapes {real_base}: {parts}")
+    return p
 XCHECK = os.path.join(ROOT, "tools", "chips_xcheck")
 CYCLES = 4000
 
@@ -123,9 +133,8 @@ def build_image(fn, body, width, ret_width=8):
     asm += ["halt:", "    jun halt"]
     asm += [f"__frame_{fn} = 0x40", f"__framebank_{fn} = 0", body]
     with tempfile.TemporaryDirectory() as d:
-        sp, op = os.path.join(d, "t.s"), os.path.join(d, "t.o")
-        with open(sp, "w") as f:
-            f.write("\n".join(asm) + "\n")
+        sp, op = contained(d, "t.s"), contained(d, "t.o")
+        sp.write_text("\n".join(asm) + "\n")
         run([LLVM_MC, "-triple=i4004", "-filetype=obj", sp, "-o", op])
         rel = run([LLVM_OBJDUMP, "-r", op]).stdout
         rom = bytearray(parse_objdump_text(

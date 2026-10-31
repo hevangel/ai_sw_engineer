@@ -27,6 +27,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential ca-certificates curl git git-lfs \
       clang lld cmake ninja-build ccache \
+      binutils-m68k-linux-gnu \
       python3 python3-pip python3-venv \
       xxd file less zstd \
  && rm -rf /var/lib/apt/lists/*

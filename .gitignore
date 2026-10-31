@@ -51,6 +51,13 @@ Thumbs.db
 
 # Local agent state
 .kiro/
+.mimosa/
+.mimosa/
 
 # Git worktrees (see AGENTS.md: all worktrees live under worktrees/)
 /worktrees/
+
+# Browser-machine WASM artifact (built by web/*/scripts/build.sh from source)
+system/*/*/web/www/*.wasm
+.mimosa/
+web/wasm/.mimosa/

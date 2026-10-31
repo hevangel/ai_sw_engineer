@@ -20,7 +20,18 @@ no third-party code is copied.
 """
 import argparse
 import json
+import pathlib
 import sys
+
+
+def safe_out(path):
+    """CLI output path: relative paths must stay inside the working
+    directory (no `..` climbs); absolute paths are explicit intent."""
+    p = pathlib.Path(path).resolve()
+    if not pathlib.Path(path).is_absolute() and pathlib.Path.cwd() not in p.parents:
+        raise SystemExit(f"build_schedule: refusing relative output outside the "
+                         f"working directory: {path}")
+    return p
 
 
 def build(doc):
@@ -50,8 +61,7 @@ def main():
         sys.exit("unsupported schema_version")
     text = build(doc)
     if args.out:
-        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(text)
+        safe_out(args.out).write_text(text, encoding="utf-8", newline="\n")
     else:
         sys.stdout.write(text)
 
