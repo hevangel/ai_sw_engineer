@@ -1,0 +1,29 @@
+[package]
+name = "apple_basic"
+version = "0.1.0"
+edition = "2021"
+description = "apple_basic for apple_ii, reimplemented in Rust"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across titles.
+name = "software"
+path = "src/lib.rs"
+
+[[bin]]
+name = "apple_basic"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
