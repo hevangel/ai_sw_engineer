@@ -26,7 +26,8 @@ On Windows run `scripts/docker_run.sh` from Git Bash or WSL; from PowerShell use
 
 | Toolchain | Built by | In the image |
 |---|---|---|
-| 6502 family: llvm-mos, llvm-mos-sdk, rust-mos | upstream image (base stage) | `/usr/local`, `rustc +mos` |
+| 6502 family: rust-mos with its own llvm-mos and SDK | upstream image (base stage) | `/usr/local` (on `PATH`), `rustc +mos` |
+| llvm-mos (clang, lld, compiler-rt, MOS.cmake distribution) and llvm-mos-sdk at the `external/llvm-mos` and `external/llvm-mos-sdk` pins | `llvm-mos` stage, per their READMEs | `/opt/ai-sw/llvm-mos` (`$LLVM_MOS_HOME`), e.g. `$LLVM_MOS_HOME/bin/mos-c64-clang` |
 | M68k: pinned nightly `m68k-unknown-none-elf`, GNU m68k binutils | base stage | `rustc +nightly-…`, `m68k-linux-gnu-ld` |
 | `llvm-i4004`, `llvm-i8008`, `llvm-i8086` (llc, llvm-mc, llvm-objdump, FileCheck, …) | each backend's `scripts/build_llvm.sh`, one BuildKit stage per backend | `/opt/ai-sw/llvm-<chip>/install` |
 | rustc with `i8086-unknown-none` (stage 1, `core`/`alloc`/`compiler_builtins`) | `llvm-i8086/scripts/build_llvm_for_rust.sh` + `rust_build.sh` | `/build/rust-obj/x86_64-unknown-linux-gnu/stage1` (`$I8086_RUSTC`), library sources in `/build/rust-src/library` |
@@ -42,8 +43,9 @@ docker compose run --rm toolchain verify_toolchains.sh   # one line per toolchai
 docker compose --profile base build base        # the light image only (same as `docker build .`)
 ```
 
-- **LLVM pin.** The build fetches exactly `LLVM_PROJECT_COMMIT` from github.com/llvm/llvm-project, so the 2 GB submodule is not part of the build context. `scripts/compose_build.sh` reads the commit from `git ls-tree HEAD external/llvm-project` and refuses a different value; keep the default in `docker-compose.yml` equal to the pin when the submodule moves. The rustc source pin lives in `llvm-i8086/scripts/rust_build.sh`.
+- **Pins.** The build fetches exactly `LLVM_PROJECT_COMMIT`, `LLVM_MOS_COMMIT` and `LLVM_MOS_SDK_COMMIT` from GitHub, so the large submodules are not part of the build context. `scripts/compose_build.sh` reads all three from `git ls-tree HEAD external/<name>` and refuses a different value; keep the defaults in `docker-compose.yml` equal to the pins when a submodule moves.
+- **Two llvm-mos copies.** `rustc +mos` stays on the base image's own llvm-mos (on `PATH`), because its LTO bitcode must match the LLVM it was built with. The repository's pinned llvm-mos is not on `PATH`; use it through `$LLVM_MOS_HOME/bin` (C/C++ with the SDK, or llvm-mc/objdump on rust-mos output). Moving `rustc +mos` to it needs a matching rust-mos build. The rustc source pin lives in `llvm-i8086/scripts/rust_build.sh`.
 - **Where scripts find the tools.** The backend scripts use `<repo>/llvm-<chip>/install/bin`. When the mounted repository has no `install/` of its own, the entrypoint links it to the image's copy (`llvm-*/install` is gitignored); a locally built `install/` always wins. Set `AI_SW_LINK_TOOLCHAINS=0` to disable the link. The i8086 scripts default `$I8086_RUSTC` to the path the image provides, so do not mount the old `ai-sw-llvm-build` volume over `/build` in this image.
-- **Cost.** The first build compiles three MC/CodeGen LLVMs, the LLVM libraries for rustc and rustc itself: roughly an hour on 16 cores and tens of GB of BuildKit cache; the backend stages run in parallel and ccache is kept in BuildKit cache mounts. Requires BuildKit (Docker 23+ or `docker compose`).
+- **Cost.** The first build compiles three MC/CodeGen LLVMs, the LLVM libraries for rustc and rustc itself: roughly one to two hours on 16 cores (llvm-mos builds clang, lld and compiler-rt) and tens of GB of BuildKit cache; the backend stages run in parallel and ccache is kept in BuildKit cache mounts. Requires BuildKit (Docker 23+ or `docker compose`).
 - **Check.** The `full` stage ends with `docker/verify_toolchains.sh`, so an image without a working i4004/i8008/i8086 LLVM, the i8086 rustc and its library sources, rust-mos or the M68k route fails to build. Its output is appended to `/home/mos/TOOLCHAIN_VERSIONS.txt`.
 

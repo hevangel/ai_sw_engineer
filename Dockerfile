@@ -67,12 +67,17 @@ CMD ["bash"]
 #   llvm-i4004, llvm-i8008, llvm-i8086  llc/llvm-mc/... with each experimental target
 #   rust-i8086                          LLVM libraries (X86 + I8086) and a stage-1 rustc
 #                                       with the i8086-unknown-none target
-# The 6502 family (llvm-mos/rust-mos) and the M68k route (pinned nightly +
-# binutils-m68k) already come with the base stage. llvm-i286, llvm-m6800 and
-# llvm-m6809 are audit-only and have nothing to build yet.
+#   llvm-mos                            llvm-mos (clang, lld, compiler-rt) and llvm-mos-sdk
+#                                       at the external/llvm-mos{,-sdk} submodule pins,
+#                                       installed in /opt/ai-sw/llvm-mos
+# The base stage keeps the upstream rust-mos image's own llvm-mos on PATH, because
+# `rustc +mos` (and its LTO bitcode) is built against that LLVM; the pinned build
+# is the repository's llvm-mos, used through $LLVM_MOS_HOME. The M68k route
+# (pinned nightly + binutils-m68k) comes with the base stage. llvm-i286,
+# llvm-m6800 and llvm-m6809 are audit-only and have nothing to build yet.
 #
-# LLVM_PROJECT_COMMIT must equal the external/llvm-project submodule pin;
-# scripts/compose_build.sh reads it from git and passes it in.
+# LLVM_PROJECT_COMMIT, LLVM_MOS_COMMIT and LLVM_MOS_SDK_COMMIT must equal the
+# submodule pins; scripts/compose_build.sh reads them from git and passes them in.
 
 FROM base AS llvm-source
 ARG LLVM_PROJECT_COMMIT=0d261d1ca552c95a8f007e061c787ac7132fbcbc
@@ -107,6 +112,35 @@ COPY llvm-i8086 /src/llvm-i8086
 RUN --mount=type=cache,id=ai-sw-ccache-i8086,target=/ccache \
     JOBS="${JOBS}" bash /src/llvm-i8086/scripts/build_llvm.sh
 
+# llvm-mos and its SDK, built as their READMEs describe (clang/cmake/caches/MOS.cmake,
+# then the SDK against that install), with the host gcc: the base image's bare
+# `clang` is the llvm-mos cross compiler and cannot build host binaries.
+FROM base AS llvm-mos
+ARG LLVM_MOS_COMMIT=a5c31b24a97cc16c582d124167e29e3da8946581
+ARG LLVM_MOS_SDK_COMMIT=555253f65a0fa3b4bbe8a203fe21f160da27f931
+ARG JOBS=8
+USER root
+ENV CCACHE_DIR=/ccache CC=gcc CXX=g++
+RUN for repo in llvm-mos:${LLVM_MOS_COMMIT} llvm-mos-sdk:${LLVM_MOS_SDK_COMMIT}; do \
+      name="${repo%%:*}"; commit="${repo#*:}"; \
+      mkdir -p "/src/$name" && cd "/src/$name" && git init -q . \
+      && git remote add origin "https://github.com/llvm-mos/$name.git" \
+      && git fetch -q --depth 1 origin "$commit" && git checkout -q FETCH_HEAD \
+      && test "$(git rev-parse HEAD)" = "$commit" && rm -rf .git || exit 1; \
+    done
+RUN --mount=type=cache,id=ai-sw-ccache-llvm-mos,target=/ccache \
+    cmake -C /src/llvm-mos/clang/cmake/caches/MOS.cmake -G Ninja \
+      -S /src/llvm-mos/llvm -B /build/llvm-mos-obj \
+      -DCMAKE_INSTALL_PREFIX=/opt/ai-sw/llvm-mos \
+      -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+      -DLLVM_CCACHE_BUILD=ON -DLLVM_PARALLEL_LINK_JOBS=2 \
+ && cmake --build /build/llvm-mos-obj -j "${JOBS}" --target install-distribution \
+ && cmake -G Ninja -S /src/llvm-mos-sdk -B /build/llvm-mos-sdk-obj \
+      -DCMAKE_INSTALL_PREFIX=/opt/ai-sw/llvm-mos -DCMAKE_PREFIX_PATH=/opt/ai-sw/llvm-mos \
+      -DLLVM_MOS=/opt/ai-sw/llvm-mos -DLLVM_MOS_BOOTSTRAP_COMPILER=OFF \
+ && cmake --build /build/llvm-mos-sdk-obj -j "${JOBS}" --target install \
+ && /opt/ai-sw/llvm-mos/bin/mos-c64-clang --version
+
 # rustc with i8086-unknown-none (llvm-i8086/rust/README.md). rust_build.sh fetches
 # the pinned rust-lang/rust commit and writes /build/rust-obj (bootstrap.toml).
 FROM llvm-i8086 AS rust-i8086
@@ -121,6 +155,7 @@ USER root
 COPY --from=llvm-i4004 --chown=mos /src/llvm-i4004/install /opt/ai-sw/llvm-i4004/install
 COPY --from=llvm-i8008 --chown=mos /src/llvm-i8008/install /opt/ai-sw/llvm-i8008/install
 COPY --from=llvm-i8086 --chown=mos /src/llvm-i8086/install /opt/ai-sw/llvm-i8086/install
+COPY --from=llvm-mos --chown=mos /opt/ai-sw/llvm-mos /opt/ai-sw/llvm-mos
 # Keep the stage-1 sysroot at the path the scripts default to ($I8086_RUSTC), and the
 # library sources its lib/rustlib/src/rust link points at, for -Zbuild-std=core.
 COPY --from=rust-i8086 --chown=mos /build/rust-obj/x86_64-unknown-linux-gnu/stage1 /build/rust-obj/x86_64-unknown-linux-gnu/stage1
@@ -133,6 +168,7 @@ RUN chmod 0755 /opt/ai-sw/bin/*.sh \
  && chown -h mos /build/rust-obj/x86_64-unknown-linux-gnu/stage1/lib/rustlib/src/rust
 USER mos
 ENV AI_SW_TOOLCHAINS=/opt/ai-sw \
+    LLVM_MOS_HOME=/opt/ai-sw/llvm-mos \
     I8086_RUSTC=/build/rust-obj/x86_64-unknown-linux-gnu/stage1/bin/rustc \
     PATH=/opt/ai-sw/bin:${PATH}
 # /bin/sh has no pipefail: keep the verifier's exit status, then record its report.

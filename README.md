@@ -103,7 +103,7 @@ cd system/apple_ii/integer_basic
 ./scripts/run_all.sh                            # host test → IR → target image → simulator compare
 ```
 
-All toolchains in one image (llvm-mos/rust-mos, the M68k route, the `llvm-i4004`, `llvm-i8008` and `llvm-i8086` backends and the rustc with `i8086-unknown-none`):
+All toolchains in one image (rust-mos, llvm-mos and llvm-mos-sdk at the submodule pins, the M68k route, the `llvm-i4004`, `llvm-i8008` and `llvm-i8086` backends and the rustc with `i8086-unknown-none`):
 
 ```bash
 ./scripts/compose_build.sh                      # docker compose build (about an hour the first time)

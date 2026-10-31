@@ -26,10 +26,18 @@ else
     bad rust-i8086 "$rustc_i8086 with i8086-unknown-none and its library sources"
 fi
 
-if rustc +mos --version >/dev/null 2>&1; then
-    ok mos6502 "$(rustc +mos --version) (llvm-mos, llvm-mos-sdk)"
+mos_home="${LLVM_MOS_HOME:-$toolchains/llvm-mos}"
+if [[ -x $mos_home/bin/clang && -x $mos_home/bin/mos-c64-clang ]] \
+   && "$mos_home/bin/llvm-mc" --version | grep -qi mos; then
+    ok llvm-mos "$("$mos_home/bin/clang" --version | head -n1) + llvm-mos-sdk ($mos_home)"
 else
-    bad mos6502 "rustc +mos (base image)"
+    bad llvm-mos "$mos_home/bin/clang, llvm-mc with the MOS target and the SDK drivers"
+fi
+
+if rustc +mos --version >/dev/null 2>&1; then
+    ok rust-mos "$(rustc +mos --version) (base image, with its own llvm-mos on PATH)"
+else
+    bad rust-mos "rustc +mos (base image)"
 fi
 
 if rustc "+$nightly" --print target-list 2>/dev/null | grep -qx m68k-unknown-none-elf \
