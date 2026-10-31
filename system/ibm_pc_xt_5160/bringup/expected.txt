@@ -1,0 +1,27 @@
+# Expected behavior: bringup/boot_hello.bin
+
+Source: hand-written `boot_hello.asm` (baseline, not compiler output).
+Image: 512-byte boot sector, `55 AA` at bytes 510–511, loaded by BIOS to 0000:7C00.
+
+## On a qualified XT oracle (primary RTL or MartyPC)
+
+1. Boot the sector as drive A: (or the fixed-disk path once the DOS
+   route is qualified — boot sector first per `spec/cpu_abi.md` §8).
+2. CGA text page 0 shows `XT-BOOT-HELLO` at row 0, col 0, followed by CR/LF
+   (cursor ends at row 1, col 0).
+3. CPU halts with interrupts disabled (`CLI; HLT` loop at `done`).
+4. No disk writes, no IVT changes, `DL` (boot drive) preserved until `done`.
+
+## Artifact checks (no emulator needed)
+
+- `wc -c boot_hello.bin` = 512
+- bytes 510–511 = `55 AA`
+- `ndisasm -b 16` / Capstone `CS_MODE_16` decode starts with `cli, xor ax,ax,
+  mov ds,ax, ...` and contains exactly one `int 0x10` site plus the
+  `XT-BOOT-HELLO` string bytes.
+
+## Status
+
+UNVERIFIED: `build.sh` needs NASM (not installed in this session's
+environments); oracle boot runs are bring-up work (`plans/testplan.md`).
+Fill in the measured sha256 and oracle transcripts here when they exist.

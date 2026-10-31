@@ -1,0 +1,21 @@
+{
+  "_comment": "PROVISIONAL Rust target for the IBM PC XT 5160 (Intel 8088, near-only real mode). data-layout MUST equal system/ibm_pc_xt_5160/spec/cpu_abi.md sec.5 exactly. Final say is the llvm-i8086 backend (ai_engineer#60); usable only with a rustc linked against it. Until then, builds cannot consume this file.",
+  "arch": "i8086",
+  "llvm-target": "i8086-unknown-none",
+  "data-layout": "e-m:e-p:16:16-i8:8-i16:16-i32:16-i64:16-n8:16-S16",
+  "target-pointer-width": 16,
+  "target-c-int-width": 16,
+  "target-endian": "little",
+  "os": "none",
+  "env": "",
+  "vendor": "unknown",
+  "executables": true,
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "disable-redzone": true,
+  "max-atomic-width": 0,
+  "atomic-cas": false,
+  "singlethread": true
+}
