@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| Chip | MOS 6502 (1975, MOS Technology / Chuck Peddle) |
+| Chip | MOS 6502 (NMOS, 1975) — CPUs of the Apple II, Commodore PET/C64, Atari 2600 (6507), NES (2A03), KIM-1 |
 | Word / address width | 8-bit word, 16-bit address space (64 KiB addressable) |
-| Strategy | Existing LLVM backend: `llvm-mos` + `rust-mos` fork |
-| Rust target | `rust/mos6502-none.json` (also built-in `mos-unknown-none` / platform configs) |
-| Status | Operational (LLVM-MOS Clang 20.0, rust-mos 1.87-dev, compiler-builtins mos-0.1.148) |
+| Strategy | Reuse pinned upstream `llvm-mos` + `rust-mos`; project-owned bare-metal runtime, linker script and qualification ([spec/audit_upstream.md](spec/audit_upstream.md)) |
+| Rust target | `mos-unknown-none` (tier 3, shipped by pinned `rustc +mos` 1.87.0-dev); custom `rust/mos6502-none.json` is also included |
+| Status | **Qualified (2026-10-26, issue ai_engineer#58).** A representative `no_std` Rust program compiled with the pinned toolchain to a flat 32 KiB ROM image (SHA-256 `1b471700…`, bit-reproducible across builds) executes **identically on two independent 6502 emulators** (vendored py65 and external/mos6502 — same 2,510-instruction step count, same final registers), and its 378 `.text` bytes walk as documented NMOS opcodes in the independent py65 decoder. See [report/qualification.md](report/qualification.md). |
 
 ## Strategy
 
@@ -17,10 +17,6 @@ Chips sharing this backend:
 - MOS 6507 (Atari 2600 VCS)
 - MOS 6510 (Commodore 64)
 - Ricoh 2A03 (NES / Famicom, minus decimal mode)
-| Chip | MOS 6502 (NMOS, 1975) — CPUs of the Apple II, Commodore PET/C64, Atari 2600 (6507), NES (2A03), KIM-1 |
-| Strategy | **reuse upstream `llvm-mos` + `rust-mos`** (pinned); project-owned bare-metal runtime, linker script and qualification ([spec/audit_upstream.md](spec/audit_upstream.md)) |
-| Rust target | `mos-unknown-none` (tier 3, shipped by the pinned `rustc +mos` 1.87.0-dev) |
-| Status | **2026-10-26 (issue ai_engineer#58): qualified.** A representative `no_std` Rust program compiled with the pinned toolchain to a flat 32 KiB ROM image (SHA-256 `1b471700…`, bit-reproducible across builds) executes **identically on two independent 6502 emulators** (vendored py65 and external/mos6502 — same 2,510-instruction step count, same final registers), and its 378 `.text` bytes walk as documented NMOS opcodes in the independent py65 decoder. See [report/qualification.md](report/qualification.md). |
 
 ## Layout
 
