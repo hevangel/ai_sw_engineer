@@ -1,0 +1,49 @@
+# One image with every toolchain of this repository (Dockerfile target `full`):
+# llvm-mos/rust-mos (6502 family), the M68k route, the llvm-i4004, llvm-i8008 and
+# llvm-i8086 backends, and the stage-1 rustc with i8086-unknown-none.
+#
+#   scripts/compose_build.sh            # build (pins LLVM to the submodule commit)
+#   docker compose run --rm toolchain   # shell, repository at /workspace
+#   docker compose run --rm toolchain verify_toolchains.sh
+#
+# The first build compiles four LLVM configurations and rustc: about an hour on
+# 16 cores, plus ~40 GB of BuildKit cache. See docs/docker/README.md.
+name: ai-sw-engineer
+
+services:
+  toolchain:
+    image: ai-sw-engineer:full
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: full
+      args:
+        # Must equal `git ls-tree HEAD external/llvm-project`; compose_build.sh sets it.
+        LLVM_PROJECT_COMMIT: ${LLVM_PROJECT_COMMIT:-0d261d1ca552c95a8f007e061c787ac7132fbcbc}
+        JOBS: ${JOBS:-8}
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      # Hardware simulators (primary oracle). Set AI_HW_ENGINEER to another checkout if needed.
+      - ${AI_HW_ENGINEER:-../ai_hw_engineer}:/ai_hw_engineer
+      - cargo-registry:/home/mos/.cargo/registry
+    stdin_open: true
+    tty: true
+
+  # The light image without the prebuilt backends (same as `docker build .`).
+  base:
+    image: ai-sw-engineer:latest
+    profiles: ["base"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: default
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ${AI_HW_ENGINEER:-../ai_hw_engineer}:/ai_hw_engineer
+    stdin_open: true
+    tty: true
+
+volumes:
+  cargo-registry:

@@ -1,2 +1,10 @@
-# The image is a toolchain only; the repository is bind-mounted at run time.
+# The repository is bind-mounted at run time; send only what the full image builds.
 *
+!docker/
+!llvm-i4004/
+!llvm-i8008/
+!llvm-i8086/
+llvm-*/install
+llvm-*/build
+llvm-*/build_llvm.out
+llvm-*/tests/.lit

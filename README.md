@@ -103,6 +103,15 @@ cd system/apple_ii/integer_basic
 ./scripts/run_all.sh                            # host test → IR → target image → simulator compare
 ```
 
+All toolchains in one image (llvm-mos/rust-mos, the M68k route, the `llvm-i4004`, `llvm-i8008` and `llvm-i8086` backends and the rustc with `i8086-unknown-none`):
+
+```bash
+./scripts/compose_build.sh                      # docker compose build (about an hour the first time)
+docker compose run --rm toolchain               # shell with every toolchain, repo at /workspace
+```
+
+See [docs/docker/README.md](docs/docker/README.md).
+
 The chip simulators come from a sibling checkout of `ai_hw_engineer`; set `AI_HW_ENGINEER=/path/to/ai_hw_engineer` if it is not at `../ai_hw_engineer`.
 
 ## Scope and limitations
