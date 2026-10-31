@@ -1,0 +1,12 @@
+[package]
+name = "motorola_68000"
+version = "0.1.0"
+edition = "2021"
+description = "MC68000 CPU core (no_std library), validated against the SingleStepTests 680x0 vector suite"
+license = "MIT"
+
+[dependencies]
+
+[lib]
+name = "motorola_68000"
+path = "src/lib.rs"
