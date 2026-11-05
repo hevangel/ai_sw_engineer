@@ -2,10 +2,11 @@
 
 | Level | What | Oracle | Command (from `system/ibm_pc/emulator/`) |
 |---|---|---|---|
-| Units | SHA-256, scan codes, script parsing, firmware/disk size checks, CGA graphics decoding (banks, palettes, 640x200) | FIPS 180-4 vectors; hand-worked from the Technical Reference | `cargo test` |
+| Units | SHA-256, scan codes, script parsing, firmware/disk size checks, CGA graphics decoding (banks, palettes, 640x200), text frames (glyph, attributes, blink, cursor, 40 columns, display enable), speaker resampling and WAV, debugger (breakpoints, address parsing, monitor commands) | FIPS 180-4 vectors; hand-worked from the Technical Reference and the 6845 datasheet | `cargo test` |
 | CPU programs | control flow, stack, interrupts and shadows, `REP` interruption, memory map, I/O | Intel manual, worked by hand | `cargo test --test cpu_programs` |
 | Devices | PIC priority/EOI, PIT modes and latch, DMA flip-flop and terminal count, FDC command phases, keyboard handshake | datasheets, worked by hand | `cargo test --test devices` |
-| CLI | usage and error exits | n/a | `cargo test --test cli` |
+| CLI | usage and error exits; `--monitor` over standard input with a stand-in 8 KiB ROM | n/a; the stand-in program's own effect | `cargo test --test cli` |
+| Front-end support vs the originals | the BIOS power-on beep's frequency; every pixel of the DOS boot screen drawn with the character ROM; a breakpoint at the BIOS entry point | the timer divisor read out of the original BIOS; the RTL's recorded screen and the original character ROM's glyphs; the far jump at the BIOS reset vector | `cargo test --release --test frontend_support -- --ignored --nocapture` |
 | Silicon vectors | every single-instruction state and bus-write sequence | the physical chip (SingleStepTests/8086 `e71c68d`) | `cargo test --release --test silicon_vectors -- --ignored --nocapture` |
 | RTL CPU differential | boundary-biased random states, expected values from this core | the hardware project's 8086 RTL (Verilator, in Docker) | `scripts/rtl_diff.sh [cases_per_encoding] [seed]` |
 | RTL system replay | unchanged BIOS + PC DOS 1.00 + typed DOS and BASIC session: screens and drive B image | the hardware project's IBM PC RTL (`Vibm_pc`) | `cargo test --release --test replay -- --ignored --nocapture` |

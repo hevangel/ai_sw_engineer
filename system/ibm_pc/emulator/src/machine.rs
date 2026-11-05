@@ -15,6 +15,7 @@ use crate::fdc::Fdc;
 use crate::pic::Pic;
 use crate::pit::Pit;
 use crate::ppi::{Keyboard, Ppi};
+use crate::speaker::Speaker;
 
 pub const CGA_BASE: u32 = 0xB8000;
 pub const CGA_SIZE: usize = 0x4000;
@@ -26,6 +27,10 @@ pub const ROM_SIZE: usize = 0x1_0000 - 0x6000;
 /// colour display (bits 5-4 = 10), no coprocessor, 64 KiB on the planar. SW2
 /// reads as zero (no expansion memory).
 pub const SW1_DEFAULT: u8 = 0x6F;
+
+/// `Board::io_log` keeps the first this-many OUTs, so a long interactive run
+/// does not grow without bound.
+pub const IO_LOG_LIMIT: usize = 1 << 16;
 
 /// Everything on the bus except the CPU.
 pub struct Board {
@@ -39,13 +44,14 @@ pub struct Board {
     pub dma: Dma,
     pub cga: Cga,
     pub fdc: Fdc,
+    pub speaker: Speaker,
     pub sw1: u8,
     pub nmi_enabled: bool,
     /// CPU clocks since reset.
     pub clock: u64,
     pit_phase: u64,
     bus_bytes: u64,
-    /// Every OUT since reset: (port, value).
+    /// The first [`IO_LOG_LIMIT`] OUTs since reset: (port, value).
     pub io_log: Vec<(u16, u8)>,
     nmi: bool,
     forced_intr: Option<u8>,
@@ -66,6 +72,7 @@ impl Board {
             dma: Dma::new(),
             cga: Cga::new(),
             fdc: Fdc::new(),
+            speaker: Speaker::new(),
             sw1: SW1_DEFAULT,
             nmi_enabled: false,
             clock: 0,
@@ -105,6 +112,12 @@ impl Board {
         (t2 << 5) | (t2 << 4)
     }
 
+    /// The speaker is timer 2's output gated by port B bit 1.
+    fn update_speaker(&mut self) {
+        let level = self.pit.out(2) && self.ppi.b & 0x02 != 0;
+        self.speaker.set(self.clock, level);
+    }
+
     /// Advance the board by `dt` CPU clocks.
     fn advance(&mut self, dt: u64) {
         self.clock += dt;
@@ -119,6 +132,7 @@ impl Board {
             } else {
                 self.pic.set_line(0, self.pit.out(0));
             }
+            self.update_speaker();
         }
         self.kbd.poll(self.ppi.b, self.clock);
         self.pic.set_line(1, self.kbd.irq);
@@ -212,7 +226,9 @@ impl Bus for Board {
 
     fn port_out(&mut self, port: u16, value: u8) {
         self.bus_bytes += 1;
-        self.io_log.push((port, value));
+        if self.io_log.len() < IO_LOG_LIMIT {
+            self.io_log.push((port, value));
+        }
         let p = port & 0x3FF;
         match p {
             0x00..=0x0F => self.dma.write(p as u8, value),
@@ -223,6 +239,7 @@ impl Bus for Board {
                 if p & 3 == 1 || p & 3 == 3 {
                     self.pit.set_gate(2, self.ppi.b & 1 != 0);
                     self.kbd.port_b(self.ppi.b, self.clock);
+                    self.update_speaker();
                 }
             }
             0x80..=0x9F => self.dma.write_page(p as u8, value),
@@ -283,11 +300,13 @@ impl Machine {
             self.board.sw1,
         );
         let disks = std::mem::take(&mut self.board.fdc.disks);
+        let capture = self.board.speaker.capture;
         self.cpu = Cpu::new();
         self.board = Board::new(ram_kib);
         self.board.rom = rom;
         self.board.sw1 = sw1;
         self.board.fdc.disks = disks;
+        self.board.speaker.capture = capture;
         self.instructions = 0;
     }
 
