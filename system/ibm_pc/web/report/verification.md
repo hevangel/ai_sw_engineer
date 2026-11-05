@@ -5,7 +5,7 @@
 Environment: Linux container, `cargo 1.99.1` (wasm32-unknown-unknown), Node 22.23.4,
 Playwright 1.63.0 with its Chromium (headless). Original images fetched with
 `../emulator/scripts/fetch_reference.py` (all SHA-256 equal to
-`../emulator/original/provenance.md`). WASM artifact: 141 KB,
+`../emulator/original/provenance.md`). WASM artifact (not committed; `scripts/build.sh` rebuilds it): 141 KB,
 SHA-256 `78097d71e72f42d4029646637bc51e9d73990842a2b3c4f77d78a077f2ad2a59`, built by `scripts/build.sh` from the emulator at this commit.
 
 | Command | Result |
@@ -24,11 +24,12 @@ Findings fixed during this stage:
   machine's writes; it now keeps them, as real diskettes do.
 - Frames were posted on every 4 ms tick (182 per second); now at most 60 per second.
 
-Screenshots (real runs, Chromium): [errors](screenshots/functional/02_errors.png),
-[DIR typed in the page](screenshots/functional/05_dir.png),
-[Rust hello_rs](screenshots/functional/07a_hello_rs.png),
-[SV unavailable](screenshots/functional/07_sv_unavailable.png),
-[390 px](screenshots/functional/08_narrow.png).
+Screenshots (real runs, Chromium; not committed — regenerate with
+`tests/browser.mjs --shots report/screenshots/functional` at commit of this stage): errors (`functional/02_errors.png`),
+DIR typed in the page (`functional/05_dir.png`),
+Rust hello_rs (`functional/07a_hello_rs.png`),
+SV unavailable (`functional/07_sv_unavailable.png`),
+390 px (`functional/08_narrow.png`).
 
 Remaining limits: Mode B is not implemented (no Xezim adapter here); timing is the
 native emulator's instruction-level model (E-A2), so speed "100%" means machine clocks
@@ -37,7 +38,9 @@ listening; only Chromium was exercised; no visual design work was done (issue #2
 
 ## 2026-11-05: UI/UX polish stage (issue #250)
 
-Baseline: the functional stage above (commit `84cf934`). Its evidence was reviewed by
+Baseline: the functional stage above. Screenshots named below are not committed:
+`tests/browser.mjs --shots report/screenshots/polish` regenerates the "after" set, and
+the same command at the functional-stage commit the "before" set (`functional/`). Its evidence was reviewed by
 the agent before this stage started (35/35 browser checks, RTL-identical screens,
 screenshots inspected); **human acceptance of #249 has not been given** and is not
 claimed. Review findings U1-U12 and the plan are in
@@ -47,17 +50,17 @@ message (`text`) and the `stopped` flag on errors.
 
 | Finding | Resolution | Evidence |
 |---|---|---|
-| U1 screen below the fold | two columns (monitor left); one column with the monitor first below 960 px | [before](screenshots/functional/05_dir.png) / [after](screenshots/polish/05_dir.png); [390 px before](screenshots/functional/08_narrow.png) / [after](screenshots/polish/08_narrow.png) |
-| U2 unexplained black screen, stale frame after a backend switch | overlay for loading / missing BIOS / ready / paused / stopped; the canvas is cleared on a switch | [before](screenshots/functional/01_initial.png) / [after](screenshots/polish/01_initial.png); browser checks "the screen says what is missing", "ready", "paused" |
+| U1 screen below the fold | two columns (monitor left); one column with the monitor first below 960 px | before (`functional/05_dir.png`) / after (`polish/05_dir.png`); 390 px before (`functional/08_narrow.png`) / after (`polish/08_narrow.png`) |
+| U2 unexplained black screen, stale frame after a backend switch | overlay for loading / missing BIOS / ready / paused / stopped; the canvas is cleared on a switch | before (`functional/01_initial.png`) / after (`polish/01_initial.png`); browser checks "the screen says what is missing", "ready", "paused" |
 | U3 Power on enabled without a BIOS | disabled until a BIOS loads; the overlay says why | browser check "Power on is disabled until a BIOS is loaded" |
 | U4 key capture invisible | badge under the screen: "Keyboard → PC · Ctrl+] to release" / "Click the screen to type" | browser checks on the badge before and after Ctrl+] |
-| U5 raw inputs, hash noise, no drive activity | media cards with original/user badges (hash in tooltip), drag-and-drop by hash or size, drive motor lights | browser check "dropped BIOS and BASIC land in their slots"; [after](screenshots/polish/05_dir.png) (drive A light on during DIR) |
+| U5 raw inputs, hash noise, no drive activity | media cards with original/user badges (hash in tooltip), drag-and-drop by hash or size, drive motor lights | browser check "dropped BIOS and BASIC land in their slots"; after (`polish/05_dir.png`) (drive A light on during DIR) |
 | U6 files chosen again on every visit | remembered in IndexedDB (W-A4) with Forget | browser checks "after a reload the BIOS is restored", "Forget clears" |
 | U7 no Esc/Tab/F-keys on phones | special-key row | browser check "the Esc button reaches DOS (line cancelled)" |
 | U8 screen text not accessible | "Screen as text" with copy | the browser test now reads every screen through it |
-| U9 debugger changes state under the user | commands pause first; Clear and Help | [debugger](screenshots/polish/06_debugger.png); check "debugger shows registers" |
-| U10 SV mode hidden in a select | segmented control labelled "unavailable" | [after](screenshots/polish/07_sv_unavailable.png) |
-| U11, U12 weak hierarchy, mixed status | monitor bezel, tokens with light and dark themes, primary button, state chip + time + speed | [dark](screenshots/polish/09_dark.png) |
+| U9 debugger changes state under the user | commands pause first; Clear and Help | debugger (`polish/06_debugger.png`); check "debugger shows registers" |
+| U10 SV mode hidden in a select | segmented control labelled "unavailable" | after (`polish/07_sv_unavailable.png`) |
+| U11, U12 weak hierarchy, mixed status | monitor bezel, tokens with light and dark themes, primary button, state chip + time + speed | dark (`polish/09_dark.png`) |
 
 Regressions rerun after the polish (same environment as above):
 

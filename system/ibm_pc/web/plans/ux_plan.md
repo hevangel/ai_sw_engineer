@@ -1,9 +1,10 @@
 # IBM PC 5150 browser frontend — usability review and polish plan (issue #250)
 
-Review of the functional baseline (commit `84cf934`, issue #249) used as a first-time
+Review of the functional baseline (issue #249) used as a first-time
 user would: load the originals, boot DOS, type, use a disk, debug, try the SV mode, on a
-1280 px desktop and a 390 px phone. Screenshots of that baseline:
-[../report/screenshots/functional/](../report/screenshots/functional/). Each finding has
+1280 px desktop and a 390 px phone. Screenshots of that baseline
+(`report/screenshots/functional/`, not committed) come from `tests/browser.mjs --shots`
+run at the functional-stage commit. Each finding has
 the change that answers it; the "after" evidence is in
 [../report/verification.md](../report/verification.md).
 

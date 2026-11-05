@@ -20,7 +20,8 @@ available here.
 
 Needs the repo's pinned Rust (`cargo +1.99.1`) with `wasm32-unknown-unknown`, and any
 static file server. No bundler, no npm tree. The built `www/ibm_pc_emulator_wasm.wasm`
-is committed, so serving `www/` works without building; rebuild after an emulator change.
+is not committed: run `scripts/build.sh` before serving `www/`, and after any emulator
+change. For static hosting, publish `www/` with the built `.wasm` in it.
 
 ```bash
 rustup target add --toolchain 1.99.1 wasm32-unknown-unknown
@@ -51,12 +52,12 @@ Click the screen to type; Ctrl+] gives the keyboard back to the page.
 | Path | Contents |
 |---|---|
 | [wasm/](wasm/) | `ibm_pc-emulator-wasm` cdylib: raw C ABI over the native `Machine` |
-| [www/](www/) | the static site: `index.html`, `css/`, `js/main.js` (UI), `js/worker.js` (machine), `js/keys.js` (scan codes), `js/store.js` (remembered files), the built `.wasm` |
+| [www/](www/) | the static site: `index.html`, `css/`, `js/main.js` (UI), `js/worker.js` (machine), `js/keys.js` (scan codes), `js/store.js` (remembered files); `scripts/build.sh` adds the `.wasm` |
 | [scripts/build.sh](scripts/build.sh) | pinned-toolchain WASM build into `www/` |
 | [tests/node_replay.mjs](tests/node_replay.mjs) | Node: self-test without ROMs; with them, the RTL's 20-step session through the WASM exports, and speed |
 | [tests/browser.mjs](tests/browser.mjs) | Playwright/Chromium: the real page driven as a user, screens against the RTL's |
 | [plans/ux_plan.md](plans/ux_plan.md) | usability review of the functional stage and the polish plan (#250) |
-| [report/screenshots/](report/screenshots/) | screenshots from the browser test runs: `functional/` (before polish), `polish/` (after) |
+| `report/screenshots/` | not committed: `tests/browser.mjs --shots report/screenshots/<set>` writes the screenshots the report names |
 
 ## Verify
 

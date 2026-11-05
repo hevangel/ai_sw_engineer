@@ -5,8 +5,8 @@
 #
 #   system/ibm_pc/web/scripts/build.sh
 #
-# Output: system/ibm_pc/web/www/ibm_pc_emulator_wasm.wasm (committed, so the
-# static site works without a build; rebuild after any emulator change).
+# Output: system/ibm_pc/web/www/ibm_pc_emulator_wasm.wasm (gitignored; rebuild
+# after any emulator change).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
