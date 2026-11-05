@@ -102,7 +102,7 @@ function sendAudio() {
 
 function stopWith(message) {
   running = false;
-  post({ type: 'error', message });
+  post({ type: 'error', message, stopped: true });
   status();
 }
 
@@ -213,6 +213,10 @@ const handlers = {
     post({ type: 'disk', drive, bytes }, [bytes.buffer]);
   },
   status() { status(); },
+  text() {
+    x.pc_text();
+    post({ type: 'text', text: out() });
+  },
 };
 
 self.onmessage = async (e) => {

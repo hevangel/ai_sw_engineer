@@ -34,3 +34,41 @@ Remaining limits: Mode B is not implemented (no Xezim adapter here); timing is t
 native emulator's instruction-level model (E-A2), so speed "100%" means machine clocks
 per second, not cycle-exact behaviour; sound was checked as delivered samples, not by
 listening; only Chromium was exercised; no visual design work was done (issue #250).
+
+## 2026-11-05: UI/UX polish stage (issue #250)
+
+Baseline: the functional stage above (commit `84cf934`). Its evidence was reviewed by
+the agent before this stage started (35/35 browser checks, RTL-identical screens,
+screenshots inspected); **human acceptance of #249 has not been given** and is not
+claimed. Review findings U1-U12 and the plan are in
+[../plans/ux_plan.md](../plans/ux_plan.md). The WASM artifact is unchanged by this
+stage (same SHA-256 as above); only `www/` HTML, CSS and JS changed, plus one worker
+message (`text`) and the `stopped` flag on errors.
+
+| Finding | Resolution | Evidence |
+|---|---|---|
+| U1 screen below the fold | two columns (monitor left); one column with the monitor first below 960 px | [before](screenshots/functional/05_dir.png) / [after](screenshots/polish/05_dir.png); [390 px before](screenshots/functional/08_narrow.png) / [after](screenshots/polish/08_narrow.png) |
+| U2 unexplained black screen, stale frame after a backend switch | overlay for loading / missing BIOS / ready / paused / stopped; the canvas is cleared on a switch | [before](screenshots/functional/01_initial.png) / [after](screenshots/polish/01_initial.png); browser checks "the screen says what is missing", "ready", "paused" |
+| U3 Power on enabled without a BIOS | disabled until a BIOS loads; the overlay says why | browser check "Power on is disabled until a BIOS is loaded" |
+| U4 key capture invisible | badge under the screen: "Keyboard → PC · Ctrl+] to release" / "Click the screen to type" | browser checks on the badge before and after Ctrl+] |
+| U5 raw inputs, hash noise, no drive activity | media cards with original/user badges (hash in tooltip), drag-and-drop by hash or size, drive motor lights | browser check "dropped BIOS and BASIC land in their slots"; [after](screenshots/polish/05_dir.png) (drive A light on during DIR) |
+| U6 files chosen again on every visit | remembered in IndexedDB (W-A4) with Forget | browser checks "after a reload the BIOS is restored", "Forget clears" |
+| U7 no Esc/Tab/F-keys on phones | special-key row | browser check "the Esc button reaches DOS (line cancelled)" |
+| U8 screen text not accessible | "Screen as text" with copy | the browser test now reads every screen through it |
+| U9 debugger changes state under the user | commands pause first; Clear and Help | [debugger](screenshots/polish/06_debugger.png); check "debugger shows registers" |
+| U10 SV mode hidden in a select | segmented control labelled "unavailable" | [after](screenshots/polish/07_sv_unavailable.png) |
+| U11, U12 weak hierarchy, mixed status | monitor bezel, tokens with light and dark themes, primary button, state chip + time + speed | [dark](screenshots/polish/09_dark.png) |
+
+Regressions rerun after the polish (same environment as above):
+
+| Command | Result |
+|---|---|
+| `cargo test --release --no-fail-fast -- --include-ignored` (emulator) | 80 passed; the same 2 environmental failures as the emulator's sixteenth record (stress objects and the silicon corpus are not in this container) |
+| `cargo test`, `fmt --check`, `clippy -D warnings` (wasm crate) | 4 of 4; clean |
+| `IBM_PC_ROMS=DIR node tests/node_replay.mjs` | all pass: the RTL's 20-step session identical through the WASM exports; one machine second in 0.033 s |
+| `IBM_PC_ROMS=DIR node tests/browser.mjs --shots ...` | **45 of 45** (the 35 functional checks, adapted to the new controls, plus 10 for the polish): reset, input, media, Ctrl+Alt+Del, worker execution at 100% real time, 53 frames per second, no main-thread task over 100 ms, the SV unavailable state, 390 px without horizontal scroll, no console errors, same-origin requests only |
+
+Remaining gaps: Mode B (Xezim signals and waveforms) is still unavailable, so there is
+no waveform inspection to regress; only Chromium was exercised; sound was checked as
+delivered samples, not by ear; no screen-reader session was run (the text view and
+labels were checked by markup and the tests); human review of both stages is pending.

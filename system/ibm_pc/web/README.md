@@ -36,7 +36,8 @@ python3 -m http.server 8080 --directory system/ibm_pc/web/www
 
 Open http://localhost:8080 (`file://` does not work: the worker and the WASM are
 fetched). Load the BIOS (required), and optionally Cassette BASIC, the CGA character
-ROM and a diskette for drive A, then press **Power on**. The page shows each file's
+ROM and a diskette for drive A (choose them, or drop them anywhere on the page), then
+press **Power on**. The page remembers the files in this browser unless told not to. The page shows each file's
 SHA-256 and labels it as an original only when it matches
 [the recorded hashes](../emulator/original/provenance.md). IBM's firmware and PC DOS
 are copyrighted: they are never bundled, fetched or committed.
@@ -50,11 +51,12 @@ Click the screen to type; Ctrl+] gives the keyboard back to the page.
 | Path | Contents |
 |---|---|
 | [wasm/](wasm/) | `ibm_pc-emulator-wasm` cdylib: raw C ABI over the native `Machine` |
-| [www/](www/) | the static site: `index.html`, `css/`, `js/main.js` (UI), `js/worker.js` (machine), `js/keys.js` (scan codes), the built `.wasm` |
+| [www/](www/) | the static site: `index.html`, `css/`, `js/main.js` (UI), `js/worker.js` (machine), `js/keys.js` (scan codes), `js/store.js` (remembered files), the built `.wasm` |
 | [scripts/build.sh](scripts/build.sh) | pinned-toolchain WASM build into `www/` |
 | [tests/node_replay.mjs](tests/node_replay.mjs) | Node: self-test without ROMs; with them, the RTL's 20-step session through the WASM exports, and speed |
 | [tests/browser.mjs](tests/browser.mjs) | Playwright/Chromium: the real page driven as a user, screens against the RTL's |
-| [report/screenshots/](report/screenshots/) | screenshots from the browser test runs |
+| [plans/ux_plan.md](plans/ux_plan.md) | usability review of the functional stage and the polish plan (#250) |
+| [report/screenshots/](report/screenshots/) | screenshots from the browser test runs: `functional/` (before polish), `polish/` (after) |
 
 ## Verify
 

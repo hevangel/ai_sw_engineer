@@ -73,15 +73,15 @@ context.on('request', (r) => requests.push(r.url()));
 const shot = async (name, p = page) => { if (shots) await p.screenshot({ path: join(shots, `${name}.png`), fullPage: true }); };
 const text = (sel) => page.locator(sel).innerText();
 
-// Read the PC's text screen through the page's own debugger panel.
+// Read the PC's text screen through the page's own "Screen as text" view
+// (it does not pause the machine; debugger commands do).
 async function pcScreen() {
-  const before = (await text('#mon-out')).length;
-  await page.fill('#mon-line', 'screen');
-  await page.click('#mon-form button[type=submit]');
-  await page.waitForFunction((n) => document.getElementById('mon-out').textContent.length > n, before);
-  const all = await text('#mon-out');
-  const rows = all.slice(before).split('\n').filter((l) => l.startsWith('|')).slice(-25).map((l) => l.slice(1));
-  return rows;
+  const n = await page.evaluate(() => window.__pcStats.texts);
+  await page.click('#text-refresh');
+  await page.waitForFunction((k) => window.__pcStats.texts > k, n);
+  const rows = (await page.locator('#text-out').textContent()).split('\n');
+  while (rows.length < 25) rows.push('');
+  return rows.slice(0, 25);
 }
 async function waitScreen(pred, what, ms = 60000) {
   const t0 = Date.now();
@@ -100,13 +100,12 @@ const same = (a, b) => a.length === b.length && a.every((r, i) => r.trimEnd() ==
 await page.goto(origin);
 await page.waitForFunction(() => document.getElementById('build').textContent.includes('ibm_pc-emulator-wasm'));
 check(true, 'page loads and the worker reports its build');
-check(await page.locator('#backend').inputValue() === 'wasm', 'Rust/WASM is the default backend');
+check(await page.locator('#backend-wasm').isChecked(), 'Rust/WASM is the default backend');
 await shot('01_initial');
 
-// Error states.
-await page.click('#power');
-await page.waitForSelector('#error:not([hidden])');
-check(/BIOS/.test(await text('#error')), `power on without a BIOS explains why: "${await text('#error')}"`);
+// Error and empty states.
+check(await page.locator('#power').isDisabled(), 'Power on is disabled until a BIOS is loaded');
+check(/Load the IBM BIOS ROM/.test(await text('#overlay')), `the screen says what is missing: "${await text('#overlay-text')}"`);
 await page.setInputFiles('#f-bios', { name: 'wrong.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100) });
 await page.waitForFunction(() => /not loaded:/.test(document.getElementById('s-0').textContent));
 check(/8,192/.test(await text('#s-0')), 'a wrong-size BIOS is refused with the size it needs');
@@ -130,8 +129,10 @@ check(/user-provided/.test(await text('#s-4')), 'the generated blank disk is not
 await shot('03_loaded');
 
 // Boot fast, then real time.
+check(/Ready/.test(await text('#overlay-text')), 'the screen says the machine is ready');
 await page.selectOption('#speed', 'max');
 await page.click('#power');
+await page.locator('#textview summary').click();
 await page.locator('#debug summary').click();
 const date = await waitScreen((r) => r.join('\n').includes("Enter today's date"), 'the DOS date prompt');
 check(same(date, RTL[0]), 'boot screen identical to the RTL\'s (step 1)');
@@ -140,6 +141,7 @@ await shot('04_date_prompt');
 
 // Type on the keyboard into the focused screen.
 await page.locator('#screen').focus();
+check(/Keyboard → PC/.test(await text('#capture')), 'the keyboard-capture badge shows keys go to the PC');
 await page.keyboard.type('10-14-81');
 await page.keyboard.press('Enter');
 const prompt = await waitScreen((r) => r.some((l) => l.trimEnd().endsWith('A>')), 'the A> prompt');
@@ -164,7 +166,7 @@ await page.waitForTimeout(1000);
 const fps = (await page.evaluate(() => window.__pcStats.frames)) - frames0;
 check(fps >= 20 && fps <= 65, `screen updates ${fps} times per second (CGA refresh is 60 Hz)`);
 const status = await text('#status');
-const pct = Number((status.match(/at (\d+)%/) || [])[1]);
+const pct = Number((status.match(/(\d+)% of a real/) || [])[1]);
 check(pct >= 90 && pct <= 110, `status reports real-time speed: "${status}"`);
 
 // The text box types too (CHKDSK, against the RTL's screen).
@@ -186,7 +188,8 @@ check(timeCom.includes('TIME    COM'), '(TIME.COM is on the original DOS disk)')
 
 // Pause / resume.
 await page.click('#pause');
-await page.waitForFunction(() => /^Paused/.test(document.getElementById('status').textContent));
+await page.waitForFunction(() => document.getElementById('state').textContent === 'Paused');
+check(await page.locator('#overlay').isVisible() && /Paused/.test(await text('#overlay-text')), 'the screen shows the paused state');
 const c1 = await page.evaluate(() => document.getElementById('status').textContent);
 await page.waitForTimeout(600);
 check(c1 === await text('#status'), 'paused: the machine clock stands still');
@@ -194,13 +197,24 @@ const r = await (async () => { await page.click('button[data-cmd="r"]'); await p
 check(/AX=[0-9A-F]{4} BX=/.test(r), 'debugger shows registers');
 await shot('06_debugger');
 await page.click('#pause');
-await page.waitForFunction(() => /^Running/.test(document.getElementById('status').textContent));
+await page.waitForFunction(() => document.getElementById('state').textContent === 'Running');
 check(true, 'resumed');
 
 // Keyboard: Ctrl+] gives focus back to the page; Tab then moves on.
 await page.locator('#screen').focus();
 await page.keyboard.press('Control+BracketRight');
 check(await page.evaluate(() => document.activeElement.id) === 'type-text', 'Ctrl+] releases the keyboard to the text box');
+check(/Click the screen/.test(await text('#capture')), 'and the badge says so');
+
+// Special-key row: Esc on the DOS prompt cancels the line ("\\" and a new line).
+await page.fill('#type-text', 'xyz');
+await page.uncheck('#type-enter');
+await page.click('#type-send');
+await page.check('#type-enter');
+await page.click('.keys button[data-key="0x01"]');
+const esc = await waitScreen((r) => r.some((l) => l.trimEnd() === 'A>xyz\\'), 'Esc to cancel the line');
+check(esc.some((l) => l.trimEnd() === 'A>xyz\\'), 'the Esc button reaches DOS (line cancelled)');
+await page.click('.keys button[data-key="0x1C"]');
 
 // Sound: the beep at the next power-on reaches Web Audio.
 await page.check('#sound');
@@ -243,19 +257,45 @@ if (existsSync(helloImg)) {
 }
 
 // The SystemVerilog backend: explanatory unavailable state, then back.
-await page.selectOption('#backend', 'sv');
+await page.check('#backend-sv');
 check(await page.locator('#sv-panel').isVisible(), 'SV backend shows the unavailable panel');
 check(/not qualified or available/.test(await text('#sv-panel')), 'it says why');
 await shot('07_sv_unavailable');
 await page.click('#sv-back');
 check(await page.locator('#wasm-ui').isVisible(), 'back to the Rust emulator');
-check(/Machine off/.test(await text('#status')), 'the backend switch reset the machine');
+check(/Machine off/.test(await text('#status')) && await text('#state') === 'Off', 'the backend switch reset the machine');
+
+// Remembered media: a reload restores the files chosen earlier.
+await page.reload();
+await page.waitForFunction(() => /remembered/.test(document.getElementById('s-0').textContent), null, { timeout: 10000 });
+check(/original: IBM 5150 BIOS/.test(await text('#s-0')), 'after a reload the BIOS is restored from this browser');
+check(!(await page.locator('#power').isDisabled()), 'and Power on is available at once');
+await page.click('#forget');
+await page.waitForFunction(() => document.getElementById('forget').textContent === 'Forgotten');
+await page.reload();
+await page.waitForFunction(() => document.getElementById('build').textContent.length > 0);
+await page.waitForTimeout(500);
+check(/not loaded/.test(await text('#s-0')), 'Forget clears the remembered files');
+
+// Drag and drop: files are assigned by recorded hash.
+const dropFiles = [['basic.bin', readFileSync(join(roms, 'basic.bin'))], ['bios.bin', readFileSync(join(roms, 'bios.bin'))]];
+const dt = await page.evaluateHandle((files) => {
+  const d = new DataTransfer();
+  for (const [name, data] of files) d.items.add(new File([new Uint8Array(data)], name));
+  return d;
+}, dropFiles.map(([n, b]) => [n, [...b]]));
+await page.dispatchEvent('body', 'drop', { dataTransfer: dt });
+await page.waitForFunction(() => /original/.test(document.getElementById('s-0').textContent) && /original/.test(document.getElementById('s-1').textContent));
+check(true, 'dropped BIOS and BASIC land in their slots');
 
 // Narrow layout.
 await page.setViewportSize({ width: 390, height: 844 });
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check(overflow <= 0, `no horizontal scroll at 390 px (${overflow} px)`);
 await shot('08_narrow');
+await page.emulateMedia({ colorScheme: 'dark' });
+await page.setViewportSize({ width: 1280, height: 1000 });
+await shot('09_dark');
 
 check(consoleErrors.length === 0, `no console errors${consoleErrors.length ? ': ' + consoleErrors.join(' | ') : ''}`);
 const foreign = requests.filter((u) => !u.startsWith(origin) && !u.startsWith('blob:') && !u.startsWith('data:'));

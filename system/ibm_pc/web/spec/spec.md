@@ -1,7 +1,8 @@
 # IBM PC 5150 browser frontend — specification and UI/backend contract
 
 Owning issues: hevangel/ai_sw_engineer#88 (parent), #249 (functional stage, this
-document's first version), #250 (UI/UX polish). Mode A is delivered here; Mode B
+document's first version), #250 (UI/UX polish: the UI contract below as revised on
+2026-11-05 after the review in [../plans/ux_plan.md](../plans/ux_plan.md)). Mode A is delivered here; Mode B
 (SystemVerilog through Xezim) is a selector with an explanatory unavailable state,
 not an implementation (see "Mode B").
 
@@ -86,35 +87,57 @@ in the output buffer. The module owns all buffers; the host re-reads
 Page → worker: `init`, `load {slot, bytes, writeProtect, name}`, `eject {drive}`,
 `power {audio}`, `off`, `pause`, `resume`, `speed {mode: real|max}`,
 `audio {on, rate}`, `key {code}`, `keys {codes}`, `type {text}`, `frameAck`,
-`monitor {line}`, `disk {drive}`, `status`.
+`monitor {line}`, `disk {drive}`, `status`, `text`.
 Worker → page: `ready {build}`, `loaded {slot, name, size, sha256, ok, error}`,
 `ejected`, `powered`, `frame {width, height, pixels} | {width: 0, text, video}`,
 `audio {samples, rate}`, `status {running, powered, clock, instructions, speedRatio,
 drives, keysPending}`, `typed {count}`, `monitor {line, text}`, `disk {drive, bytes}`,
-`error {message}`.
+`text {text}`, `error {message, stopped?}` (`stopped` when the machine halted on an
+undefined opcode).
 
 ### UI contract
 
-- **Media.** File inputs only; nothing is bundled, fetched or uploaded. Each file's
-  size and SHA-256 are shown, and it is labelled `original: <name>` only when the hash
-  equals a recorded original ([provenance](../emulator/original/provenance.md)),
-  else `user-provided image`. Drive A is write-protected by default (the original
-  system disk is never modified). "Insert blank disk" generates a writable data disk
-  (W-A1). "Download disk B" saves drive B's current image with the machine's writes.
-- **Screen.** A focusable canvas (640 or 320 x 200, shown at 4:3). With the
-  character ROM, frames come from `Cga::frame` (colours, cursor, blink, graphics
-  modes). Without it, text rows are drawn with a browser monospace font, light grey,
-  without attributes, and the media table says so (W-A2). Graphics modes need no ROM.
-- **Keyboard.** While the canvas has focus, every mapped key goes to the PC
+- **Layout.** Wide screens: the monitor (screen, controls, special keys, text box,
+  status) on the left, media, debugger and machine notes on the right. Below 960 px one
+  column with the monitor first. No horizontal scrolling down to 390 px. Light and
+  dark themes follow the system setting.
+- **Screen states.** An overlay on the screen names the state whenever the machine is
+  not running: loading, "Load the IBM BIOS ROM" (with a file button), ready (with
+  Power on), paused (Resume), stopped by an error (Restart). It is hidden while the
+  machine runs, so only real machine output is visible then. A state chip (Off,
+  Running, Paused, Stopped) and the machine time and measured speed sit below.
+- **Media.** One card per slot (BIOS, Cassette BASIC, character ROM, drive A, drive
+  B): file input, size, and `original: <name>` only when the SHA-256 equals a recorded
+  original ([provenance](../emulator/original/provenance.md)), else `user-provided
+  image`; the full hash is the status's tooltip. Files can also be dropped anywhere on
+  the page: a recorded original goes to its slot, otherwise 8 KiB → BIOS, 2 KiB →
+  character ROM, 32 KiB → BASIC, 160 KiB → drive A, or B when A is full. Nothing is
+  bundled, fetched or uploaded. Drive A is write-protected by default. "Insert blank
+  disk" generates a writable data disk (W-A1); "Download" saves drive B with the
+  machine's writes. Drive motor lights (A, B) follow the diskette adapter's DOR.
+- **Remembered media** (W-A4). With "Remember ROMs and disks in this browser" (on by
+  default) each file the user loads is kept in this origin's IndexedDB and loaded again
+  on the next visit; "Forget" and unticking delete them. Generated disks and the
+  machine's writes are not kept. Storage failures are ignored (files are then chosen
+  again).
+- **Power.** Power on stays disabled until a BIOS is loaded; once on it becomes
+  Restart (power cycle).
+- **Keyboard.** While the canvas has focus every mapped key goes to the PC
   (`keys.js`, by `KeyboardEvent.code`: physical position, US 5150 layout), make on
-  keydown (repeating while held, like the 5150's typematic), break on keyup, all
-  held keys released on blur. Ctrl+] gives focus back to the page. A text box types
-  strings through `pc_type`; a button sends Ctrl+Alt+Del.
-- **Controls.** Power on / Restart (power cycle), Pause/Resume, speed, sound (Web Audio
-  starts only after the user ticks it), debugger panel (the native monitor's
-  commands). Errors appear in an `alert` region; the status line is `aria-live`.
-- **Sound.** Samples are DC-blocked (the speaker's idle level is constant) and
-  scheduled 50 ms ahead; a gap resynchronises instead of drifting.
+  keydown (repeating while held, W-A3), break on keyup, all held keys released on blur.
+  A badge under the screen says whether keys go to the PC. Ctrl+] gives focus back to
+  the page. A special-key row sends Esc, Tab, Backspace, Enter, the arrows (numeric
+  pad), Ctrl+Break (Ctrl + Scroll Lock) and F1-F10; a text box types strings
+  (`pc_type`); a button sends Ctrl+Alt+Del.
+- **Screen as text.** A panel shows the 25 text rows (from `pc_text`) on demand and
+  copies them to the clipboard, for screen readers and copying.
+- **Debugger.** The native monitor's commands; each command pauses the machine first,
+  so what it shows is a stable state.
+- **Sound.** Web Audio starts only after the user ticks Sound. Samples are DC-blocked
+  (the speaker's idle level is constant) and scheduled 50 ms ahead; a gap
+  resynchronises instead of drifting. No sound in "Fast".
+- **Errors** appear in an `alert` region; the status line is `aria-live`; the canvas
+  has a label that says how keys are captured and released; a skip link leads to it.
 
 ## Mode B — optional Xezim/SystemVerilog machine (unavailable)
 
@@ -135,3 +158,4 @@ normalized trace time) is open work.
 | W-A1 | A data disk with both FATs starting FE FF FF, the 64 directory entries starting E5h, the rest of the system area zero and the data area F6h is writable by PC DOS 1.00 | PC DOS 1.00 counts directory entries that start with 00h as files (`../chkdsk/spec/spec.md`), so a zero-filled directory is "full" | `tests/browser.mjs`: `COPY TIME.COM B:CLOCK.COM` succeeds and the downloaded image's directory holds `CLOCK   COM`. Not byte-identical to what FORMAT writes |
 | W-A2 | Without the character ROM, text is drawn in a browser font without colours, cursor or blink | the ROM is IBM's and is not shipped | the media table says so; the frame path with the ROM is the checked one |
 | W-A3 | Host key repeat stands in for the 5150 keyboard's typematic repeat | the browser repeats keydown at the host's rate | interactive only; the deterministic tests type with explicit presses |
+| W-A4 | Keeping the user's own ROM and disk files in the browser's IndexedDB is acceptable: they stay on the user's machine, in this origin only, and can be forgotten | the files are copyrighted but the user already holds them; the page never sends them anywhere | `tests/browser.mjs`: a reload restores the BIOS, Forget clears it; the network check sees only same-origin requests |
