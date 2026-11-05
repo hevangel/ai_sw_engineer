@@ -17,6 +17,7 @@
 //! same CPU state.
 //!
 //! Run: `cargo test --release --test boot_oracle -- --include-ignored --nocapture`
+//! (`IBM_PC_EXPORT_IMAGES=DIR` also writes the images to `DIR`).
 
 use std::path::{Path, PathBuf};
 
@@ -107,10 +108,17 @@ fn header(text: &str, key: &str) -> String {
         .to_string()
 }
 
+/// With `IBM_PC_EXPORT_IMAGES=DIR`, also write the images there as `<name>.img`
+/// (the browser test boots `hello_rs.img` in the page).
 #[test]
 fn the_images_are_the_ones_the_rtl_booted() {
+    let export = std::env::var_os("IBM_PC_EXPORT_IMAGES").map(PathBuf::from);
     for name in NAMES {
         let img = image(name);
+        if let Some(dir) = &export {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join(format!("{name}.img")), &img).unwrap();
+        }
         assert_eq!(
             sha256::hex(&img),
             header(&transcript(name), "image sha256"),

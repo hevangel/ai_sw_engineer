@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IBM PC 5150 emulator</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+  <h1>IBM PC 5150</h1>
+  <p class="sub">The project's Rust whole-system emulator compiled to WebAssembly, running in your browser.</p>
+  <div class="backend">
+    <label for="backend">Backend</label>
+    <select id="backend">
+      <option value="wasm" selected>Rust emulator (WebAssembly, default)</option>
+      <option value="sv">SystemVerilog machine (Xezim) &mdash; slower, signal inspection</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <section id="sv-panel" class="panel" hidden aria-labelledby="sv-title">
+    <h2 id="sv-title">SystemVerilog backend unavailable</h2>
+    <p>This mode would run the actual SystemVerilog IBM PC from the hardware project
+      through the HDL Workbench/Xezim adapter, with signal and waveform inspection.
+      That adapter is not qualified or available to this page yet
+      (hevangel/ai_engineer#80, hevangel/ai_engineer#55), so nothing runs in this mode and no signals are shown.
+      The Rust emulator is not a simulation of the RTL and is not presented as one.</p>
+    <p>Switching backends resets the machine. <button id="sv-back" type="button">Back to the Rust emulator</button></p>
+  </section>
+
+  <div id="wasm-ui">
+  <section class="panel" aria-labelledby="media-title">
+    <h2 id="media-title">1. Load the machine's ROMs and disks</h2>
+    <p class="note">IBM's firmware and PC DOS are copyrighted and are not included.
+      Use your own copies; the page checks each file's SHA-256 against the
+      recorded originals. Files stay in your browser.</p>
+    <table class="media">
+      <thead><tr><th scope="col">Slot</th><th scope="col">File</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+        <tr><th scope="row"><label for="f-bios">BIOS ROM (required, 8 KiB)</label></th>
+          <td><input type="file" id="f-bios" data-slot="0"></td><td id="s-0" class="st">not loaded</td></tr>
+        <tr><th scope="row"><label for="f-basic">Cassette BASIC ROM (optional, 32 KiB)</label></th>
+          <td><input type="file" id="f-basic" data-slot="1"></td><td id="s-1" class="st">not loaded (without it the BIOS cannot start ROM BASIC)</td></tr>
+        <tr><th scope="row"><label for="f-font">CGA character ROM (optional, 8 KiB)</label></th>
+          <td><input type="file" id="f-font" data-slot="2"></td><td id="s-2" class="st">not loaded (text is drawn with a browser font)</td></tr>
+        <tr><th scope="row"><label for="f-a">Drive A: diskette (160 KiB)</label></th>
+          <td><input type="file" id="f-a" data-slot="3">
+            <label class="inline"><input type="checkbox" id="wp-a" checked> write-protect</label>
+            <button type="button" id="eject-a">Eject</button></td>
+          <td id="s-3" class="st">empty</td></tr>
+        <tr><th scope="row"><label for="f-b">Drive B: diskette (160 KiB)</label></th>
+          <td><input type="file" id="f-b" data-slot="4">
+            <button type="button" id="blank-b">Insert blank disk</button>
+            <button type="button" id="eject-b">Eject</button>
+            <button type="button" id="save-b">Download disk B</button></td>
+          <td id="s-4" class="st">empty</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel" aria-labelledby="machine-title">
+    <h2 id="machine-title">2. Run</h2>
+    <div class="controls" role="group" aria-label="Machine controls">
+      <button type="button" id="power">Power on</button>
+      <button type="button" id="pause" disabled>Pause</button>
+      <button type="button" id="cad" disabled>Ctrl+Alt+Del</button>
+      <label>Speed
+        <select id="speed"><option value="real" selected>Real time (4.77 MHz)</option><option value="max">As fast as possible (no sound)</option></select>
+      </label>
+      <label class="inline"><input type="checkbox" id="sound"> Sound</label>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+    <canvas id="screen" width="640" height="200" tabindex="0"
+      aria-label="IBM PC screen. Focus it to type on the PC keyboard; press Control plus right bracket to release the keyboard."
+      aria-describedby="screen-help"></canvas>
+    <p id="screen-help" class="note">Click or focus the screen to type: keys go to the PC (Tab and Esc too).
+      Press <kbd>Ctrl</kbd>+<kbd>]</kbd> to give the keyboard back to the page.
+      Arrows, Home/End, PgUp/PgDn, Ins/Del are the PC's numeric-pad keys.</p>
+    <form id="type-form" class="typeline">
+      <label for="type-text">Type text into the PC</label>
+      <input id="type-text" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. DIR">
+      <label class="inline"><input type="checkbox" id="type-enter" checked> then Enter</label>
+      <button type="submit" id="type-send" disabled>Type</button>
+    </form>
+    <p id="status" class="status" aria-live="polite">Machine off.</p>
+  </section>
+
+  <section class="panel">
+    <details id="debug">
+      <summary>Debugger (registers, step, breakpoints, memory)</summary>
+      <p class="note">Commands are the native <code>--monitor</code>'s: <code>r</code>, <code>s [n]</code>,
+        <code>t [n]</code>, <code>g [steps]</code>, <code>b SSSS:OOOO</code>, <code>bc</code>, <code>bl</code>,
+        <code>d SSSS:OOOO [len]</code>, <code>screen</code>, <code>?</code>. Numbers are hex. Pause the machine first to inspect a stable state.</p>
+      <div class="controls">
+        <button type="button" data-cmd="r">Registers</button>
+        <button type="button" data-cmd="s">Step</button>
+        <button type="button" data-cmd="t 10">Trace 10</button>
+      </div>
+      <form id="mon-form" class="typeline">
+        <label for="mon-line">Command</label>
+        <input id="mon-line" type="text" autocomplete="off" spellcheck="false" placeholder="d 0:400 20">
+        <button type="submit">Run</button>
+      </form>
+      <pre id="mon-out" tabindex="0" aria-label="Debugger output"></pre>
+    </details>
+  </section>
+  </div>
+</main>
+
+<footer>
+  <p>Machine: IBM 5150, 8088 at 4.77 MHz, 64 KiB RAM, CGA, two 160 KiB drives, speaker.
+    Not modeled: cycle-exact timing, cassette, printer, serial, more RAM.
+    <span id="build"></span></p>
+</footer>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+/* Plain functional styles (functional iteration, issue #249). */
+:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #555; --line: #ccc;
+  --good: #0a6b2d; --warn: #8a5a00; --bad: #b00020; --focus: #1a5fd0; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #eee; --bg: #161616; --muted: #aaa; --line: #444;
+    --good: #6fd08c; --warn: #f0b84a; --bad: #ff7b8a; --focus: #7fb0ff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 1100px; padding: 0 16px 32px; font: 15px/1.45 system-ui, sans-serif;
+  color: var(--fg); background: var(--bg); }
+h1 { margin: 16px 0 0; font-size: 1.6rem; }
+h2 { font-size: 1.1rem; margin: 0 0 8px; }
+.sub, .note, footer { color: var(--muted); }
+.panel { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 12px 0; }
+.backend { margin: 8px 0; }
+table.media { width: 100%; border-collapse: collapse; }
+table.media th, table.media td { text-align: left; vertical-align: top; padding: 6px 4px;
+  border-top: 1px solid var(--line); }
+.st.good { color: var(--good); } .st.warn { color: var(--warn); } .st.bad { color: var(--bad); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.inline { white-space: nowrap; }
+button, select, input[type=text] { font: inherit; padding: 4px 8px; }
+select, input[type=file] { max-width: 100%; }
+.st { overflow-wrap: anywhere; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+canvas#screen { display: block; width: 100%; max-width: 960px; aspect-ratio: 4 / 3; background: #000;
+  image-rendering: pixelated; }
+canvas#screen:focus-visible { outline: 3px solid var(--focus); }
+.typeline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.typeline input[type=text] { flex: 1 1 200px; min-width: 0; }
+.status { font-variant-numeric: tabular-nums; }
+.error { color: var(--bad); white-space: pre-wrap; }
+pre#mon-out { max-height: 320px; overflow: auto; border: 1px solid var(--line); padding: 8px;
+  font-size: 13px; white-space: pre; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (max-width: 640px) {
+  table.media thead { display: none; }
+  table.media tr, table.media th, table.media td { display: block; border: 0; padding: 2px 0; }
+  table.media tr { border-top: 1px solid var(--line); padding: 6px 0; }
+}

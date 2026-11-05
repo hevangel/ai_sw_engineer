@@ -170,15 +170,25 @@ commands (numbers hex, addresses SSSS:OOOO or physical):
   reset             power-on reset (ROM and disks kept)
   q                 quit";
 
-/// A line-oriented debugger: read commands from `input`, write results to
-/// `out`. Returns at end of input or `q`.
-pub fn monitor<R: BufRead, W: Write>(m: &mut Machine, input: R, mut out: W) -> std::io::Result<()> {
-    let mut breakpoints: Vec<u32> = Vec::new();
-    for line in input.lines() {
-        let line = line?;
+/// Debugger state across commands: the breakpoints. [`Monitor::command`]
+/// runs one command line; [`monitor`] loops over a reader. The browser build
+/// calls `command` once per line typed.
+#[derive(Clone, Debug, Default)]
+pub struct Monitor {
+    pub breakpoints: Vec<u32>,
+}
+
+impl Monitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Run one command line and return its output (`error: ...` lines for bad
+    /// input), or `None` for `q`.
+    pub fn command(&mut self, m: &mut Machine, line: &str) -> Option<String> {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
-            continue;
+            return Some(String::new());
         }
         let (cmd, rest) = line.split_once(' ').unwrap_or((line, ""));
         let rest = rest.trim();
@@ -189,8 +199,9 @@ pub fn monitor<R: BufRead, W: Write>(m: &mut Machine, input: R, mut out: W) -> s
                 u64::from_str_radix(rest, radix).map_err(|_| format!("bad count {rest:?}"))
             }
         };
+        let breakpoints = &mut self.breakpoints;
         let result: Result<String, String> = match cmd {
-            "q" => break,
+            "q" => return None,
             "?" | "h" | "help" => Ok(format!("{MONITOR_HELP}\n")),
             "r" => Ok(format!("{}\n", registers(m))),
             "s" => count(1, 16).map(|n| {
@@ -204,9 +215,9 @@ pub fn monitor<R: BufRead, W: Write>(m: &mut Machine, input: R, mut out: W) -> s
                 }
                 format!("{stop}{}\n", registers(m))
             }),
-            "t" => count(1, 16).map(|n| trace(m, n)),
+            "t" => count(1, 16).map(|n| trace(m, n.min(10_000))),
             "g" => count(1_000_000, 10).map(|n| {
-                let stop = run_until(m, n, &breakpoints);
+                let stop = run_until(m, n, breakpoints);
                 format!(
                     "stop: {stop:?} after clock {}\n{}\n",
                     m.clock(),
@@ -254,9 +265,21 @@ pub fn monitor<R: BufRead, W: Write>(m: &mut Machine, input: R, mut out: W) -> s
             }
             _ => Err(format!("unknown command {cmd:?} (? for help)")),
         };
-        match result {
-            Ok(text) => out.write_all(text.as_bytes())?,
-            Err(e) => writeln!(out, "error: {e}")?,
+        Some(match result {
+            Ok(text) => text,
+            Err(e) => format!("error: {e}\n"),
+        })
+    }
+}
+
+/// A line-oriented debugger: read commands from `input`, write results to
+/// `out`. Returns at end of input or `q`.
+pub fn monitor<R: BufRead, W: Write>(m: &mut Machine, input: R, mut out: W) -> std::io::Result<()> {
+    let mut mon = Monitor::new();
+    for line in input.lines() {
+        match mon.command(m, &line?) {
+            Some(text) => out.write_all(text.as_bytes())?,
+            None => break,
         }
     }
     out.flush()
