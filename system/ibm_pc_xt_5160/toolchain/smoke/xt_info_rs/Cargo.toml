@@ -1,0 +1,20 @@
+[package]
+name = "xt_info_rs"
+version = "0.1.0"
+edition = "2021"
+description = "XT 5160 profile smoke program: BIOS data area, RAM above 64 KiB, BIOS ROM checksum"
+license = "MIT"
+publish = false
+
+[dependencies]
+ibm_pc_hal = { path = "../../../../ibm_pc/platform/hal" }
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

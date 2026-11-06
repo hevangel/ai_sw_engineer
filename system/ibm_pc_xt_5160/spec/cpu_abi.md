@@ -1,5 +1,7 @@
 # IBM PC XT 5160 CPU/ABI profile
 
+> **Historical, frozen 2026-11-06.** This is the provisional draft of 2026-10-28, written before the `llvm-i8086` backend existed. It is superseded by [the compiler profile](../toolchain/spec/profile.md) and [its report](../toolchain/report/report.md), which reuse the 5150 profile; the target JSON and XT-only linker script it describes were removed (wrong data layout and linker, review of 2026-10-31).
+
 Acceptance box 2 of ai_sw_engineer#59. Machine facts follow the primary
 hardware authority (IBM April 1983 5160 Technical Reference, via
 `ai_hw_engineer/system/ibm_pc_xt_5160/spec/spec.md`); every **(P)** paragraph

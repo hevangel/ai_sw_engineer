@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Historical (2026-11-06): a hand-written NASM baseline from before llvm-i8086; never run.
+# The profile's images are built by ../toolchain/scripts/build_profile.sh.
 # Build the hand-written bring-up baseline boot sector (NOT compiler output).
 # Usage: bringup/build.sh   -> bringup/boot_hello.bin (512 bytes, AA55-signed)
 set -euo pipefail

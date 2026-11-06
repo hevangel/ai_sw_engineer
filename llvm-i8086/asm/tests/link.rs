@@ -4,7 +4,7 @@
 
 mod common;
 use common::*;
-use i8086_ld::{floppy, link, parse_object, parse_script, Options, FLOPPY_160K};
+use i8086_ld::{floppy, link, parse_object, parse_script, Options, FLOPPY_160K, FLOPPY_KIB};
 
 const SCRIPT: &str = "
 MEMORY {
@@ -399,6 +399,30 @@ fn the_floppy_image_checks_the_boot_sector() {
     assert!(floppy(&vec![0; 1000], 0x7C00, 0x7C00, true, 600)
         .unwrap_err()
         .contains("does not fit"));
+}
+
+#[test]
+fn every_floppy_size_pads_in_logical_sector_order() {
+    let mut boot = vec![0u8; 512];
+    boot.extend([7u8; 600]);
+    for kib in FLOPPY_KIB {
+        let img = floppy(&boot, 0x7C00, 0x7C00, true, kib * 1024).unwrap();
+        assert_eq!(img.len(), kib * 1024, "{kib} KiB");
+        assert_eq!(&img[510..512], &[0x55, 0xAA]);
+        assert!(img[512..1112].iter().all(|&b| b == 7));
+        assert!(img[1112..].iter().all(|&b| b == 0));
+    }
+}
+
+#[test]
+fn the_floppy_size_option_is_checked() {
+    let ld = env!("CARGO_BIN_EXE_i8086-ld");
+    let out = std::process::Command::new(ld)
+        .args(["--floppy-kib", "1200", "-T", "x.ld", "x.o"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--floppy-kib must be one of"));
 }
 
 #[test]

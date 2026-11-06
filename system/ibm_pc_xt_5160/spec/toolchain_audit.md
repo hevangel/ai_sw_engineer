@@ -1,5 +1,7 @@
 # Toolchain audit: IBM PC XT 5160 (Intel 8088)
 
+> **Historical, frozen 2026-11-06.** This is the provisional draft of 2026-10-28, written before the `llvm-i8086` backend existed. It is superseded by [the compiler profile](../toolchain/spec/profile.md) and [its report](../toolchain/report/report.md), which reuse the 5150 profile; the target JSON and XT-only linker script it describes were removed (wrong data layout and linker, review of 2026-10-31).
+
 Acceptance box 1 of ai_sw_engineer#59. Audited 2026-10-28. Distinguishes
 upstream support from missing project-owned work. Versions are pinned where
 measured in this run; "pin at implementation" marks values to fix when the

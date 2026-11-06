@@ -1,0 +1,14 @@
+# Expected screen of xt_info.img on the XT 5160 profile, written before the first run.
+# ram, drives, video: the profile's machine (spec/profile.md: 256 KiB, two diskette drives,
+#   CGA in 80x25 colour), as the BIOS stores them at 0040:0013 and 0040:0010 (IBM 5160
+#   Technical Reference, BIOS listing, POST).
+# blocks: (256 - 64) / 16 = 12 blocks of 16 KiB above the first 64 KiB, none bad.
+# bios sum: the 16-bit sum of the 4,096 words of xtbios.bin (SHA-256 2798f8a9...), computed on
+#   the host by scripts/run_independent.sh and written into the line below as 0x2443.
+XT 5160 profile
+ram = 256 KiB
+drives = 2
+video = 80x25 colour
+blocks above 64 KiB = 12, bad = 0
+bios sum = 0x2443
+done

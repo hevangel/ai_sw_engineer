@@ -8,7 +8,12 @@ Target-side code shared by all titles on this machine:
 
 Keep it minimal; everything portable belongs in the title's `lib.rs`.
 
-## Bring-up contract (design; code lands with the backend)
+**The XT uses the 5150's runtime unchanged** (`system/ibm_pc/platform/runtime`: `crt0.s`,
+`crt0_com.s`, `dos.s`, `hal.s`, and the `ibm_pc_hal` crate); see
+[../../toolchain/spec/profile.md](../../toolchain/spec/profile.md). The design notes below are the
+draft of 2026-10-28, kept as history.
+
+## Bring-up contract (historical draft, 2026-10-28)
 
 The crt0 establishes, per image kind (`spec/cpu_abi.md` §8):
 

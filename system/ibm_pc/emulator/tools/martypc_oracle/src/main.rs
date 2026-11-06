@@ -1,5 +1,8 @@
 //! `martypc_oracle <bios.bin> <basic.bin> <floppy.img> <cycles>`: boot the floppy on MartyPC's
 //! IBM 5150 and print the 25 rows of the CGA text screen.
+//!
+//! `MARTY_MACHINE=5160` boots MartyPC's IBM PC XT 5160 model instead, with `MARTY_RAM_KIB` KiB
+//! of RAM (default 256, the XT profile's). The 5150 default (64 KiB) is unchanged.
 
 use std::path::PathBuf;
 
@@ -15,14 +18,14 @@ use marty_core::{
     device_types::keyboard::KeyboardType,
 };
 
-struct Cfg;
+struct Cfg(MachineType);
 
 impl CoreConfig for Cfg {
     fn get_base_dir(&self) -> PathBuf {
         PathBuf::from(".")
     }
     fn get_machine_type(&self) -> MachineType {
-        MachineType::Ibm5150v64K
+        self.0
     }
     fn get_audio_enabled(&self) -> bool {
         false
@@ -109,6 +112,13 @@ fn main() -> anyhow::Result<()> {
             "usage: martypc_oracle <bios.bin> <basic.bin> <floppy.img> <cpu cycles> [<text to wait for> <keys to type>]..."
         );
     }
+    // Which MartyPC machine: the 5150 (default, 64 KiB) or the XT 5160.
+    let xt = std::env::var("MARTY_MACHINE").is_ok_and(|v| v == "5160");
+    let machine_type = if xt { MachineType::Ibm5160 } else { MachineType::Ibm5150v64K };
+    let ram_kib: u32 = match std::env::var("MARTY_RAM_KIB") {
+        Ok(v) => v.parse()?,
+        Err(_) => if xt { 256 } else { 64 },
+    };
     let bios = std::fs::read(&a[1])?;
     let basic = std::fs::read(&a[2])?;
     let image = std::fs::read(&a[3])?;
@@ -133,10 +143,10 @@ fn main() -> anyhow::Result<()> {
         speaker: false,
         cassette: false,
         ppi_turbo: None,
-        machine_type: MachineType::Ibm5150v64K,
+        machine_type,
         cpu: None,
         memory: MemoryConfig {
-            conventional: ConventionalMemoryConfig { size: 0x10000, wait_states: 0 },
+            conventional: ConventionalMemoryConfig { size: ram_kib * 1024, wait_states: 0 },
         },
         ems: None,
         keyboard: Some(KeyboardConfig {
@@ -170,7 +180,7 @@ fn main() -> anyhow::Result<()> {
         conventional_expansion: vec![],
         media: None,
     };
-    let cfg = Cfg;
+    let cfg = Cfg(machine_type);
     let mut machine = MachineBuilder::new()
         .with_core_config(Box::new(&cfg))
         .with_machine_config(&config)

@@ -200,6 +200,12 @@ impl Linked {
 /// 5150 (160 KiB), the image form of decision P1 in `memory_map.md`.
 pub const FLOPPY_160K: usize = 40 * 8 * 512;
 
+/// The IBM floppy sizes `--floppy-kib` accepts: 160 and 180 KiB single-sided
+/// 5.25-inch (5150, XT), 320 and 360 KiB double-sided 5.25-inch, 720 KiB 3.5-inch
+/// (PS/2 Model 30). The image is always the binary in logical sector order; the
+/// boot code (`crt0`) must read it with the disk's sectors per track and heads.
+pub const FLOPPY_KIB: [usize; 5] = [160, 180, 320, 360, 720];
+
 /// Packs a linked flat binary into a bootable floppy image: the first 512
 /// bytes are the boot sector (sector 1, which the BIOS loads at `boot_addr`
 /// and jumps to) and must end with the signature 55h AAh; the rest follows,
