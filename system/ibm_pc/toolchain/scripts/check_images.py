@@ -346,8 +346,9 @@ def check_file(img, elf, mem, ranges, rep):
         return bytes(mem.get(start + i, 0) for i in range(n))
 
     if img['kind'] == 'floppy':
-        if len(data) != 163840:
-            rep.bad(f'floppy image is {len(data)} bytes, not 160 KiB')
+        kib = img.get('floppy_kib', 160)  # the XT and PS/2 profiles state their disk size
+        if len(data) != kib * 1024:
+            rep.bad(f'floppy image is {len(data)} bytes, not {kib} KiB')
         if data[510:512] != b'\x55\xaa':
             rep.bad('no 55AAh boot signature')
         if data[:510] != elf_bytes(0x7C00, 510):
@@ -356,7 +357,7 @@ def check_file(img, elf, mem, ranges, rep):
         if data[512:512 + (top - 0x7E00)] != elf_bytes(0x7E00, top - 0x7E00):
             rep.bad('stage 2 is not the ELF memory at 7E00h')
         if not rep.failed:
-            rep.ok('160 KiB, boot signature 55AAh, boot sector and stage 2 equal the ELF memory')
+            rep.ok(f'{kib} KiB, boot signature 55AAh, boot sector and stage 2 equal the ELF memory')
     elif img['kind'] == 'com':
         top = max(e for _, e, loaded in ranges if loaded)
         if data != elf_bytes(0x100, top - 0x100):

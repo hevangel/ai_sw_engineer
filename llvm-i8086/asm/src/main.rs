@@ -17,7 +17,9 @@ usage: i8086-ld -T script.ld [options] object.o...
                      (linked at 0100h, link_com.ld); CS = SS = the PSP segment
   --com <file>       write a PC DOS .COM file: the flat binary, which must start
                      at offset 0100h and fit in the segment (link_com.ld)
-  --floppy <file>    write a bootable 160 KiB floppy image (needs --boot-addr)
+  --floppy <file>    write a bootable floppy image (needs --boot-addr)
+  --floppy-kib <n>   its size: 160 (default, the 5150's), 180, 320, 360 or 720 KiB;
+                     the image is the binary in logical sector order, zero padded
   --boot-addr <n>    where the BIOS loads the boot sector (default 0x7C00)
   --sign             write the 55 AA boot signature if the sector has zeros there
   -Map <file>        write a link map
@@ -58,6 +60,7 @@ fn run() -> Result<(), String> {
     let mut opts = i8086_ld::Options::default();
     let mut boot_addr = 0x7C00u32;
     let mut sign = false;
+    let mut floppy_kib = 160usize;
     let mut inputs: Vec<String> = Vec::new();
     while let Some(a) = args.next() {
         let mut value = |what: &str| args.next().ok_or_else(|| format!("{a} needs {what}"));
@@ -74,6 +77,17 @@ fn run() -> Result<(), String> {
             "-u" => opts.undefined.push(value("a symbol")?),
             "--boot-addr" => boot_addr = parse_addr(&value("an address")?)?,
             "--sign" => sign = true,
+            "--floppy-kib" => {
+                floppy_kib = value("a size in KiB")?
+                    .parse()
+                    .map_err(|_| "--floppy-kib needs a number".to_string())?;
+                if !i8086_ld::FLOPPY_KIB.contains(&floppy_kib) {
+                    return Err(format!(
+                        "--floppy-kib must be one of {:?}",
+                        i8086_ld::FLOPPY_KIB
+                    ));
+                }
+            }
             "--no-gc-sections" => opts.gc = false,
             "-h" | "--help" => {
                 print!("{USAGE}");
@@ -194,7 +208,7 @@ fn run() -> Result<(), String> {
         }
     }
     if let Some(p) = &floppy {
-        let img = i8086_ld::floppy(&flat, load, boot_addr, sign, i8086_ld::FLOPPY_160K)?;
+        let img = i8086_ld::floppy(&flat, load, boot_addr, sign, floppy_kib * 1024)?;
         write(p, &img)?;
     }
     // One line a build log can keep.

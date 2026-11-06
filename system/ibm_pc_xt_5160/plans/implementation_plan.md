@@ -1,5 +1,7 @@
 # Implementation plan: XT 5160 toolchain profile (ai_sw_engineer#59)
 
+> **Historical, frozen 2026-11-06.** This is the provisional draft of 2026-10-28, written before the `llvm-i8086` backend existed. It is superseded by [the compiler profile](../toolchain/spec/profile.md) and [its report](../toolchain/report/report.md), which reuse the 5150 profile; the target JSON and XT-only linker script it describes were removed (wrong data layout and linker, review of 2026-10-31).
+
 Owner of the per-computer Rust profile; the shared `llvm-i8086` backend is
 ai_engineer#60's. Work order follows the issue's acceptance boxes. Status as
 of 2026-10-28.

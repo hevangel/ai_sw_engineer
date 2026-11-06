@@ -1,6 +1,6 @@
 # IBM PC XT 5160
 
-CPU: i8086 (Intel 8088). Backend: `llvm-i8086` (ai_engineer#60; does not exist yet).
+CPU: i8086 (Intel 8088). Backend: `llvm-i8086` (shared with the 5150).
 
 ## History
 
@@ -27,20 +27,18 @@ This folder owns the per-computer Rust compiler profile — target spec,
 startup/linker, image packaging — reusing the shared `llvm-i8086` ISA
 backend rather than duplicating it:
 
-- [spec/toolchain_audit.md](spec/toolchain_audit.md) — audit of existing support
-- [spec/cpu_abi.md](spec/cpu_abi.md) — machine/CPU, ISA, ABI, data layout
-- [rust/i8086-xt-none.json](rust/i8086-xt-none.json) — provisional Rust target (needs the backend)
-- [bringup/](bringup/) — hand-written bring-up baseline (not compiler output)
-- [report/final_report.md](report/final_report.md) — status, evidence, gaps
+- [toolchain/](toolchain/README.md) — the profile: spec, audit, smoke program, build and run scripts, report
+- historical (2026-10-28 draft, superseded): `spec/toolchain_audit.md`, `spec/cpu_abi.md`, `bringup/`, `report/final_report.md`
 
-Status: profile drafted; compile-and-execute gates blocked on backend
-qualification (ai_engineer#60). No title work starts until this profile
-qualifies (ai_engineer#84 dependency).
+Status (2026-11-06): the profile reuses the 5150's toolchain; six Rust/IR images build
+reproducibly, pass the independent decoder and relocation checks, and run on MartyPC's 5160
+with the original XT BIOS and PC DOS 2.00, showing the expected screens
+([report](toolchain/report/report.md)). Not run on the hardware project's XT RTL or real hardware.
 
 ## Simulators
 
 - Primary (ai_hw_engineer): `system/ibm_pc_xt_5160` — RTL platform, boots original XT BIOS + PC DOS 2.00
-- Secondary (external/): `external/martypc` — cycle-accurate 8088 PC/XT emulator (submodule not initialized yet)
+- Secondary (external/): `external/martypc` — cycle-accurate 8088 PC/XT emulator, the profile's execution oracle (`MARTY_MACHINE=5160`)
 
 ## Software
 

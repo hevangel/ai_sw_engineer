@@ -1,10 +1,10 @@
-//! pcdisk: files on the 160 KiB floppy images of PC DOS 1.x.
+//! pcdisk: files on the FAT12 floppy images of IBM DOS (160, 180, 320, 360, 720 KiB).
 
-use pcdisk::Disk;
+use pcdisk::{Disk, Geometry};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-usage: pcdisk blank <out.img>
+usage: pcdisk blank <out.img> [160|180|320|360|720]     (default 160 KiB)
        pcdisk list <disk.img>
        pcdisk add <disk.img> <file> [NAME.EXT]     (writes the image in place)
        pcdisk extract <disk.img> <NAME.EXT> <out>
@@ -24,6 +24,14 @@ fn run() -> Result<(), String> {
         .as_slice()
     {
         ["blank", out] => save(out, &Disk::blank()),
+        ["blank", out, kib] => {
+            let geo = kib
+                .parse::<usize>()
+                .ok()
+                .and_then(Geometry::by_kib)
+                .ok_or_else(|| format!("{kib:?} is not a format\n{USAGE}"))?;
+            save(out, &Disk::blank_with(geo))
+        }
         ["list", img] => {
             let d = load(img)?;
             for e in d.list() {

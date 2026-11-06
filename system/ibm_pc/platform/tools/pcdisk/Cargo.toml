@@ -2,7 +2,7 @@
 name = "pcdisk"
 version = "0.1.0"
 edition = "2021"
-description = "Reads and writes the 160 KiB single-sided FAT12 floppies of PC DOS 1.x: list, add, extract, delete, blank."
+description = "Reads and writes the FAT12 floppies of IBM DOS (160 to 720 KiB): list, add, extract, delete, blank."
 license = "MIT"
 publish = false
 
