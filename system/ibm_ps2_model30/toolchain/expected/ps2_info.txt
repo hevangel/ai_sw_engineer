@@ -1,0 +1,16 @@
+# Expected screen of ps2_info.img on the PS/2 Model 30 profile, written before any run.
+# ram, drives: the profile's machine (spec/profile.md: 8530-002/021, 640 KiB, one 3.5-inch 720 KiB
+#   drive) as the BIOS stores them at 0040:0013 and 0040:0010.
+# display: INT 10h AX=1A00h reports 0Ch, MCGA with a colour analog display (IBM PS/2 BIOS).
+# model byte, bios date: read out of ps2bios.bin (SHA-256 e3de87dd...) at F000:FFFE and F000:FFF5.
+# blocks: (640 - 64) / 16 = 36 blocks of 16 KiB above the first 64 KiB, none bad.
+# bios sum: the 16-bit sum of the 32,768 words of ps2bios.bin, computed on the host.
+PS/2 Model 30 profile
+ram = 640 KiB
+drives = 1
+display = MCGA colour (0x0c)
+model byte = 0xfa
+bios date = 09/02/86
+blocks above 64 KiB = 36, bad = 0
+bios sum = 0x3a40
+done
