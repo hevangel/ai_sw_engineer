@@ -21,9 +21,9 @@ duplicate, and record the canonical issue URL in the task plan or handoff.
    Account for pagination; a missing item in a partial listing is not proof
    that it is absent. Resolve option IDs from live definitions rather than
    copying IDs from another issue or a previous chat.
-2. Keep implementation issues in `hevangel/ai_hw_engineer`. If misplaced,
+2. Keep implementation issues in `hevangel/ai_sw_engineer`. If misplaced,
    capture their existing project fields and relationships, then transfer with
-   `gh issue transfer ISSUE_URL hevangel/ai_hw_engineer`. Record the returned
+   `gh issue transfer ISSUE_URL hevangel/ai_sw_engineer`. Record the returned
    URL and re-read the issue and project item IDs. Transfers can remove project
    membership: restore it with `gh project item-add`, then restore captured
    fields and relationships, preserving intentional Sprint commitments.
@@ -31,7 +31,7 @@ duplicate, and record the canonical issue URL in the task plan or handoff.
    project and field IDs. Use `--single-select-option-id` for Agent and Status,
    `--date YYYY-MM-DD` for Start date, and `--text` for Path. Path names the
    owning repository and relative implementation location, for example
-   `ai_hw_engineer/design/intel_80286`, without a host drive or worktree path.
+   `ai_sw_engineer/llvm-i8086`, without a host drive or worktree path.
    Preserve an evidenced first Start date on resume or transfer; follow the
    lifecycle guide's historical procedure when reconciling older work.
 4. Register the working Agent and use Researching for active investigation or
