@@ -6,7 +6,8 @@
 //! Typed keys may include the shifted `< > + | " : ?` and capitals; `MARTY_WRITABLE=1` mounts drive A
 //! writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
 //! scripted keys (default: the whole cycle budget). `MARTY_KEY_DELAY=n` runs n cycles after a
-//! wait's text appears before its keys are typed (default 0).
+//! wait's text appears before its keys are typed (default 0). A wait text starting with `$` waits
+//! for the last non-blank row to end with the rest, so a prompt printed again is waited for anew.
 
 use std::path::PathBuf;
 
@@ -245,7 +246,17 @@ fn main() -> anyhow::Result<()> {
         machine.run(batch as u32, &mut ctl);
         left -= batch;
         if let Some((marker, keys)) = script.last().cloned() {
-            if screen(&mut machine).iter().any(|r| r.contains(marker.as_str())) {
+            // A marker starting with `$` waits for the last non-blank row to end with the rest
+            // (a prompt printed again at the bottom); any other marker for any row containing it.
+            let rows = screen(&mut machine);
+            let seen = match marker.strip_prefix('$') {
+                Some(end) => rows
+                    .iter()
+                    .rfind(|r| !r.trim().is_empty())
+                    .is_some_and(|r| r.trim_end().ends_with(end)),
+                None => rows.iter().any(|r| r.contains(marker.as_str())),
+            };
+            if seen {
                 script.pop();
                 // MARTY_KEY_DELAY=n: run n cycles between seeing the text and typing (a program
                 // may print its prompt before it flushes the keyboard buffer and reads).

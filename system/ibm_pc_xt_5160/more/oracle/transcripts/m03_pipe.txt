@@ -1,0 +1,28 @@
+# oracle: type long.txt | more
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + LONG.TXT
+# program: the original on the disk
+|Line 40
+|Line 41
+|Line 42
+|Line 43
+|Line 44
+|Line 45
+|Line 46
+|Line 47
+|-- More --
+|
+|Line 48
+|Line 49
+|Line 50
+|Line 51
+|Line 52
+|Line 53
+|Line 54
+|Line 55
+|Line 56
+|Line 57
+|Line 58
+|Line 59
+|Line 60
+|
+|A>
