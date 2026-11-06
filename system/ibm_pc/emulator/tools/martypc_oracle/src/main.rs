@@ -3,6 +3,8 @@
 //!
 //! `MARTY_MACHINE=5160` boots MartyPC's IBM PC XT 5160 model instead, with `MARTY_RAM_KIB` KiB
 //! of RAM (default 256, the XT profile's). The 5150 default (64 KiB) is unchanged.
+//! Typed keys may include the shifted `< > + |` and capitals; `MARTY_WRITABLE=1` mounts drive A
+//! writable (default write-protected).
 
 use std::path::PathBuf;
 
@@ -99,8 +101,24 @@ fn key_for(ch: char) -> Option<MartyKey> {
         '0'..='9' => DIGITS[(ch as u8 - b'0') as usize],
         '-' => Minus,
         '.' => Period,
+        ',' => Comma,
+        '/' => Slash,
+        '=' => Equal,
         ' ' => Space,
         '\r' => Enter,
+        _ => return Option::None,
+    })
+}
+
+/// A character typed with Shift held on the US keyboard: the unshifted key.
+fn shifted(ch: char) -> Option<MartyKey> {
+    use MartyKey::*;
+    Some(match ch {
+        'A'..='Z' => return key_for(ch.to_ascii_lowercase()),
+        '<' => Comma,
+        '>' => Period,
+        '+' => Equal,
+        '|' => Backslash,
         _ => return Option::None,
     })
 }
@@ -192,7 +210,8 @@ fn main() -> anyhow::Result<()> {
         .fdc()
         .as_mut()
         .ok_or_else(|| anyhow::anyhow!("no floppy controller"))?
-        .load_image_from(0, image, None, true)?;
+        // MARTY_WRITABLE=1 mounts drive A writable (DOS 2 pipes write temporary files there).
+        .load_image_from(0, image, None, std::env::var_os("MARTY_WRITABLE").is_none())?;
     // drive B, as the RTL had it (DRIVE_B=<image>)
     if let Some(path) = std::env::var_os("DRIVE_B") {
         machine
@@ -217,12 +236,23 @@ fn main() -> anyhow::Result<()> {
             if screen(&mut machine).iter().any(|r| r.contains(marker.as_str())) {
                 script.pop();
                 for ch in keys.chars() {
-                    let key = key_for(ch).ok_or_else(|| anyhow::anyhow!("no key for {ch:?}"))?;
                     let mods = KeyboardModifiers::default();
+                    let (key, shift) = match key_for(ch) {
+                        Some(k) => (k, false),
+                        None => (shifted(ch).ok_or_else(|| anyhow::anyhow!("no key for {ch:?}"))?, true),
+                    };
+                    if shift {
+                        machine.key_press(MartyKey::ShiftLeft, mods);
+                        machine.run(100_000, &mut ctl);
+                    }
                     machine.key_press(key, mods);
                     machine.run(300_000, &mut ctl);
                     machine.key_release(key);
                     machine.run(300_000, &mut ctl);
+                    if shift {
+                        machine.key_release(MartyKey::ShiftLeft);
+                        machine.run(100_000, &mut ctl);
+                    }
                 }
                 settle = 0;
             }

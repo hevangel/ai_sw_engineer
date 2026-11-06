@@ -1,0 +1,29 @@
+# SORT oracle: sort <nonl.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + NONL.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 49a2c7d2c88a5dd62c8549a03aa7082c93e982658ed6dae604ec078453d1dfde
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort <nonl.txt
+|alpha
+|bravo
+|charlie
+|delta
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

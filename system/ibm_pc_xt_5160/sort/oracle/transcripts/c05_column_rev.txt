@@ -1,0 +1,29 @@
+# SORT oracle: sort /R/+3 <cols.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + COLS.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 14a02dbc4852c15c905409ac7de494a403b8457f486b7e62be140ef9387d887d
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort /R/+3 <cols.txt
+|b 3 x
+|a 3 w
+|c 2 y
+|a 1 z
+|b 1 v
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

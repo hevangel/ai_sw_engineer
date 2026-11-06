@@ -1,0 +1,29 @@
+# SORT oracle: sort /r /+3 <ties.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + TIES.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 8c9c44967f643609ca27338d83db64da7e0f1263ecd983ca130fd81c04643b30
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort /r /+3 <ties.txt
+|5 same
+|3 same
+|2 same
+|1 same
+|4 other
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

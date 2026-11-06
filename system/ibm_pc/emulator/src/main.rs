@@ -6,8 +6,8 @@ use system_emulator::session;
 use system_emulator::speaker::Speaker;
 
 const USAGE: &str =
-    "Usage: ibm_pc-emulator --bios <bios.bin> [--basic <basic.bin>] [--disk-a <160K.img>]\n\
-                     [--disk-b <160K.img>] [--ram <KiB>] [--font <cga.bin>] [--ppm <out.ppm>]\n\
+    "Usage: ibm_pc-emulator --bios <bios.bin> [--basic <basic.bin>] [--disk-a <disk.img>]\n\
+                     [--disk-b <disk.img>] [--ram <KiB>] [--font <cga.bin>] [--ppm <out.ppm>]\n\
                      [--wav <out.wav>] (<session.txt> | --monitor)\n\
 Boots the IBM 5150 model and replays a session script (see src/session.rs);\n\
 prints the recorded transcript. --ppm saves the final screen as an image: graphics\n\

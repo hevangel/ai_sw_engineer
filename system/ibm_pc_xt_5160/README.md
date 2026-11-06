@@ -42,9 +42,11 @@ with the original XT BIOS and PC DOS 2.00, showing the expected screens
 
 ## Software
 
+Catalog of candidates: [software_catalog.md](software_catalog.md) (ai_engineer#84).
+
 | Title | Year | Original authors | Status | Folder |
 |---|---|---|---|---|
-| — | — | — | blocked: gated by this toolchain profile | — |
+| SORT.EXE (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; original and rewrite identical on MartyPC's 5160 and the Rust emulator, 16 cases | [sort/](sort/README.md) |
 
 ## Sources
 

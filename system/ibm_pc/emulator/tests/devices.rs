@@ -282,3 +282,142 @@ fn keyboard_reset_handshake_and_one_key_at_a_time() {
     assert!(kbd.irq);
     assert_eq!(kbd.latch, 0x9E);
 }
+
+fn image(len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|i| (i % 251) as u8 ^ (i / 4096) as u8)
+        .collect()
+}
+
+/// A controller with `data` in drive 0, motor on, reset polling interrupt serviced.
+fn ready_fdc(data: Vec<u8>) -> Fdc {
+    let mut fdc = Fdc::new();
+    fdc.mount(0, data, false).unwrap();
+    fdc.write_dor(0x08);
+    fdc.write_dor(0x1C);
+    fdc.advance(10_000);
+    command(&mut fdc, &[0x08]);
+    results(&mut fdc, 2);
+    fdc
+}
+
+fn seek(fdc: &mut Fdc, cyl: u8) {
+    command(fdc, &[0x0F, 0x00, cyl]);
+    fdc.advance(2_000_000);
+    command(fdc, &[0x08]);
+    assert_eq!(results(fdc, 2), [0x20, cyl]);
+}
+
+/// READ DATA of one sector (terminal count on its last byte); returns data and result bytes.
+fn read_sector(fdc: &mut Fdc, c: u8, h: u8, r: u8, eot: u8) -> (Vec<u8>, Vec<u8>) {
+    command(fdc, &[0x46, h << 2, c, h, r, 0x02, eot, 0x2A, 0xFF]);
+    let mut data = Vec::new();
+    for _ in 0..3_000_000 {
+        fdc.advance(100);
+        while fdc.drq() {
+            if data.len() == SECTOR_BYTES - 1 {
+                fdc.terminal_count();
+            }
+            data.push(fdc.dma_read());
+        }
+        if data.len() == SECTOR_BYTES || fdc.status() & 0xC0 == 0xC0 {
+            break;
+        }
+    }
+    fdc.advance(1_000);
+    (data, results(fdc, 7))
+}
+
+#[test]
+fn fdc_reads_sector_9_of_cylinder_3_on_a_180k_disk() {
+    let img = image(184_320);
+    let mut fdc = ready_fdc(img.clone());
+    seek(&mut fdc, 3);
+    let (data, res) = read_sector(&mut fdc, 3, 0, 9, 9);
+    let off = (3 * 9 + 8) * SECTOR_BYTES;
+    assert_eq!(data, &img[off..off + SECTOR_BYTES]);
+    assert_eq!(
+        res,
+        [0x00, 0x00, 0x00, 4, 0, 1, 2],
+        "next sector after TC at EOT"
+    );
+}
+
+#[test]
+fn fdc_reads_head_1_of_a_360k_disk() {
+    let img = image(368_640);
+    let mut fdc = ready_fdc(img.clone());
+    seek(&mut fdc, 2);
+    let (data, res) = read_sector(&mut fdc, 2, 1, 5, 9);
+    let off = ((2 * 2 + 1) * 9 + 4) * SECTOR_BYTES;
+    assert_eq!(data, &img[off..off + SECTOR_BYTES]);
+    assert_eq!(res[..2], [0x04, 0x00], "ST0 reports head 1");
+}
+
+#[test]
+fn fdc_head_1_on_a_single_sided_disk_is_a_missing_sector() {
+    let mut fdc = ready_fdc(image(184_320));
+    let (data, res) = read_sector(&mut fdc, 0, 1, 1, 9);
+    assert!(data.is_empty());
+    assert_eq!((res[0] & 0xC0, res[1] & 0x04), (0x40, 0x04));
+}
+
+#[test]
+fn fdc_writes_to_the_right_offset_on_a_360k_disk() {
+    let img = image(368_640);
+    let mut fdc = ready_fdc(img.clone());
+    seek(&mut fdc, 4);
+    command(&mut fdc, &[0x45, 0x04, 4, 1, 7, 0x02, 9, 0x2A, 0xFF]);
+    let mut sent = 0usize;
+    for _ in 0..3_000_000 {
+        fdc.advance(100);
+        while fdc.drq() {
+            if sent == SECTOR_BYTES - 1 {
+                fdc.terminal_count();
+            }
+            fdc.dma_write(0xA5 ^ sent as u8);
+            sent += 1;
+        }
+        if sent == SECTOR_BYTES {
+            break;
+        }
+    }
+    fdc.advance(1_000);
+    assert_eq!(results(&mut fdc, 7)[0] & 0xC0, 0);
+    let off = ((4 * 2 + 1) * 9 + 6) * SECTOR_BYTES;
+    let disk = fdc.disks[0].as_ref().unwrap();
+    for i in 0..SECTOR_BYTES {
+        assert_eq!(disk.data[off + i], 0xA5 ^ i as u8);
+    }
+    let mut expect = img;
+    expect[off..off + SECTOR_BYTES].copy_from_slice(&disk.data[off..off + SECTOR_BYTES]);
+    assert_eq!(disk.data, expect, "nothing else changed");
+}
+
+#[test]
+fn fdc_read_id_cycles_through_nine_sectors() {
+    let mut fdc = ready_fdc(image(184_320));
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..40 {
+        command(&mut fdc, &[0x4A, 0x00]);
+        fdc.advance(1_000_000);
+        let r = results(&mut fdc, 7);
+        assert_eq!(r[0] & 0xC0, 0);
+        assert_eq!((r[3], r[4], r[6]), (0, 0, 2));
+        seen.insert(r[5]);
+        fdc.advance(37_001);
+    }
+    assert_eq!(seen.into_iter().max(), Some(9), "sector numbers reach 9");
+}
+
+#[test]
+fn mount_accepts_the_four_ibm_sizes_and_rejects_others() {
+    let mut fdc = Fdc::new();
+    for len in [163_840, 184_320, 327_680, 368_640] {
+        fdc.mount(1, vec![0; len], false).unwrap();
+    }
+    let e = fdc.mount(1, vec![0; 100_000], false).unwrap_err();
+    for size in ["163840", "184320", "327680", "368640"] {
+        assert!(e.contains(size), "{e}");
+    }
+}

@@ -279,7 +279,7 @@ impl Machine {
         self.board.forced_intr = Some(vector);
     }
 
-    /// Insert a 160 KiB diskette image into drive 0..=3.
+    /// Insert a 160, 180, 320 or 360 KiB diskette image into drive 0..=3.
     pub fn mount(&mut self, drive: usize, image: Vec<u8>, protected: bool) -> Result<(), String> {
         if drive > 3 {
             return Err("drive must be 0..=3".into());

@@ -1,0 +1,29 @@
+# SORT oracle: sort <zend.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + ZEND.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 9d0781bf18c0bd2142dd31b66576ab10c345e184159f704b01c27357c553a283
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort <zend.txt
+|alpha
+|bravo
+|delta
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
