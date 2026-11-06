@@ -12,7 +12,7 @@ The Model 30's CPU is the 8086, so the upstream findings of the 5150 profile app
 |---|---|---|
 | MartyPC (`external/martypc`, `05c0d088`) | no | 5150, 5160, PCjr, Tandy 1000 |
 | MAME 0.264 (Ubuntu 24.04 package) | no | `i8530286` (Model 30-286), `i8530h31` and later PS/2s; checked with `mame -listfull` |
-| 86Box | yes | `[8086] IBM PS/2 model 30` (`ibmps2_m30`, `src/machine/machine_table.c`), BIOS revisions 0-2 from its ROM set; an automation socket in the development branch (`doc/specifications/automation.md`) |
+| 86Box | yes | `[8086] IBM PS/2 model 30` (`ibmps2_m30`, `src/machine/machine_table.c`), BIOS revisions 0-2 from its ROM set; an automation socket in the development branch (`doc/specifications/automation.md`); used, at `a1e92633` |
 
 ## Project-owned, reused as is
 

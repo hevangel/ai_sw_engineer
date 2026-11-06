@@ -35,16 +35,30 @@ IBM and Microsoft copyrights; never committed.
 
 ## Execution oracle
 
-The profile needs an existing emulator of the 8086 Model 30. MartyPC does not model it; MAME 0.264 has the Model 30-286 and later PS/2s but not the 8086 Model 30. 86Box does (`[8086] IBM PS/2 model 30`, internal name `ibmps2_m30`, with MCGA and this BIOS), and its automation socket (`-D AUTOMATION=ON`: `text`, `key`, `wait text`, `fdd load`, `hold`/`step`) can drive it headless. Building it from a pinned commit is the remaining step of the execution gate; see [../report/report.md](../report/report.md).
+The profile needs an existing emulator of the 8086 Model 30. MartyPC does not model it; MAME 0.264 has the Model 30-286 and later PS/2s but not the 8086 Model 30. **86Box** does (`[8086] IBM PS/2 model 30`, internal name `ibmps2_m30`, MCGA, this BIOS), and its automation socket drives it headless. Built from commit `a1e92633baf178ff0791cb5624e406da3e8eb257` (2026-11-06; GPL-2.0) with
+
+```bash
+apt-get install -y libsdl2-dev libpng-dev libfreetype-dev libopenal-dev libslirp-dev libsndfile1-dev libzstd-dev pkg-config
+```
+
+```bash
+cmake -G Ninja -S 86box -B 86box-obj -DCMAKE_BUILD_TYPE=Release -DQT=OFF -DSDL2=ON -DAUTOMATION=ON -DRTMIDI=OFF -DFLUIDSYNTH=OFF -DMUNT=OFF -DSOUNDCANVAS=OFF -DDISCORD=OFF -DVNC=OFF -DDISASM=OFF
+```
+
+```bash
+ninja -C 86box-obj
+```
+
+`scripts/ps2_86box.py` writes a throwaway VM (8086 at 8 MHz, 640 KiB, BIOS revision 0, one 3.5-inch 720 KiB drive, no fixed disk, clock not synchronised with the host), starts it held with SDL's dummy video and audio drivers, and drives it with `wait text`, `key`, `step`, `text` and `regs`. POST reports `161-Set Date and Time` and `1790-Fixed Disk Error`, both true of this machine (no clock set, no fixed disk), and waits for F1, which the script presses. Nothing of 86Box is in this repository.
 
 ## Assumption ledger
 
 | ID | Assumption | Why | How it is validated |
 |---|---|---|---|
-| P-A1 | The RAM and video layout of the memory map are those of the Technical Reference | not checked against hardware | `ps2_info_rs` prints the BIOS's RAM size and tests every 16 KiB block (on the emulator, once it runs) |
-| P-A2 | `irq_rs`'s 5150-style keyboard acknowledge (port 61h bit 7) is harmless on the Model 30 | the Model 30's keyboard interface is not the 5150's PPI | `irq_rs` on the emulator: the scan codes typed must be printed |
-| P-A3 | PC DOS 3.30 boots from the 720 KiB disk made by `fetch_reference.py` with IBMBIO.COM and IBMDOS.COM not marked hidden/system | the 3.30 boot record finds IBMBIO.COM by the first directory entry and cluster 2, not by attribute | booting it on the emulator |
+| P-A1 | The RAM and video layout of the memory map are those of the Technical Reference | not checked against hardware | on 86Box: every 16 KiB block from 64 KiB to the reported top passes; the BIOS reports 639 KiB, the top 1 KiB being its extended BIOS data area (the first expectation said 640; see the report) |
+| P-A2 | `irq_rs`'s 5150-style keyboard acknowledge (port 61h bit 7) is harmless on the Model 30 | the Model 30's keyboard interface is not the 5150's PPI | on 86Box: `irq_rs` prints the six make and break codes typed, the RTL's screen |
+| P-A3 | PC DOS 3.30 boots from the 720 KiB disk made by `fetch_reference.py` with IBMBIO.COM and IBMDOS.COM not marked hidden/system | the 3.30 boot record finds IBMBIO.COM by the first directory entry and cluster 2, not by attribute | on 86Box: it boots to `A>` and runs the three DOS programs |
 
 ## Not supported
 
-The 8087 in generated code; the 5.25-inch external drive; MCGA graphics modes from Rust (the BIOS teletype is the console); more than one 64 KiB segment in the tiny model; the RTL of the hardware project (not reachable here).
+The 8087 in generated code; the 5.25-inch external drive; MCGA graphics modes from Rust (the BIOS teletype is the console); more than one 64 KiB segment in the tiny model; the RTL of the hardware project (not reachable here); real hardware.

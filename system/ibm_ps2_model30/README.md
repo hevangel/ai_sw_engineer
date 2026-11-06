@@ -20,16 +20,15 @@ claim is made here.
 
 [toolchain/](toolchain/README.md): the compiler profile of this computer (issue
 [ai_sw_engineer#60](https://github.com/hevangel/ai_sw_engineer/issues/60)). Status 2026-11-06: six
-images build reproducibly and pass the independent decoder, relocation and placement checks; the
-execution gate (running them on an independent emulator of the Model 30) is not done yet, see the
-[report](toolchain/report/report.md).
+images build reproducibly, pass the independent decoder, relocation and placement checks, and run
+on 86Box's Model 30 with the original BIOS and PC DOS 3.30 ([report](toolchain/report/report.md)).
 
 ## Simulators
 
 - Rust system emulator: [emulator/](emulator/README.md) is the scaffold's placeholder; the
   emulator is issue [ai_sw_engineer#30](https://github.com/hevangel/ai_sw_engineer/issues/30).
 - Independent emulator for the profile: 86Box (`[8086] IBM PS/2 model 30`, `ibmps2_m30`), with its
-  automation socket; not yet built here (see the report).
+  automation socket, built from a pinned commit (see the profile).
 - Primary (ai_hw_engineer): the SV machine of hevangel/ai_engineer#86, not used here.
 
 ## Software

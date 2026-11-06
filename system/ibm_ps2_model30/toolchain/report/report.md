@@ -1,6 +1,6 @@
 # IBM PS/2 Model 30 compiler profile: report
 
-Issue [ai_sw_engineer#60](https://github.com/hevangel/ai_sw_engineer/issues/60). Run of 2026-11-06 on a Linux host. **Interim: the execution gate is not done** (no image has run on an emulator of the Model 30 yet). Profile: [../spec/profile.md](../spec/profile.md); audit and versions: [../spec/audit.md](../spec/audit.md).
+Issue [ai_sw_engineer#60](https://github.com/hevangel/ai_sw_engineer/issues/60). Run of 2026-11-06 on a Linux host. Profile: [../spec/profile.md](../spec/profile.md); audit and versions: [../spec/audit.md](../spec/audit.md).
 
 ## Commands
 
@@ -9,8 +9,10 @@ python3 -I system/ibm_ps2_model30/toolchain/scripts/fetch_reference.py DIR
 ```
 
 ```bash
-system/ibm_ps2_model30/toolchain/scripts/run_tests.sh
+PS2_ROMS=DIR BOX86=<86Box> system/ibm_ps2_model30/toolchain/scripts/run_tests.sh
 ```
+
+`BOX86` is 86Box built from commit `a1e92633` with `-D AUTOMATION=ON` ([../spec/profile.md](../spec/profile.md), "Execution oracle").
 
 ## Results
 
@@ -21,11 +23,23 @@ system/ibm_ps2_model30/toolchain/scripts/run_tests.sh
 | Decoders (`check_images.py`) | 1,550 + 2,685 + 943 + 1,777 + 1,777 + 20 instructions: GNU binutils, Capstone and llvm-objdump agree on every boundary and cover every code byte; all mnemonics 8086. The first build failed here, rightly: the first `crt0.s` kept the boot drive as a data byte at the end of the boot code, which the decoders cannot agree on; it now keeps it in BP |
 | Relocations, placement, entry, formats | 97, 139, 59, 81, 81, 7 relocations re-applied equal the linked bytes; ranges inside 0500h..FFFFh (diskettes) and 0100h.. (DOS); entries 7C00h and 0100h; diskettes 720 KiB with 55AAh, boot sector and stage 2 equal the ELF memory |
 | Negative controls (`mutants.py`) | a changed relocated word, an 80186 `pusha`, a wiped boot signature, a range below 0500h, a changed `.EXE` segment word: each reported |
-| **Execution** | **not run.** Expected screens are written ([../expected/ps2_info.txt](../expected/ps2_info.txt): 640 KiB, one drive, MCGA colour 0Ch, model byte FAh, BIOS date 09/02/86, 36 blocks above 64 KiB, ROM sum 3A40h); `hello_rs`/`irq_rs` would be compared with the RTL's recorded screens and the DOS programs with their recorded lines, as in the XT profile |
+| Execution on 86Box's PS/2 Model 30 (`run_independent.sh`) | **6 of 6**, below; a wrong expected model byte is reported (negative control) |
 
-## Why execution is not done
+### Execution
 
-No emulator of the 8086 Model 30 could be run in this session: MartyPC and MAME 0.264 do not model it ([../spec/audit.md](../spec/audit.md)). 86Box does and has an automation socket that can drive it headless, but building it means compiling 86Box's current development source, which this session was not permitted to do without the owner's approval. A side attempt to exercise the 720 KiB loader on MartyPC's XT with the 1986 XT BIOS stopped at that BIOS's POST diskette error 601 with any drive type, so it says nothing about the loader.
+86Box `a1e92633` (unmodified; GPL-2.0), `ibmps2_m30` with BIOS revision 0, 8086 at 8 MHz, 640 KiB, MCGA, one 3.5-inch 720 KiB drive. POST shows `161-Set Date and Time` and `1790-Fixed Disk Error` (true of this machine: no clock set, no fixed disk) and waits for F1, which the driver presses. Expectations do not come from 86Box:
+
+| Image | Expected | Result |
+|---|---|---|
+| `ps2_info.img` | [../expected/ps2_info.txt](../expected/ps2_info.txt): 1 drive, display MCGA colour 0Ch (INT 10h function 1Ah), model byte FAh and date 09/02/86 (read from the ROM file), 36 blocks above 64 KiB none bad, ROM sum 3A40h (computed from the file), and RAM | identical, after one correction (below) |
+| `hello_rs.img`, `irq_rs.img` (720 KiB boot diskettes) | the screens the RTL recorded for these programs on the 5150 | identical; `irq_rs` takes the timer and keyboard interrupts in Rust and prints the six codes typed (P-A2) |
+| `hello.com`, `hellox.exe` under the original **PC DOS 3.30** (booted from the 720 KiB disk, P-A3) | the RTL's lines, with `drive A of 5` (below) | identical |
+| `segx.exe` (two segments) under PC DOS 3.30 | `Far segment!`, `*Near again` | identical |
+
+Two expectations were wrong at first and were corrected from documentation, not from the emulator:
+
+- **RAM:** written as 640 KiB; 86Box showed 639. The PS/2 BIOS takes the top 1 KiB of conventional memory for its extended BIOS data area and reports the rest (IBM, *PS/2 and PC BIOS Interface Technical Reference*). Every 16 KiB block up to that top passed the write/read test.
+- **Drive count:** the run script first expected `drive A of 1` (the Model 30's one drive). `hello_com` prints what DOS function 0Eh returns, which from DOS 3.0 on is the number of logical drive letters, at least 5 (Microsoft, *MS-DOS Programmer's Reference*, INT 21h function 0Eh); PC DOS 1.00 and 2.00 return the real count, which is why the 5150 and the XT print 2. 86Box under DOS 3.30 printed 5.
 
 ## Artifacts
 
@@ -40,4 +54,7 @@ No emulator of the 8086 Model 30 could be run in this session: MartyPC and MAME 
 
 ## Limits
 
-Everything in "Why execution is not done"; plus the assumptions P-A1..P-A3 of the profile, each to be checked by the execution run; no hardware or RTL run; evidence is for six programs.
+- Not run on hardware or on the hardware project's RTL; 86Box is the execution oracle. It was built from its development branch (the automation socket is not in a release yet), pinned by commit.
+- POST errors 161 and 1790 are passed with F1; the machine has no clock setting or fixed disk.
+- The DOS disk is made from PC DOS 3.30's files (P-A3), not an original 720 KiB distribution disk.
+- Evidence is for six programs, not arbitrary Rust.
