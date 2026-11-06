@@ -1,0 +1,28 @@
+# oracle: tree b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:mkdir:SUB1,b:mkdir:SUB2,b:mkdir:SUB2\INNER,b:mkdir:SUB2\INNER\DEEP
+# program: the original on the disk
+|
+|Sub-directories:  None
+|
+|
+|
+|Path: \SUB2
+|
+|Sub-directories:  INNER
+|
+|
+|
+|Path: \SUB2\INNER
+|
+|Sub-directories:  DEEP
+|
+|
+|
+|Path: \SUB2\INNER\DEEP
+|
+|Sub-directories:  None
+|
+|
+|
+|
+|A>

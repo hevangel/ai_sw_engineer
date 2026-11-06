@@ -1,0 +1,28 @@
+# oracle: tree b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:mkdir:A,b:mkdir:B,b:mkdir:C,b:mkdir:A\X
+# program: the original on the disk
+|
+|Sub-directories:  X
+|
+|
+|
+|Path: \A\X
+|
+|Sub-directories:  None
+|
+|
+|
+|Path: \B
+|
+|Sub-directories:  None
+|
+|
+|
+|Path: \C
+|
+|Sub-directories:  None
+|
+|
+|
+|
+|A>

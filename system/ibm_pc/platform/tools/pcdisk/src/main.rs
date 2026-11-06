@@ -9,6 +9,9 @@ usage: pcdisk blank <out.img> [160|180|320|360|720]     (default 160 KiB)
        pcdisk add <disk.img> <file> [NAME.EXT]     (writes the image in place)
        pcdisk extract <disk.img> <NAME.EXT> <out>
        pcdisk delete <disk.img> <NAME.EXT>
+       pcdisk mkdir <disk.img> <PATH>     (subdirectory, e.g. SUB or SUB\\INNER)
+       pcdisk label <disk.img> <LABEL>     (volume label, up to 11 characters)
+NAME.EXT may be a path with backslashes, e.g. SUB\\INNER\\FILE.TXT.
 ";
 
 fn run() -> Result<(), String> {
@@ -65,6 +68,16 @@ fn run() -> Result<(), String> {
         ["delete", img, name] => {
             let mut d = load(img)?;
             d.delete(name)?;
+            save(img, &d)
+        }
+        ["mkdir", img, path] => {
+            let mut d = load(img)?;
+            d.mkdir(path)?;
+            save(img, &d)
+        }
+        ["label", img, label] => {
+            let mut d = load(img)?;
+            d.set_label(label)?;
             save(img, &d)
         }
         _ => Err(format!("bad arguments\n{USAGE}")),

@@ -1,0 +1,28 @@
+# oracle: tree b: /x
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:mkdir:SUB1
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>tree b: /x
+|
+|Invalid parameter
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

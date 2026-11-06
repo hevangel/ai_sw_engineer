@@ -18,7 +18,7 @@
 //! disk that is sector 7 + (*n* - 2), one sector per cluster.
 //!
 //! A directory entry is the 11-byte name (8 + 3, space padded), an attribute
-//! byte (2 hidden, 4 system), zeros, a date word at offset 24, the first
+//! byte (1 read-only, 2 hidden, 4 system, 8 volume label, 10h directory), zeros, a date word at offset 24, the first
 //! cluster at 26 and the size at 28. A deleted entry starts with E5h, an unused
 //! one with 00h. A FAT entry is 000h free, FF8h to FFFh end of chain.
 //!
@@ -26,6 +26,16 @@
 //! media byte against it. [`Disk::blank`] is the 160 KiB disk, whose boot sector
 //! is all zeros; [`Disk::blank_with`] on the other formats also writes a boot
 //! sector with a DOS 2.x BPB.
+//!
+//! PC DOS 2.00 subdirectories and the volume label are supported. A
+//! subdirectory is a chain of clusters of 32-byte entries (attribute 10h) whose
+//! first two entries are `.` (its own first cluster) and `..` (the parent's
+//! first cluster, 0 for the root); a new directory cluster is zeroed (00h means
+//! never used) and a full subdirectory grows by one cluster. [`Disk::mkdir`]
+//! creates one; [`Disk::add`], [`Disk::read`] and [`Disk::delete`] take paths
+//! like `SUB\INNER\FILE.TXT` (backslash separators); [`Disk::list_dir`] lists
+//! any directory. [`Disk::set_label`] writes the volume label entry (attribute
+//! 08h) in the root directory.
 
 /// Bytes per sector, in every format.
 pub const SECTOR: usize = 512;
@@ -306,35 +316,100 @@ impl Disk {
             .count()
     }
 
-    fn dir_slot(&self, i: usize) -> std::ops::Range<usize> {
-        let s = self.geo.dir_start() * SECTOR + i * 32;
-        s..s + 32
+    /// Byte offsets of the entries of the root directory.
+    fn root_offsets(&self) -> Vec<usize> {
+        let s = self.geo.dir_start() * SECTOR;
+        (0..self.geo.root_entries).map(|i| s + i * 32).collect()
     }
 
-    /// The files in directory order (deleted and unused entries skipped).
+    /// Byte offsets of the entries of a directory: `None` is the root, `Some(c)`
+    /// the subdirectory whose chain starts at cluster `c`.
+    fn dir_offsets(&self, dir: Option<u16>) -> Result<Vec<usize>, String> {
+        let Some(first) = dir else {
+            return Ok(self.root_offsets());
+        };
+        let mut out = Vec::new();
+        for c in self.chain(first)? {
+            let r = self.cluster_range(c);
+            out.extend((r.start..r.end).step_by(32));
+        }
+        Ok(out)
+    }
+
+    fn entry_at(&self, off: usize) -> Entry {
+        let e = &self.data[off..off + 32];
+        Entry {
+            name: unpad_name(&e[..11]),
+            attr: e[11],
+            first_cluster: u16::from_le_bytes([e[26], e[27]]),
+            size: u32::from_le_bytes([e[28], e[29], e[30], e[31]]),
+        }
+    }
+
+    fn in_use(&self, off: usize) -> bool {
+        !matches!(self.data[off], 0x00 | 0xE5)
+    }
+
+    /// The entries of the root directory in directory order (deleted and
+    /// unused entries skipped; a volume label and subdirectories are listed,
+    /// with their attribute).
     pub fn list(&self) -> Vec<Entry> {
-        (0..self.geo.root_entries)
-            .filter_map(|i| {
-                let e = &self.data[self.dir_slot(i)];
-                if e[0] == 0x00 || e[0] == 0xE5 {
-                    return None;
-                }
-                Some(Entry {
-                    name: unpad_name(&e[..11]),
-                    attr: e[11],
-                    first_cluster: u16::from_le_bytes([e[26], e[27]]),
-                    size: u32::from_le_bytes([e[28], e[29], e[30], e[31]]),
-                })
-            })
+        self.root_offsets()
+            .into_iter()
+            .filter(|&o| self.in_use(o))
+            .map(|o| self.entry_at(o))
             .collect()
     }
 
+    /// The entries of any directory (`""` or `"\"` is the root; otherwise
+    /// `SUB` or `SUB\INNER`), including `.` and `..` of a subdirectory and
+    /// subdirectories (attribute 10h).
+    pub fn list_dir(&self, path: &str) -> Result<Vec<Entry>, String> {
+        let comps = split_path(path)?;
+        let dir = self.resolve_dir(&comps)?;
+        Ok(self
+            .dir_offsets(dir)?
+            .into_iter()
+            .filter(|&o| self.in_use(o))
+            .map(|o| self.entry_at(o))
+            .collect())
+    }
+
+    /// Finds the directory named by `comps` (all components directories).
+    fn resolve_dir(&self, comps: &[&str]) -> Result<Option<u16>, String> {
+        let mut dir = None;
+        for c in comps {
+            let want = pad_name(c)?;
+            let off = self
+                .dir_offsets(dir)?
+                .into_iter()
+                .find(|&o| {
+                    self.in_use(o) && self.data[o..o + 11] == want && self.data[o + 11] & 0x10 != 0
+                })
+                .ok_or_else(|| format!("{c}: no such directory"))?;
+            dir = Some(self.entry_at(off).first_cluster);
+        }
+        Ok(dir)
+    }
+
+    /// Splits `A\B\NAME` into the directory and the padded leaf name.
+    fn locate(&self, name: &str) -> Result<(Option<u16>, [u8; 11]), String> {
+        let comps = split_path_name(name)?;
+        let (leaf, parents) = comps.split_last().ok_or("empty name")?;
+        let dir = self.resolve_dir(parents)?;
+        Ok((dir, pad_name(leaf)?))
+    }
+
+    fn find_in(&self, dir: Option<u16>, want: &[u8; 11]) -> Result<Option<usize>, String> {
+        Ok(self
+            .dir_offsets(dir)?
+            .into_iter()
+            .find(|&o| self.in_use(o) && self.data[o..o + 11] == *want))
+    }
+
     fn find(&self, name: &str) -> Result<Option<usize>, String> {
-        let want = pad_name(name)?;
-        Ok((0..self.geo.root_entries).find(|&i| {
-            let e = &self.data[self.dir_slot(i)];
-            e[0] != 0x00 && e[0] != 0xE5 && e[..11] == want
-        }))
+        let (dir, want) = self.locate(name)?;
+        self.find_in(dir, &want)
     }
 
     /// The clusters of the chain starting at `first`.
@@ -357,15 +432,14 @@ impl Disk {
     }
 
     pub fn read(&self, name: &str) -> Result<Vec<u8>, String> {
-        let i = self
+        let off = self
             .find(name)?
             .ok_or_else(|| format!("{name}: no such file"))?;
-        let e = &self.data[self.dir_slot(i)];
-        let size = u32::from_le_bytes([e[28], e[29], e[30], e[31]]) as usize;
-        let first = u16::from_le_bytes([e[26], e[27]]);
+        let e = self.entry_at(off);
+        let size = e.size as usize;
         let mut out = Vec::with_capacity(size);
         if size > 0 {
-            for c in self.chain(first)? {
+            for c in self.chain(e.first_cluster)? {
                 out.extend_from_slice(&self.data[self.cluster_range(c)]);
             }
         }
@@ -373,28 +447,75 @@ impl Disk {
         Ok(out)
     }
 
+    fn free_list(&self, n: usize) -> Vec<usize> {
+        (2..=self.geo.last_cluster())
+            .filter(|&c| self.fat_entry(c) == 0)
+            .take(n)
+            .collect()
+    }
+
+    /// A free entry slot of `dir`; `None` when a subdirectory is full (it then
+    /// needs a new cluster, see `grow_dir`). A full root is an error.
+    fn free_slot(&self, dir: Option<u16>) -> Result<Option<usize>, String> {
+        let slot = self
+            .dir_offsets(dir)?
+            .into_iter()
+            .find(|&o| !self.in_use(o));
+        if slot.is_none() && dir.is_none() {
+            return Err(format!(
+                "the directory is full ({} entries)",
+                self.geo.root_entries
+            ));
+        }
+        Ok(slot)
+    }
+
+    /// Chains the zeroed cluster `new` after the last cluster of `dir` and
+    /// returns the offset of its first entry.
+    fn grow_dir(&mut self, dir: u16, new: usize) -> Result<usize, String> {
+        let last = *self.chain(dir)?.last().expect("a chain has a cluster");
+        let r = self.cluster_range(new);
+        self.data[r.clone()].fill(0);
+        self.set_fat_entry(last, new as u16);
+        self.set_fat_entry(new, 0xFFF);
+        Ok(r.start)
+    }
+
+    fn write_entry(&mut self, off: usize, name: &[u8; 11], attr: u8, first: u16, size: u32) {
+        self.data[off..off + 32].fill(0);
+        self.data[off..off + 11].copy_from_slice(name);
+        self.data[off + 11] = attr;
+        self.data[off + 26..off + 28].copy_from_slice(&first.to_le_bytes());
+        self.data[off + 28..off + 32].copy_from_slice(&size.to_le_bytes());
+    }
+
     /// Adds a file (replacing one of the same name), taking the lowest free
-    /// clusters, as DOS does.
+    /// clusters, as DOS does. `name` may be a path, `SUB\INNER\FILE.TXT`; the
+    /// directories must exist.
     pub fn add(&mut self, name: &str, contents: &[u8]) -> Result<(), String> {
         if self.find(name)?.is_some() {
             self.delete(name)?;
         }
-        let padded = pad_name(name)?;
+        let (dir, padded) = self.locate(name)?;
         let csize = self.cluster_bytes();
         let need = contents.len().div_ceil(csize);
-        let free: Vec<usize> = (2..=self.geo.last_cluster())
-            .filter(|&c| self.fat_entry(c) == 0)
-            .take(need)
-            .collect();
-        if free.len() < need {
+        let slot = self.free_slot(dir)?;
+        let extra = usize::from(slot.is_none());
+        let mut free = self.free_list(need + extra);
+        if free.len() < need + extra {
             return Err(format!(
-                "the disk is full: {name} needs {need} clusters, {} are free",
+                "the disk is full: {name} needs {} clusters, {} are free",
+                need + extra,
                 self.free_clusters()
             ));
         }
-        let slot = (0..self.geo.root_entries)
-            .find(|&i| matches!(self.data[self.dir_slot(i).start], 0x00 | 0xE5))
-            .ok_or_else(|| format!("the directory is full ({} entries)", self.geo.root_entries))?;
+        let slot = match slot {
+            Some(s) => s,
+            None => {
+                let new = free.remove(0);
+                self.grow_dir(dir.expect("only a subdirectory grows"), new)?
+            }
+        };
         for (k, &c) in free.iter().enumerate() {
             let r = self.cluster_range(c);
             self.data[r.clone()].fill(0);
@@ -403,30 +524,104 @@ impl Disk {
             let next = free.get(k + 1).map_or(0xFFF, |&n| n as u16);
             self.set_fat_entry(c, next);
         }
-        let e = self.dir_slot(slot);
-        self.data[e.clone()].fill(0);
-        self.data[e.start..e.start + 11].copy_from_slice(&padded);
-        self.data[e.start + 26..e.start + 28]
-            .copy_from_slice(&(free.first().map_or(0, |&c| c as u16)).to_le_bytes());
-        self.data[e.start + 28..e.start + 32]
-            .copy_from_slice(&(contents.len() as u32).to_le_bytes());
+        let first = free.first().map_or(0, |&c| c as u16);
+        self.write_entry(slot, &padded, 0, first, contents.len() as u32);
         Ok(())
     }
 
     /// Deletes a file the way DOS does: the entry's first byte becomes E5h and
-    /// its clusters are freed.
+    /// its clusters are freed. `name` may be a path.
     pub fn delete(&mut self, name: &str) -> Result<(), String> {
-        let i = self
+        let off = self
             .find(name)?
             .ok_or_else(|| format!("{name}: no such file"))?;
-        let e = self.dir_slot(i);
-        let first = u16::from_le_bytes([self.data[e.start + 26], self.data[e.start + 27]]);
+        let first = self.entry_at(off).first_cluster;
         if first != 0 {
             for c in self.chain(first)? {
                 self.set_fat_entry(c, 0);
             }
         }
-        self.data[e.start] = 0xE5;
+        self.data[off] = 0xE5;
         Ok(())
     }
+
+    /// Creates a subdirectory, `SUB` or `SUB\INNER` (the parent must exist), as
+    /// DOS 2.00 MKDIR does: one cluster (the lowest free), zeroed, with `.` and
+    /// `..` (attribute 10h) as its first two entries.
+    pub fn mkdir(&mut self, path: &str) -> Result<(), String> {
+        let (parent, padded) = self.locate(path)?;
+        if self.find_in(parent, &padded)?.is_some() {
+            return Err(format!("{path}: already exists"));
+        }
+        let slot = self.free_slot(parent)?;
+        let extra = usize::from(slot.is_none());
+        let mut free = self.free_list(1 + extra);
+        if free.len() < 1 + extra {
+            return Err(format!("the disk is full: {path} needs a cluster"));
+        }
+        let slot = match slot {
+            Some(s) => s,
+            None => {
+                let new = free.remove(0);
+                self.grow_dir(parent.expect("only a subdirectory grows"), new)?
+            }
+        };
+        let c = free[0];
+        let r = self.cluster_range(c);
+        self.data[r.clone()].fill(0);
+        self.set_fat_entry(c, 0xFFF);
+        let mut dot = [b' '; 11];
+        dot[0] = b'.';
+        let mut dotdot = [b' '; 11];
+        dotdot[..2].copy_from_slice(b"..");
+        self.write_entry(r.start, &dot, 0x10, c as u16, 0);
+        self.write_entry(r.start + 32, &dotdot, 0x10, parent.unwrap_or(0), 0);
+        self.write_entry(slot, &padded, 0x10, c as u16, 0);
+        Ok(())
+    }
+
+    /// Sets the volume label (up to 11 characters, space padded) in the root
+    /// directory, replacing an existing one.
+    pub fn set_label(&mut self, label: &str) -> Result<(), String> {
+        let upper = label.to_ascii_uppercase();
+        if upper.len() > 11
+            || !upper
+                .chars()
+                .all(|c| (c.is_ascii_graphic() || c == ' ') && !"\\/:*?\"<>|".contains(c))
+        {
+            return Err(format!("{label:?} is not a volume label (11 characters)"));
+        }
+        let mut name = [b' '; 11];
+        name[..upper.len()].copy_from_slice(upper.as_bytes());
+        let offs = self.root_offsets();
+        let existing = offs
+            .iter()
+            .copied()
+            .find(|&o| self.in_use(o) && self.data[o + 11] == 0x08);
+        let slot = match existing {
+            Some(o) => o,
+            None => self
+                .free_slot(None)?
+                .expect("free_slot of the root errors when full"),
+        };
+        self.write_entry(slot, &name, 0x08, 0, 0);
+        Ok(())
+    }
+}
+
+/// Splits a directory path (`""`, `"\"`, `SUB\INNER`) into components.
+fn split_path(path: &str) -> Result<Vec<&str>, String> {
+    let p = path.trim_matches('\\');
+    if p.is_empty() {
+        return Ok(Vec::new());
+    }
+    split_path_name(p)
+}
+
+fn split_path_name(path: &str) -> Result<Vec<&str>, String> {
+    let comps: Vec<&str> = path.split('\\').collect();
+    if comps.iter().any(|c| c.is_empty()) {
+        return Err(format!("{path:?} has an empty path component"));
+    }
+    Ok(comps)
 }

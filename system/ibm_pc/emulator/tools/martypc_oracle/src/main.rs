@@ -3,8 +3,10 @@
 //!
 //! `MARTY_MACHINE=5160` boots MartyPC's IBM PC XT 5160 model instead, with `MARTY_RAM_KIB` KiB
 //! of RAM (default 256, the XT profile's). The 5150 default (64 KiB) is unchanged.
-//! Typed keys may include the shifted `< > + |` and capitals; `MARTY_WRITABLE=1` mounts drive A
-//! writable (default write-protected).
+//! Typed keys may include the shifted `< > + | " : ?` and capitals; `MARTY_WRITABLE=1` mounts drive A
+//! writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
+//! scripted keys (default: the whole cycle budget). `MARTY_KEY_DELAY=n` runs n cycles after a
+//! wait's text appears before its keys are typed (default 0).
 
 use std::path::PathBuf;
 
@@ -104,6 +106,9 @@ fn key_for(ch: char) -> Option<MartyKey> {
         ',' => Comma,
         '/' => Slash,
         '=' => Equal,
+        '\'' => Quote,
+        ';' => Semicolon,
+        '\\' => Backslash,
         ' ' => Space,
         '\r' => Enter,
         _ => return Option::None,
@@ -119,6 +124,10 @@ fn shifted(ch: char) -> Option<MartyKey> {
         '>' => Period,
         '+' => Equal,
         '|' => Backslash,
+        '"' => Quote,
+        '*' => Digit8,
+        ':' => Semicolon,
+        '?' => Slash,
         _ => return Option::None,
     })
 }
@@ -213,7 +222,7 @@ fn main() -> anyhow::Result<()> {
         // MARTY_WRITABLE=1 mounts drive A writable (DOS 2 pipes write temporary files there).
         .load_image_from(0, image, None, std::env::var_os("MARTY_WRITABLE").is_none())?;
     // drive B, as the RTL had it (DRIVE_B=<image>)
-    if let Some(path) = std::env::var_os("DRIVE_B") {
+    if let Some(path) = std::env::var_os("DRIVE_B").filter(|p| !p.is_empty()) {
         machine
             .fdc()
             .as_mut()
@@ -228,6 +237,9 @@ fn main() -> anyhow::Result<()> {
     };
     let mut left = cycles;
     let mut settle = 0u64;
+    // MARTY_SETTLE=n: stop n cycles after the last scripted keys were typed (default: run all).
+    let key_delay: Option<u64> = std::env::var("MARTY_KEY_DELAY").ok().and_then(|v| v.parse().ok());
+    let settle_limit: Option<u64> = std::env::var("MARTY_SETTLE").ok().and_then(|v| v.parse().ok());
     while left > 0 {
         let batch = left.min(100_000);
         machine.run(batch as u32, &mut ctl);
@@ -235,6 +247,11 @@ fn main() -> anyhow::Result<()> {
         if let Some((marker, keys)) = script.last().cloned() {
             if screen(&mut machine).iter().any(|r| r.contains(marker.as_str())) {
                 script.pop();
+                // MARTY_KEY_DELAY=n: run n cycles between seeing the text and typing (a program
+                // may print its prompt before it flushes the keyboard buffer and reads).
+                if let Some(d) = key_delay {
+                    machine.run(d as u32, &mut ctl);
+                }
                 for ch in keys.chars() {
                     let mods = KeyboardModifiers::default();
                     let (key, shift) = match key_for(ch) {
@@ -258,6 +275,9 @@ fn main() -> anyhow::Result<()> {
             }
         } else {
             settle += batch;
+            if settle_limit.is_some_and(|l| settle >= l) {
+                break;
+            }
         }
     }
     let _ = settle;

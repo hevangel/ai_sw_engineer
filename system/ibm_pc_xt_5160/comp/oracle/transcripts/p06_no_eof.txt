@@ -1,0 +1,28 @@
+# oracle: comp bin.dat bin2.dat
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + BIN.DAT,BIN2.DAT
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>comp bin.dat bin2.dat
+|
+|
+|
+|A:BIN     .DAT and A:BIN2    .DAT
+|
+|Eof mark not found
+|
+|Files compare ok
+|
+|Compare more files (Y/N)? n
+|A>
+|
+|
+|
+|
