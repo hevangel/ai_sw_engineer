@@ -23,20 +23,20 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 
 | File | Bytes | What | Fit as a title |
 |---|---:|---|---|
-| **SORT.EXE** | 1,280 | DOS 2 filter: sorts the lines of standard input to standard output; `/R` reverse, `/+n` sort on column n | **selected first** (below) |
+| **SORT.EXE** | 1,280 | DOS 2 filter: sorts the lines of standard input to standard output; `/R` reverse, `/+n` sort on column n | **done**: `sort/` (#281), selected first (below) |
 | MORE.COM | 384 | filter: pages standard input 24 lines at a time | small; interactive (keypresses) |
 | ASSIGN.COM | 896 | redirects drive letters (resident) | resident, patches DOS |
 | GRAPHICS.COM | 789 | resident Print Screen for graphics | needs a printer model |
-| TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | good second title; needs disks with subdirectories |
+| TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | **done**: `tree/` (#285) |
 | SYS.COM | 1,408 | copies the system files | writes system areas |
 | DISKCOMP.COM, DISKCOPY.COM | 2,074, 2,444 | compare/copy whole diskettes | two drives, disk swaps |
 | RECOVER.COM | 2,304 | recovers files from bad sectors | needs damaged disks |
-| COMP.COM | 2,523 | compares files | good, small |
+| COMP.COM | 2,523 | compares files | **done**: `comp/` (#284) |
 | MODE.COM | 3,139 | sets display, printer, serial modes | device-specific |
 | BACKUP.COM, RESTORE.COM | 3,687, 4,003 | fixed-disk backup | need the fixed disk |
 | EDLIN.COM | 4,608 | line editor | interactive, larger |
 | PRINT.COM | 4,608 | background print spooler | resident, printer |
-| FIND.EXE | 5,888 | filter: lines containing a string, `/V /C /N` | good, a DOS 2 filter like SORT |
+| FIND.EXE | 5,888 | filter: lines containing a string, `/V /C /N` | **done**: `find/` (#283) |
 | FORMAT.COM | 6,016 | formats diskettes | writes media; FDC formatting |
 | FDISK.COM | 6,177 | fixed-disk partitioning | needs the fixed disk |
 | CHKDSK.COM | 6,400 | disk check (the DOS 2 version, with subdirectories) | the 5150's first title was the DOS 1.00 CHKDSK; this is its successor |
@@ -58,4 +58,5 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 ## Selection
 
 1. **SORT.EXE** (PC DOS 2.00): child issue in ai_sw_engineer, folder `sort/`. Why first: the smallest complete program that needs what the XT profile adds over the 5150 (DOS 2.00, its handle-based I/O and redirection, the `.EXE` format); a pure function of its input and switches, so the oracle is exact; small enough to specify from the binary in full.
-2. Next candidates, in order: FIND.EXE (the other DOS 2 filter), COMP.COM, TREE.COM (needs subdirectory disks), CHKDSK.COM 2.00.
+2. Then FIND.EXE (#283), COMP.COM (#284) and TREE.COM (#285), done 2026-11-06: each identical to the original in the four-way matrix (22, 10 and 9 cases). They share `scripts/capture_dos.sh` (one MartyPC boot per case, input files on drive A, optional drive B disks with subdirectories and labels built by pcdisk, prompts answered).
+3. Next candidates: MORE.COM (interactive; Microsoft's MORE.ASM is published), CHKDSK.COM 2.00.

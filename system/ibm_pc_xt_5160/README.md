@@ -47,6 +47,9 @@ Catalog of candidates: [software_catalog.md](software_catalog.md) (ai_engineer#8
 | Title | Year | Original authors | Status | Folder |
 |---|---|---|---|---|
 | SORT.EXE (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; original and rewrite identical on MartyPC's 5160 and the Rust emulator, 16 cases | [sort/](sort/README.md) |
+| FIND.EXE (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; identical on both emulators, 22 cases | [find/](find/README.md) |
+| COMP.COM (PC DOS 2.00) | 1983 | IBM | reimplemented in Rust; identical on both emulators, 10 cases | [comp/](comp/README.md) |
+| TREE.COM (PC DOS 2.00) | 1983 | IBM (David Litton) | reimplemented in Rust; identical on both emulators, 9 cases (drive B disks with subdirectories) | [tree/](tree/README.md) |
 
 ## Sources
 
