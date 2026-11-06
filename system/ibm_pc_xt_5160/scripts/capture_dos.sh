@@ -62,7 +62,11 @@ while IFS= read -r line; do
   {
     echo "# oracle: $cmd"
     echo "# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + $files"
-    echo "# program: ${PROGRAM:+$NAME = $(basename "$PROGRAM") sha256 $(sha "$PROGRAM")}${PROGRAM:-the original on the disk}"
+    if [[ -n ${PROGRAM:-} ]]; then
+      echo "# program: $NAME = $(basename "$PROGRAM") sha256 $(sha "$PROGRAM")"
+    else
+      echo "# program: the original on the disk"
+    fi
     printf '%s\n' "$rows"
   } > "$OUT/$name.txt"
   echo "$name"
