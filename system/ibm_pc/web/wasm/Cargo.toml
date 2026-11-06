@@ -1,0 +1,20 @@
+[package]
+name = "ibm_pc-emulator-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WASM bindings for the IBM PC 5150 system emulator (browser build)"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The native emulator crate, unchanged: no second browser-only machine model.
+[dependencies]
+ibm_pc-emulator = { path = "../../emulator" }
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+lto = true
+codegen-units = 1

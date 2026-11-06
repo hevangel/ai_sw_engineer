@@ -260,3 +260,18 @@ Findings: the Rust program, checking the write-protected drive A:, ended in DOS'
 | Command | Result |
 |---|---|
 | `scripts/martypc_boot_images.sh` (docker; builds `tools/martypc_oracle`, a harness that uses `external/martypc/crates/lib/marty_core` unmodified: IBM 5150 with 64 KiB, CGA, two 160 KiB floppy drives, the original BIOS and BASIC ROMs, the keyboard typing the scripted keys) | `boot_hello`, `hello_rs`, `irq_rs` (timer and keyboard interrupts handled by Rust), and under the original PC DOS 1.00: `HELLO.COM`, `HELLOX.EXE` and `SEGX.EXE` (the two-segment `.EXE`) all show **exactly the 25 screen rows the RTL recorded**. MartyPC's CPU and bus timing were validated by its author against real 8088 hardware, so this is the nearest thing to the physical machine available here; it is independent of both the RTL and the Rust emulator |
+
+## Sixteenth record: speaker, character-ROM text, debugger (2026-11-05)
+
+Issue hevangel/ai_sw_engineer#28: the pieces the browser front end (`../web`, issue #249) needs. Firmware from `scripts/fetch_reference.py` (pinned PCjs revisions; every SHA-256 matched `original/provenance.md`); toolchain `cargo 1.99.1`.
+
+| Command | Result |
+|---|---|
+| `cargo test --release -- --include-ignored` | all levels pass except two whose inputs are not in this container: the stress matrix (`I8086_STRESS_OBJECTS` not set: the pinned i8086 rustc is not built here) and the silicon vectors (the 175 MB corpus is not cached here). The CPU core is unchanged by this record, so the fourteenth record's results for those two stand |
+| `cargo test --release --test replay -- --ignored` | the RTL's 20-step DOS and BASIC session replays exactly with the speaker model and the bounded I/O log in place |
+| `cargo test --release --test frontend_support -- --ignored --nocapture` | **power-on beep: 895.8 Hz measured against 896.5 Hz** from the divisor 533h read out of the original BIOS's BEEP routine (0.137 s long; the chip's is longer, E-A2/E-A13); **every pixel of the DOS boot screen**, drawn with the original character ROM, is the glyph of the character the RTL recorded in that cell; the debugger stops at the target of the BIOS reset vector's far jump after one instruction |
+| `cargo test` (units, `cli`) | text frames (glyph, attributes, blink, cursor, 40 columns, display disable), speaker resampling of a 1 kHz square wave and the WAV header, breakpoints and the monitor's commands; `--monitor` over standard input with a stand-in ROM |
+| `ibm_pc-emulator ... --font cga.bin --ppm dos_text.ppm --wav boot.wav` (first step of the session) | the DOS date prompt as a 640x200 image drawn with the character ROM; the boot's speaker output as a 16-bit WAV |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | clean |
+
+What this does not show: the beep's length and any timing-dependent sound match the instruction-level timing, not the chip; text frames are checked against the RTL's characters, not against a captured image of a real CGA monitor.

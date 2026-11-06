@@ -1,6 +1,6 @@
 # Systems
 
-One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. Working emulators: [Busicom 141-PF](busicom_141pf/emulator/README.md), the [IBM PC 5150](ibm_pc/emulator/README.md) (it boots the original BIOS and PC DOS 1.00) and the [Atari 400/800 first slice](atari_400_800/emulator/README.md); emulators for the other listed systems remain planned.
+One folder per historical machine. Each holds the machine's `platform/` (memory map, I/O, boot, linker script, runtime/HAL), a host Rust `emulator/` for complete-machine execution, and one subfolder per software title reimplemented in Rust. Working emulators: [Busicom 141-PF](busicom_141pf/emulator/README.md), the [IBM PC 5150](ibm_pc/emulator/README.md) (it boots the original BIOS and PC DOS 1.00, natively and [in the browser](ibm_pc/web/README.md)) and the [Atari 400/800 first slice](atari_400_800/emulator/README.md); emulators for the other listed systems remain planned.
 
 | System | Year | CPU | LLVM backend | HW simulator in ai_hw_engineer | Software titles | Folder |
 |---|---|---|---|---|---|---|

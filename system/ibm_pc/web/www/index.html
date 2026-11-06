@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IBM PC 5150 Emulator</title>
+<meta name="description" content="The IBM Personal Computer 5150 in your browser: the project's Rust emulator compiled to WebAssembly.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<a class="skip" href="#screen">Skip to the PC screen</a>
+<header class="top">
+  <div class="brand">
+    <h1>IBM PC 5150</h1>
+    <p class="sub">8088 · 4.77 MHz · 64 KiB · CGA · two 160 KiB drives — the project's Rust emulator, compiled to WebAssembly, running in your browser.</p>
+  </div>
+  <fieldset class="segmented" aria-describedby="backend-help">
+    <legend>Backend</legend>
+    <input type="radio" name="backend" id="backend-wasm" value="wasm" checked>
+    <label for="backend-wasm">Rust emulator <span class="tag">default</span></label>
+    <input type="radio" name="backend" id="backend-sv" value="sv">
+    <label for="backend-sv">SystemVerilog <span class="tag muted">unavailable</span></label>
+  </fieldset>
+  <p id="backend-help" class="sr-only">The SystemVerilog backend would run the hardware project's RTL with signal inspection; it is not available yet.</p>
+</header>
+
+<main>
+  <section id="sv-panel" class="panel sv" hidden aria-labelledby="sv-title">
+    <h2 id="sv-title">SystemVerilog backend unavailable</h2>
+    <p>This mode would run the actual SystemVerilog IBM PC from the hardware project
+      through the HDL Workbench/Xezim adapter: much slower than the Rust emulator, but
+      with internal signals and waveforms to inspect.
+      That adapter is not qualified or available to this page yet
+      (hevangel/ai_engineer#80, hevangel/ai_engineer#55), so nothing runs in this mode and no signals are shown.
+      The Rust emulator is not a simulation of the RTL and is not presented as one.</p>
+    <p>Switching backends resets the machine.</p>
+    <p><button id="sv-back" type="button" class="primary">Back to the Rust emulator</button></p>
+  </section>
+
+  <div id="wasm-ui" class="layout">
+    <section class="monitor-col" aria-label="The PC">
+      <div class="bezel">
+        <div class="screen-wrap">
+          <canvas id="screen" width="640" height="200" tabindex="0"
+            aria-label="IBM PC screen. While it has focus, keys go to the PC; press Control plus right bracket to release the keyboard."
+            aria-describedby="capture"></canvas>
+          <div id="overlay" class="overlay" aria-live="polite">
+            <p id="overlay-text">Starting…</p>
+            <div id="overlay-actions" class="overlay-actions"></div>
+          </div>
+        </div>
+        <div class="bezel-bar">
+          <span id="capture" class="capture">Click the screen to type</span>
+          <span class="leds" aria-hidden="true"><span class="led" id="led-a"></span>A <span class="led" id="led-b"></span>B</span>
+        </div>
+      </div>
+
+      <div class="controls" role="group" aria-label="Machine controls">
+        <button type="button" id="power" class="primary" disabled>Power on</button>
+        <button type="button" id="pause" disabled>Pause</button>
+        <button type="button" id="cad" disabled title="Send Ctrl+Alt+Del (warm boot)">Ctrl+Alt+Del</button>
+        <label class="field">Speed
+          <select id="speed"><option value="real" selected>Real 4.77 MHz</option><option value="max">Fast (no sound)</option></select>
+        </label>
+        <label class="field check"><input type="checkbox" id="sound"> Sound</label>
+      </div>
+
+      <div class="keys" role="group" aria-label="Special keys">
+        <button type="button" data-key="0x01">Esc</button>
+        <button type="button" data-key="0x0F">Tab</button>
+        <button type="button" data-key="0x0E">Bksp</button>
+        <button type="button" data-key="0x1C">Enter</button>
+        <button type="button" data-key="0x48" aria-label="Up">↑</button>
+        <button type="button" data-key="0x50" aria-label="Down">↓</button>
+        <button type="button" data-key="0x4B" aria-label="Left">←</button>
+        <button type="button" data-key="0x4D" aria-label="Right">→</button>
+        <button type="button" data-seq="0x1D,0x46,0xC6,0x9D">Ctrl+Break</button>
+        <details class="fkeys"><summary>F1–F10</summary>
+          <span>
+            <button type="button" data-key="0x3B">F1</button><button type="button" data-key="0x3C">F2</button>
+            <button type="button" data-key="0x3D">F3</button><button type="button" data-key="0x3E">F4</button>
+            <button type="button" data-key="0x3F">F5</button><button type="button" data-key="0x40">F6</button>
+            <button type="button" data-key="0x41">F7</button><button type="button" data-key="0x42">F8</button>
+            <button type="button" data-key="0x43">F9</button><button type="button" data-key="0x44">F10</button>
+          </span>
+        </details>
+      </div>
+
+      <form id="type-form" class="typeline">
+        <label for="type-text">Type text</label>
+        <input id="type-text" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. DIR">
+        <label class="field check"><input type="checkbox" id="type-enter" checked> + Enter</label>
+        <button type="submit" id="type-send" disabled>Type</button>
+      </form>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div class="statusbar">
+        <span id="state" class="chip off">Off</span>
+        <span id="status" aria-live="polite">Machine off.</span>
+      </div>
+
+      <details id="textview" class="panel slim">
+        <summary>Screen as text</summary>
+        <div class="row">
+          <button type="button" id="text-refresh">Refresh</button>
+          <button type="button" id="text-copy">Copy to clipboard</button>
+        </div>
+        <pre id="text-out" tabindex="0" aria-label="The PC screen as text"></pre>
+      </details>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="media-title" id="media">
+        <h2 id="media-title">ROMs and disks</h2>
+        <p class="note">Use your own copies of IBM's firmware and PC DOS (they are copyrighted and not included).
+          Choose files or drop them anywhere on the page. Each is checked against the recorded originals; nothing leaves your browser.</p>
+        <div class="cards">
+          <div class="card" id="card-0">
+            <div class="card-head"><label for="f-bios">BIOS ROM</label> <span class="tag req">required · 8 KiB</span></div>
+            <input type="file" id="f-bios" data-slot="0">
+            <p id="s-0" class="st">not loaded</p>
+          </div>
+          <div class="card" id="card-1">
+            <div class="card-head"><label for="f-basic">Cassette BASIC ROM</label> <span class="tag">optional · 32 KiB</span></div>
+            <input type="file" id="f-basic" data-slot="1">
+            <p id="s-1" class="st">not loaded — needed for ROM BASIC</p>
+          </div>
+          <div class="card" id="card-2">
+            <div class="card-head"><label for="f-font">CGA character ROM</label> <span class="tag">optional · 8 KiB</span></div>
+            <input type="file" id="f-font" data-slot="2">
+            <p id="s-2" class="st">not loaded — text uses a browser font, no colours</p>
+          </div>
+          <div class="card" id="card-3">
+            <div class="card-head"><label for="f-a">Drive A</label> <span class="tag">160 KiB diskette</span></div>
+            <input type="file" id="f-a" data-slot="3">
+            <div class="row">
+              <label class="field check"><input type="checkbox" id="wp-a" checked> write-protect</label>
+              <button type="button" id="eject-a">Eject</button>
+            </div>
+            <p id="s-3" class="st">empty</p>
+          </div>
+          <div class="card" id="card-4">
+            <div class="card-head"><label for="f-b">Drive B</label> <span class="tag">160 KiB diskette</span></div>
+            <input type="file" id="f-b" data-slot="4">
+            <div class="row">
+              <button type="button" id="blank-b">Insert blank disk</button>
+              <button type="button" id="eject-b">Eject</button>
+              <button type="button" id="save-b">Download</button>
+            </div>
+            <p id="s-4" class="st">empty</p>
+          </div>
+        </div>
+        <div class="row remember">
+          <label class="field check"><input type="checkbox" id="remember" checked> Remember ROMs and disks in this browser</label>
+          <button type="button" id="forget">Forget</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <details id="debug">
+          <summary>Debugger</summary>
+          <p class="note">The native <code>--monitor</code>'s commands. Numbers are hex; addresses <code>SSSS:OOOO</code>.
+            Commands pause the machine first.</p>
+          <div class="row">
+            <button type="button" data-cmd="r">Registers</button>
+            <button type="button" data-cmd="s">Step</button>
+            <button type="button" data-cmd="t 10">Trace 10</button>
+            <button type="button" data-cmd="?">Help</button>
+            <button type="button" id="mon-clear">Clear</button>
+          </div>
+          <form id="mon-form" class="typeline">
+            <label for="mon-line">Command</label>
+            <input id="mon-line" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="d 0:400 20">
+            <button type="submit">Run</button>
+          </form>
+          <pre id="mon-out" tabindex="0" aria-label="Debugger output"></pre>
+        </details>
+      </section>
+
+      <section class="panel slim about">
+        <h2>About this machine</h2>
+        <p>IBM 5150 board as the hardware project models it: 8088 at 4.77 MHz, 64 KiB RAM, CGA,
+          two single-sided 160 KiB drives, speaker. Timing is per instruction, not per cycle.
+          Not modelled: cassette, printer, serial, game port, more RAM.</p>
+        <p class="note" id="build"></p>
+      </section>
+    </aside>
+  </div>
+</main>
+<div id="drop" class="drop" hidden><p>Drop ROMs or disk images</p></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -10,18 +10,22 @@ and runs typed DOS and BASIC sessions. The screens, and the written drive B imag
 the hardware project's RTL for a 20-step session (boot, date, `DIR`, `CHKDSK`, ROM and
 disk BASIC, `FORMAT B:`, `COPY`, and BASIC drawing in both CGA graphics modes, compared by
 video-memory hash). The CPU core passes all 566,721 physical-chip vectors
-the RTL passes. Not done: the speaker, an interactive graphical front end, character-ROM
-text rendering, and a whole compiled `llvm-i8086` title (an assembled two-stage boot program already boots through the original BIOS; compiled functions run on the core; the Rust target does not exist yet). Contract and limits:
+the RTL passes. The speaker, text frames drawn with the original CGA character ROM, and a
+debugger (breakpoints, step, trace, registers, memory; `--monitor`) are in; the interactive
+graphical front end is the browser build in [`../web`](../web/README.md); compiled
+`llvm-i8086` titles run under DOS ([chkdsk](../chkdsk/README.md)). Contract and limits:
 [spec/spec.md](spec/spec.md); evidence: [report/verification.md](report/verification.md).
 
 | Path | Contents |
 |---|---|
 | `src/cpu.rs` | `Cpu`: instruction-level 8088 core; `Bus` trait (byte-wide memory, I/O, NMI/INTR) |
 | `src/machine.rs` | `Machine`/`Board`: memory map, I/O decode, clock, interrupt wiring, DMA service |
-| `src/pic.rs`, `pit.rs`, `ppi.rs`, `dma.rs`, `fdc.rs`, `cga.rs` | the peripherals; `ppi.rs` also holds the keyboard; `cga.rs` also decodes graphics modes to pixels and PPM |
+| `src/pic.rs`, `pit.rs`, `ppi.rs`, `dma.rs`, `fdc.rs`, `cga.rs` | the peripherals; `ppi.rs` also holds the keyboard; `cga.rs` also draws text and graphics frames and PPM |
+| `src/speaker.rs` | the speaker gate (timer 2 AND port B bit 1), PCM resampling, WAV |
+| `src/debug.rs` | breakpoints, step, trace, registers, memory dump, the `--monitor` command loop |
 | `src/session.rs`, `keys.rs`, `sha256.rs` | session scripts and transcripts, text to scan codes, image fingerprints |
 | `src/main.rs` | the `ibm_pc-emulator` command line |
-| `tests/` | `cpu_programs`, `devices`, `cli`, `replay` (RTL transcripts), `silicon_vectors` (physical-chip corpus) |
+| `tests/` | `cpu_programs`, `devices`, `cli`, `replay` (RTL transcripts), `silicon_vectors` (physical-chip corpus), `frontend_support` (beep, character ROM, debugger against the originals) |
 | `oracle/transcripts/` | screens and drive hashes recorded from the RTL (`scripts/rtl_oracle.sh`) |
 | `examples/rtl_fuzz.rs`, `rtl/tb_diff.cpp`, `scripts/rtl_diff.sh` | CPU differential fuzz against the RTL |
 | `examples/bringup.rs` | boot the ROMs and print the screen, for bring-up |
@@ -31,8 +35,10 @@ text rendering, and a whole compiled `llvm-i8086` title (an assembled two-stage 
 
 The original BIOS, Cassette BASIC and PC DOS 1.00 disk are not in this repository.
 `$IBM_PC_ROMS` (or `$AI_HW_ENGINEER/system/ibm_pc/work/reference`) points at a directory
-with `bios.bin`, `basic.bin`, `pcdos100.img` and `workdisk.img`
-([provenance](original/provenance.md)). From the repository root, with
+with `bios.bin`, `basic.bin`, `pcdos100.img`, `workdisk.img` and, for text frames, `cga.bin`
+([provenance](original/provenance.md)). Without the hardware project,
+`python3 -I system/ibm_pc/emulator/scripts/fetch_reference.py DIR` fetches them from the
+pinned PCjs revisions and checks the hashes (keep `DIR` outside the repository). From the repository root, with
 `R=../ai_hw_engineer/system/ibm_pc/work/reference` (add `+1.99.1` after `cargo` where no
 default toolchain is set):
 
@@ -44,7 +50,16 @@ system/ibm_pc/emulator/target/release/ibm_pc-emulator \
 diff <(grep -v '^#' /tmp/session.out) <(grep -v '^#' system/ibm_pc/emulator/oracle/transcripts/dos100_session.txt)
 ```
 
-Add `--ppm screen.ppm` to save the final screen as an image when it ends in a CGA graphics mode.
+Add `--ppm screen.ppm` to save the final screen as an image (in text modes also
+`--font $R/cga.bin`, the IBM CGA character ROM), `--wav beep.wav` to record the speaker.
+Debug instead of replaying a session:
+
+```bash
+printf 'b F000:E05B\ng\nr\nt 3\nd 0:400 20\nq\n' | \
+  system/ibm_pc/emulator/target/release/ibm_pc-emulator --bios $R/bios.bin --monitor
+```
+
+`?` lists the monitor's commands (`r`, `s`, `t`, `g`, `b`, `bc`, `bl`, `d`, `k`, `screen`, `reset`, `q`).
 
 The session file is the input (its `screen` and `disk` lines are ignored) and the output
 is a transcript in the same format; an empty diff means the Rust machine showed what the
@@ -59,6 +74,9 @@ cargo clippy --manifest-path system/ibm_pc/emulator/Cargo.toml --all-targets -- 
 
 # against the RTL's recorded session (needs the firmware, about a second)
 cargo test --release --manifest-path system/ibm_pc/emulator/Cargo.toml --test replay -- --ignored
+
+# speaker, character ROM and debugger against the originals (needs the firmware)
+cargo test --release --manifest-path system/ibm_pc/emulator/Cargo.toml --test frontend_support -- --ignored
 
 # 566,721 physical-chip vectors (needs the hardware project's cached corpus)
 cargo test --release --manifest-path system/ibm_pc/emulator/Cargo.toml \
@@ -75,5 +93,6 @@ The corpus, the RTL and the firmware cache come from a sibling checkout of `ai_h
 (`$AI_HW_ENGINEER`, default `../ai_hw_engineer`); nothing from it is copied here.
 
 - [spec/spec.md](spec/spec.md): contract, dependencies, unsupported hardware, assumption ledger
+- [spec/inventory.md](spec/inventory.md): other IBM PC emulators, licences and their role here
 - [plans/testplan.md](plans/testplan.md): verification levels and commands
 - [report/verification.md](report/verification.md): dated verification records and findings

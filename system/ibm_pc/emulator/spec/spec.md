@@ -4,14 +4,17 @@ Host library and `ibm_pc-emulator` executable that run original and compiled
 machine-code images through the CPU, memory and peripherals of the whole machine.
 This is separate from the title reimplementations and the `llvm-i8086` backend.
 
-Status (2026-10-25): the **8088 CPU core** and the **5150 board** (memory and I/O
+Status (2026-11-05): the **8088 CPU core** and the **5150 board** (memory and I/O
 decode, interrupt controller, timer, PPI and keyboard, DMA, diskette controller,
-CGA registers and text screen) are implemented. The unchanged IBM BIOS boots PC
-DOS 1.00 from a diskette image and runs typed DOS and BASIC sessions whose screens,
-CGA graphics memory and written disk images match the hardware project's RTL (see
-`report/verification.md`). Not done: the speaker, an interactive graphical front
-end, text-mode rendering with the character ROM, and running compiled `llvm-i8086`
-images (there are none yet).
+CGA registers, text and graphics frames, speaker) are implemented. The unchanged IBM
+BIOS boots PC DOS 1.00 from a diskette image and runs typed DOS and BASIC sessions
+whose screens, CGA graphics memory and written disk images match the hardware
+project's RTL (see `report/verification.md`); compiled `llvm-i8086` images (boot
+floppies, `.COM`/`.EXE`, the `chkdsk` title) run on it. Text frames are drawn with the
+original CGA character ROM when the user supplies it. A debugger (breakpoints, step,
+trace, registers, memory) is in `src/debug.rs` and `--monitor`. The interactive
+graphical front end is the browser build in [`../web`](../web/README.md). Inventory
+of other emulators: [inventory.md](inventory.md).
 
 ## Sources
 
@@ -36,7 +39,9 @@ images (there are none yet).
 | 8255 PPI, keyboard | `src/ppi.rs` | no |
 | 8237A DMA | `src/dma.rs` | no |
 | 8272 FDC | `src/fdc.rs` | no |
-| CGA 6845 registers, text screen | `src/cga.rs` | no |
+| CGA 6845 registers, text screen, frames | `src/cga.rs` | no |
+| Speaker gate | `src/speaker.rs` | no |
+| Debugger and monitor | `src/debug.rs` | no |
 
 Decision E1: write every core here instead of depending on `external/martypc`.
 MartyPC is the secondary oracle, and an emulator sharing its code would not be an
@@ -97,13 +102,39 @@ address bits alias:
 | 00h-0Fh | 8237A DMA | register file, flip-flop, mask, mode, status, terminal count, auto-initialize, address decrement; channel 2 transfers for the diskette controller |
 | 20h-21h | 8259A PIC | ICW1-ICW4, OCW1-OCW3, edge-triggered, fixed priority, non-specific and specific EOI, IRR/ISR reads |
 | 40h-43h | 8253 PIT | modes 0-5, binary/BCD flag, 16-bit and byte access, counter latch, gate on channel 2; channel 0 drives IRQ0, channel 2 reaches port C bits 4-5 |
-| 60h-63h | 8255 PPI | mode 0; port A = SW1 (PB7 set) or the keyboard latch, port B output latch (timer-2 gate, keyboard clock and acknowledge), port C input (timer-2 output) |
+| 60h-63h | 8255 PPI | mode 0; port A = SW1 (PB7 set) or the keyboard latch, port B output latch (timer-2 gate, speaker data, keyboard clock and acknowledge), port C input (timer-2 output) |
 | 80h-83h | DMA page latches | per IBM wiring: 81h channel 2, 82h channel 3, 83h channel 1 |
 | A0h | NMI mask | latched, no NMI source |
 | 3D0h-3DFh | CGA | 6845 index/data, mode and colour-select registers, status (retrace bits); the 320x200 four-colour and 640x200 two-colour graphics modes decode to RGBI pixels and a PPM image |
 | 3F2h, 3F4h-3F5h | diskette adapter | DOR (drive select, reset, DMA/IRQ enable, motors), 8272 main status and data |
 
 Everything else reads FFh. Absent adapters (serial, printer, game) are absent.
+
+**Speaker** (`src/speaker.rs`, E-A13): the level is timer 2's output AND port B bit 1,
+re-evaluated after each step's timer advance and after every port B write. With
+`Speaker::capture` set (off by default), edges are recorded in CPU clocks (at most
+65,536 between two drains; older ones are dropped) and `render(now, rate, out)` turns
+them into PCM samples in -1.0..1.0, each the mean level over its period. The CLI writes
+them as a WAV file (`--wav`); the browser build plays them with Web Audio.
+
+**Frames** (`Cga::frame`, E-A14): graphics modes as `Cga::pixels`; text modes drawn from
+the 8x8 double-dot font at 1800h of the 8 KiB IBM CGA character ROM (or a bare 2 KiB
+8x8 font) into 640x200 or 320x200 RGBI pixels, with attributes (foreground, background,
+blink or background intensity by mode bit 5), the 6845 cursor (R10/R11 scan lines,
+R14/R15 address, R10 bits 6-5 = 01 hides it) and display enable (mode bit 3). Without
+a font a text mode has no frame; the 25 text rows (`Cga::text`) are still available.
+The character ROM is IBM's and is not in this repository (`../original/provenance.md`).
+Not modeled: CRTC geometry other than 40/80x25 (R0-R9 are stored, not applied),
+overscan border colour, snow, composite artifacts.
+
+**Debugger** (`src/debug.rs`): `run_until` (breakpoints on physical CS:IP, halt,
+undefined opcode, step budget; at least one step), `registers`, `dump`, `trace`,
+`parse_addr` (`SSSS:OOOO` or physical, hex), and `monitor`, a line-oriented command
+loop over any reader and writer (`ibm_pc-emulator --monitor` reads standard input; `?`
+lists commands). Deterministic: the same commands print the same text.
+
+**I/O log**: `Board::io_log` keeps the first 65,536 OUTs since reset (`IO_LOG_LIMIT`),
+so a long interactive run stays bounded.
 
 **Diskette controller** (E-A10): up to four single-sided 160 KiB drives (40 cylinders,
 8 sectors of 512 bytes). Commands: SPECIFY, SENSE DRIVE STATUS, SENSE INTERRUPT STATUS,
@@ -141,13 +172,15 @@ holds, plus 2,000,000 clocks to settle. The RTL oracle (`scripts/rtl_oracle.py`)
 the same format from the hardware project's RTL, so a replay is a text comparison.
 `ibm_pc-emulator --bios B [--basic B] [--disk-a I] [--disk-b I] [--ram KiB] session.txt`
 prints the transcript; invalid input fails with a line number, a timeout or I/O error
-exits nonzero. `--ppm file` saves the final screen as an image when it is in a graphics
-mode. Drive A is mounted write-protected.
+exits nonzero. `--ppm file` saves the final screen as an image: graphics modes always,
+text modes when `--font` gives the character ROM. `--wav file` records the speaker for
+the whole run (44.1 kHz, 16-bit mono). `--monitor` replaces the session with debugger
+commands from standard input. Drive A is mounted write-protected.
 
 ## Unsupported hardware and variants
 
 More than 64 KiB of RAM on the 5150 board model, MDA, EGA and later video, the CGA
-light pen, character-ROM text rendering, the speaker, hard disks, double-sided and
+light pen, the speaker's analog response, hard disks, double-sided and
 8-inch diskettes, the 5160 XT variant, serial/printer/game adapters, cassette I/O,
 NMI sources (parity, coprocessor), composite colour artifacts, sub-instruction
 timing, and undocumented NMOS behavior beyond the vector corpus.
@@ -167,4 +200,6 @@ timing, and undocumented NMOS behavior beyond the vector corpus.
 | E-A10 | The diskette controller works at command level with fixed times: 6 ms per cylinder step, 200 ms per revolution (sector time 1/8 of it), 32 microseconds per byte; SPECIFY is ignored; READY is always true (the 5150 adapter has no READY input) but a drive transfers data only with a disk inserted and the motor on; after reset release one polling interrupt (ST0 = C0h) is raised, and the first SENSE INTERRUPT STATUS clears all four | the datasheet gives timing as programmable intervals and polling as four interrupts; the BIOS is written for the 5150 adapter | the BIOS POST disk test, boot, DOS reads and writes, FORMAT and COPY all work, and drive B's image after FORMAT and COPY is byte-identical to the RTL's (transcript `disk` lines) |
 | E-A11 | The CGA frame is 79,545 CPU clocks (60 Hz) with vertical retrace in clocks 73,000 and up, and horizontal blanking from clock 240 of each 303-clock line | the Technical Reference gives the dot clock and line counts; the retrace bit pattern a BIOS polls is what matters | the BIOS video routines, which poll the status port, run; the hardware project uses the same figures |
 | E-A12 | The planar switches read SW1 = 6Fh (two drives, 80x25 colour, no 8087, 64 KiB) and SW2 = 0 | the board's DIP switches are user settings; these are the values the hardware project's board presents, so the same firmware sees the same machine | BASIC reports 61,404 bytes free and CHKDSK reports 65,536 bytes of memory, as on the RTL |
+| E-A13 | The speaker level is sampled once per step, after the timer advances, so an edge inside one long instruction (a `REP` string run) lands at the end of that step; the analog driver and cone are not modeled (a sample is the mean level) | the planar's speaker circuit is analog; timer edges between CPU steps are not observable to software | the BIOS power-on beep measures 895.8 Hz against 896.5 Hz from the divisor 533h read out of the original BIOS (`tests/frontend_support.rs`); its length (0.137 s) follows the instruction-level timing of E-A2, not the chip |
+| E-A14 | The CGA cursor blinks with a 16-frame period (8 on, 8 off) and blinking characters with 32 (16 visible, 16 hidden); text uses the double-dot font at 1800h of the character ROM (the card's jumper default) | the 6845 datasheet gives the cursor rates as 1/16 or 1/32 of the field rate; the Technical Reference describes the jumper | `tests/frontend_support.rs`: every pixel of the DOS boot screen equals the character ROM glyph of the character the RTL recorded in that cell; rates are a display choice, not observed by software |
 | E-V1 | (validated finding, not an assumption) DAA/DAS: the high-digit adjustment tests the original AL against 9Fh and, for 9Ah..9Fh, only when AF was clear; the low-digit adjustment does not set CF. This differs from the manual's pseudo-code | the manual's pseudo-code reads differently | 4,000 DAA/DAS vectors from the physical chip, all pass; the RTL passes them too |
