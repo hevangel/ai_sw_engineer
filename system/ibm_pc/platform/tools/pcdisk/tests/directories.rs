@@ -131,3 +131,24 @@ fn root_only_operations_are_unchanged() {
     assert_eq!(d.bytes()[..before.len()].len(), before.len());
     assert!(d.read("A\\").is_err());
 }
+
+#[test]
+fn a_system_copy_keeps_the_files_in_order_and_takes_the_new_bpb() {
+    let mut src = pcdisk::Disk::blank_with(&pcdisk::GEOMETRY_180);
+    src.add("IBMBIO.COM", &[1u8; 1500]).unwrap();
+    src.add("IBMDOS.COM", &[2u8; 3000]).unwrap();
+    src.add("COMMAND.COM", &[3u8; 700]).unwrap();
+    src.mkdir("SUB").unwrap();
+    let mut boot = src.bytes().to_vec();
+    boot[0x40] = 0xAB; // stands for boot code
+    let src = pcdisk::Disk::from_bytes(boot).unwrap();
+    let d = pcdisk::Disk::system_copy(&src, &pcdisk::GEOMETRY_360).unwrap();
+    assert_eq!(d.bytes().len(), 360 * 1024);
+    let names: Vec<String> = d.list().into_iter().map(|e| e.name).collect();
+    assert_eq!(names, ["IBMBIO.COM", "IBMDOS.COM", "COMMAND.COM"]);
+    assert_eq!(d.list()[0].first_cluster, 2);
+    assert_eq!(d.read("IBMDOS.COM").unwrap(), vec![2u8; 3000]);
+    assert_eq!(d.bytes()[0x40], 0xAB);
+    let blank = pcdisk::Disk::blank_with(&pcdisk::GEOMETRY_360);
+    assert_eq!(d.bytes()[0x0B..0x1E], blank.bytes()[0x0B..0x1E]);
+}
