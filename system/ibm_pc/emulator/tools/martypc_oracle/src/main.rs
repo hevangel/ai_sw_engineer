@@ -263,6 +263,7 @@ fn main() -> anyhow::Result<()> {
             };
             if seen {
                 script.pop();
+                typed_at = rows.clone();
                 // MARTY_KEY_DELAY=n: run n cycles between seeing the text and typing (a program
                 // may print its prompt before it flushes the keyboard buffer and reads).
                 if let Some(d) = key_delay {
@@ -288,7 +289,6 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 settle = 0;
-                typed_at = screen(&mut machine);
             }
         } else {
             settle += batch;
