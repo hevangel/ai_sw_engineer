@@ -29,7 +29,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | GRAPHICS.COM | 789 | resident Print Screen for graphics | needs a printer model |
 | TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | **done**: `tree/` (#285) |
 | SYS.COM | 1,408 | copies the system files | writes system areas |
-| DISKCOMP.COM, DISKCOPY.COM | 2,074, 2,444 | compare/copy whole diskettes | two drives, disk swaps |
+| DISKCOMP.COM, DISKCOPY.COM | 2,074, 2,444 | compare/copy whole diskettes | DISKCOPY **done**: `diskcopy/` (#289); DISKCOMP a candidate |
 | RECOVER.COM | 2,304 | recovers files from bad sectors | needs damaged disks |
 | COMP.COM | 2,523 | compares files | **done**: `comp/` (#284) |
 | MODE.COM | 3,139 | sets display, printer, serial modes | device-specific |
@@ -37,7 +37,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | EDLIN.COM | 4,608 | line editor | interactive, larger |
 | PRINT.COM | 4,608 | background print spooler | resident, printer |
 | FIND.EXE | 5,888 | filter: lines containing a string, `/V /C /N` | **done**: `find/` (#283) |
-| FORMAT.COM | 6,016 | formats diskettes | writes media; FDC formatting |
+| FORMAT.COM | 6,016 | formats diskettes | **done**: `format/` (#288) |
 | FDISK.COM | 6,177 | fixed-disk partitioning | needs the fixed disk |
 | CHKDSK.COM | 6,400 | disk check (the DOS 2 version, with subdirectories) | **done**: `chkdsk/` (#287); successor of the 5150's first title, the DOS 1.00 CHKDSK |
 | ANSI.SYS | 1,664 | console driver with ANSI escapes | device driver |
@@ -62,3 +62,4 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 3. MORE.COM (#286), done 2026-11-07: identical on 10 cases; the IBM binary has two instructions the published MORE.ASM lacks (it reprints the character that triggered the prompt).
 4. CHKDSK.COM 2.00 (#287), done 2026-11-07: identical on 15 cases (damaged 360 KiB disks, /V, /F with a second check, Y/N answers, file arguments, the default drive). The Rust emulator now presents SW2 for its RAM size, so its 256 KiB machine reports the memory the oracle shows.
 5. All six small utilities of disk 1 that are pure functions of their input are done. Next candidates are larger or need more machine: EDLIN.COM (interactive), DEBUG.COM, the resident utilities (PRINT, ASSIGN, GRAPHICS), FORMAT and DISKCOPY (media writes, two drives).
+6. FORMAT.COM (#288) and DISKCOPY.COM (#289), done 2026-11-07: matched on screen and on the drive B image after the run (12 and 7 cases; FORMAT with two documented masks, the label's time stamp and the /8 boot record). DISKCOPY copies a double-sided 360 KiB syscopy of disk 1, since MartyPC and the hardware differ on side 1 of a one-sided disk.
