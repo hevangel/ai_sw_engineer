@@ -39,7 +39,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | FIND.EXE | 5,888 | filter: lines containing a string, `/V /C /N` | **done**: `find/` (#283) |
 | FORMAT.COM | 6,016 | formats diskettes | writes media; FDC formatting |
 | FDISK.COM | 6,177 | fixed-disk partitioning | needs the fixed disk |
-| CHKDSK.COM | 6,400 | disk check (the DOS 2 version, with subdirectories) | the 5150's first title was the DOS 1.00 CHKDSK; this is its successor |
+| CHKDSK.COM | 6,400 | disk check (the DOS 2 version, with subdirectories) | **done**: `chkdsk/` (#287); successor of the 5150's first title, the DOS 1.00 CHKDSK |
 | ANSI.SYS | 1,664 | console driver with ANSI escapes | device driver |
 
 ## Languages and development tools
@@ -60,4 +60,5 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 1. **SORT.EXE** (PC DOS 2.00): child issue in ai_sw_engineer, folder `sort/`. Why first: the smallest complete program that needs what the XT profile adds over the 5150 (DOS 2.00, its handle-based I/O and redirection, the `.EXE` format); a pure function of its input and switches, so the oracle is exact; small enough to specify from the binary in full.
 2. Then FIND.EXE (#283), COMP.COM (#284) and TREE.COM (#285), done 2026-11-06: each identical to the original in the four-way matrix (22, 10 and 9 cases). They share `scripts/capture_dos.sh` (one MartyPC boot per case, input files on drive A, optional drive B disks with subdirectories and labels built by pcdisk, prompts answered).
 3. MORE.COM (#286), done 2026-11-07: identical on 10 cases; the IBM binary has two instructions the published MORE.ASM lacks (it reprints the character that triggered the prompt).
-4. Next candidate: CHKDSK.COM 2.00.
+4. CHKDSK.COM 2.00 (#287), done 2026-11-07: identical on 15 cases (damaged 360 KiB disks, /V, /F with a second check, Y/N answers, file arguments, the default drive). The Rust emulator now presents SW2 for its RAM size, so its 256 KiB machine reports the memory the oracle shows.
+5. All six small utilities of disk 1 that are pure functions of their input are done. Next candidates are larger or need more machine: EDLIN.COM (interactive), DEBUG.COM, the resident utilities (PRINT, ASSIGN, GRAPHICS), FORMAT and DISKCOPY (media writes, two drives).

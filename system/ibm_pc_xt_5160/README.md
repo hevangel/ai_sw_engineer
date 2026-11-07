@@ -51,6 +51,7 @@ Catalog of candidates: [software_catalog.md](software_catalog.md) (ai_engineer#8
 | COMP.COM (PC DOS 2.00) | 1983 | IBM | reimplemented in Rust; identical on both emulators, 10 cases | [comp/](comp/README.md) |
 | TREE.COM (PC DOS 2.00) | 1983 | IBM (David Litton) | reimplemented in Rust; identical on both emulators, 9 cases (drive B disks with subdirectories) | [tree/](tree/README.md) |
 | MORE.COM (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; identical on both emulators, 10 cases (keys answered at each prompt) | [more/](more/README.md) |
+| CHKDSK.COM (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; identical on both emulators, 15 cases (damaged drive B disks, /F with a second check) | [chkdsk/](chkdsk/README.md) |
 
 ## Sources
 
