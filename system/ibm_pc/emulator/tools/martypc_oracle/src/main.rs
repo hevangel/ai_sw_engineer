@@ -3,8 +3,8 @@
 //!
 //! `MARTY_MACHINE=5160` boots MartyPC's IBM PC XT 5160 model instead, with `MARTY_RAM_KIB` KiB
 //! of RAM (default 256, the XT profile's). The 5150 default (64 KiB) is unchanged.
-//! Typed keys may include the shifted `< > + | " : ?` and capitals; `MARTY_WRITABLE=1` mounts drive A
-//! writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
+//! Typed keys may include the shifted `< > + | " : ?` and capitals; `MARTY_WRITABLE=1` mounts drives A
+//! and B writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
 //! scripted keys (default: the whole cycle budget). `MARTY_KEY_DELAY=n` runs n cycles after a
 //! wait's text appears before its keys are typed (default 0). A wait text starting with `$` waits
 //! for the last non-blank row to end with the rest, so a prompt printed again is waited for anew.
@@ -228,7 +228,7 @@ fn main() -> anyhow::Result<()> {
             .fdc()
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("no floppy controller"))?
-            .load_image_from(1, std::fs::read(path)?, None, true)?;
+            .load_image_from(1, std::fs::read(path)?, None, std::env::var_os("MARTY_WRITABLE").is_none())?;
     }
 
     let mut ctl = ExecutionControl::new();

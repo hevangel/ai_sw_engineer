@@ -1,0 +1,28 @@
+# oracle: chkdsk b:/v
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:mkdir:SUB,b:mkdir:SUB\INNER,b:add:ROOT.TXT=ONE.TXT,b:add:SUB\A.TXT=ONE.TXT,b:add:SUB\INNER\BIG.BIN=BIG.BIN
+# program: the original on the disk
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>chkdsk b:/v
+|Directory B:
+|Directory B:\SUB
+|Directory B:\SUB\INNER
+|      B:\SUB\INNER\BIG.BIN
+|      B:\SUB\A.TXT
+|      B:\ROOT.TXT
+|
+|   362496 bytes total disk space
+|     2048 bytes in 2 directories
+|     7168 bytes in 3 user files
+|   353280 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>

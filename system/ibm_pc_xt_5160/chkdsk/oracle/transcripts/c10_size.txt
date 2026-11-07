@@ -1,0 +1,28 @@
+# oracle: chkdsk b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:SIZE.IMG
+# program: the original on the disk
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>chkdsk b:
+|
+|Errors found, F parameter not specified.
+|Corrections will not be written to disk.
+|
+|B:\SHORT.TXT
+|   Allocation error, size adjusted.
+|B:\LONG.TXT
+|   Allocation error, size adjusted.
+|
+|   362496 bytes total disk space
+|     5120 bytes in 2 user files
+|   357376 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>

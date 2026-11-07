@@ -1,0 +1,28 @@
+# oracle: chkdsk b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:INVALID.IMG
+# program: the original on the disk
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>chkdsk b:
+|
+|Errors found, F parameter not specified.
+|Corrections will not be written to disk.
+|
+|B:\BADLINK.TXT
+|   Has invalid cluster, file truncated.
+|B:\BADLINK.TXT
+|   Allocation error, size adjusted.
+|B:\FREE.TXT
+|   First cluster number is invalid,
+|    entry truncated.
+|
+|   362496 bytes total disk space
+|     2048 bytes in 2 user files
+|   360448 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>

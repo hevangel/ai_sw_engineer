@@ -9,7 +9,8 @@
 # cases.py DIR writes the case files to DIR and prints one tab-separated line per case:
 # name, comma-separated files (- for none), command, then optional pairs of (text to wait for,
 # keys to type) for prompts after the command. A file item may instead be a step for a drive B
-# disk (a blank 360 KiB disk made for the case): b:mkdir:PATH, b:label:LABEL, b:add:PATH=FILE.
+# disk (a blank 360 KiB disk made for the case): b:mkdir:PATH, b:label:LABEL, b:add:PATH=FILE;
+# a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead.
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
 # (default <title>/oracle/transcripts, <title>/build/oracle).
 set -euo pipefail
@@ -43,8 +44,12 @@ while IFS= read -r line; do
     for x in "${fl[@]}"; do
       case $x in
         b:*)
-          if [[ -z $diskb ]]; then diskb="$WORK/${name}_b.img"; "$PCDISK" blank "$diskb" 360; fi
           step=${x#b:}
+          if [[ -z $diskb ]]; then
+            diskb="$WORK/${name}_b.img"
+            if [[ $step == image:* ]]; then cp "$WORK/in/${step#image:}" "$diskb"; continue; fi
+            "$PCDISK" blank "$diskb" 360
+          fi
           case $step in
             mkdir:*) "$PCDISK" mkdir "$diskb" "${step#mkdir:}" ;;
             label:*) "$PCDISK" label "$diskb" "${step#label:}" ;;
