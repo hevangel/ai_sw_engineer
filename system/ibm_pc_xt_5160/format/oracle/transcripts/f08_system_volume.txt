@@ -1,0 +1,29 @@
+# oracle: format b:/s/v
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:ZERO360.IMG
+# program: the original on the disk
+# drive B after: sha256 c646676e7bab8de2d03ed8a8671fadd64cff6c50499a05dc905617823fec4d7e
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>format b:/s/v
+|Insert new diskette for drive B:
+|and strike any key when ready
+|
+|Formatting...Format complete
+|System transferred
+|
+|Volume label (11 characters, ENTER for none)? SYS DISK
+|
+|
+|   362496 bytes total disk space
+|    40960 bytes used by system
+|   321536 bytes available on disk
+|
+|Format another (Y/N)?n
+|A>

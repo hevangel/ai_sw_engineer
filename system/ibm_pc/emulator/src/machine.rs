@@ -25,8 +25,17 @@ pub const ROM_SIZE: usize = 0x1_0000 - 0x6000;
 /// ASSUMPTION (spec E-A12): IBM 5150 SW1 = 6Fh as the hardware project's board
 /// presents it: two drives (bits 7-6 = 01, bit 0 = drives present), 80x25
 /// colour display (bits 5-4 = 10), no coprocessor, 64 KiB on the planar. SW2
-/// reads as zero (no expansion memory).
+/// gives the expansion memory above the planar's 64 KiB in 32 KiB units
+/// (switches 1-4, read on port C bits 3-0 while port B bit 2 is set): zero for
+/// a machine of 64 KiB or less, as the hardware project's board has it.
 pub const SW1_DEFAULT: u8 = 0x6F;
+
+/// SW2 for `ram_kib` of RAM: switches 1-4 (bits 3-0) count the 32 KiB blocks
+/// above the planar's 64 KiB, switch 5 (bit 4) the 512 KiB block, as the 5150's
+/// Technical Reference tabulates them (spec E-A12).
+pub fn sw2_for(ram_kib: usize) -> u8 {
+    (ram_kib.saturating_sub(64) / 32).min(0x1F) as u8
+}
 
 /// `Board::io_log` keeps the first this-many OUTs, so a long interactive run
 /// does not grow without bound.
@@ -46,6 +55,8 @@ pub struct Board {
     pub fdc: Fdc,
     pub speaker: Speaker,
     pub sw1: u8,
+    /// Switch block 2 (expansion memory), see [`sw2_for`].
+    pub sw2: u8,
     pub nmi_enabled: bool,
     /// CPU clocks since reset.
     pub clock: u64,
@@ -74,6 +85,7 @@ impl Board {
             fdc: Fdc::new(),
             speaker: Speaker::new(),
             sw1: SW1_DEFAULT,
+            sw2: sw2_for(ram_kib),
             nmi_enabled: false,
             clock: 0,
             pit_phase: 0,
@@ -106,10 +118,16 @@ impl Board {
         }
     }
 
-    /// Port C input pins: timer 2 output on bits 4 (cassette) and 5.
+    /// Port C input pins: timer 2 output on bits 4 (cassette) and 5; bits 3-0
+    /// SW2 switches 1-4 while port B bit 2 is set, else switch 5 on bit 0.
     fn port_c(&self) -> u8 {
         let t2 = u8::from(self.pit.out(2));
-        (t2 << 5) | (t2 << 4)
+        let sw = if self.ppi.b & 0x04 != 0 {
+            self.sw2 & 0x0F
+        } else {
+            (self.sw2 >> 4) & 1
+        };
+        (t2 << 5) | (t2 << 4) | sw
     }
 
     /// The speaker is timer 2's output gated by port B bit 1.
@@ -279,7 +297,7 @@ impl Machine {
         self.board.forced_intr = Some(vector);
     }
 
-    /// Insert a 160 KiB diskette image into drive 0..=3.
+    /// Insert a 160, 180, 320 or 360 KiB diskette image into drive 0..=3.
     pub fn mount(&mut self, drive: usize, image: Vec<u8>, protected: bool) -> Result<(), String> {
         if drive > 3 {
             return Err("drive must be 0..=3".into());
@@ -294,10 +312,11 @@ impl Machine {
 
     /// Power-on reset: CPU state, RAM zero-filled (spec E-A1), ROM kept.
     pub fn reset(&mut self) {
-        let (ram_kib, rom, sw1) = (
+        let (ram_kib, rom, sw1, sw2) = (
             self.board.ram.len() / 1024,
             self.board.rom.clone(),
             self.board.sw1,
+            self.board.sw2,
         );
         let disks = std::mem::take(&mut self.board.fdc.disks);
         let capture = self.board.speaker.capture;
@@ -305,6 +324,7 @@ impl Machine {
         self.board = Board::new(ram_kib);
         self.board.rom = rom;
         self.board.sw1 = sw1;
+        self.board.sw2 = sw2;
         self.board.fdc.disks = disks;
         self.board.speaker.capture = capture;
         self.instructions = 0;
@@ -397,5 +417,34 @@ impl Machine {
             }
         }
         Step::Ran
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::*;
+
+    #[test]
+    fn sw2_counts_expansion_memory_in_32_kib_blocks() {
+        assert_eq!(sw2_for(16), 0);
+        assert_eq!(sw2_for(64), 0);
+        assert_eq!(sw2_for(256), 6);
+        assert_eq!(sw2_for(544), 15);
+        assert_eq!(sw2_for(640), 18);
+    }
+
+    #[test]
+    fn port_c_shows_sw2_by_port_b_bit_2() {
+        let mut b = Board::new(256);
+        b.ppi.b = 0x04;
+        assert_eq!(b.port_in(0x62) & 0x0F, 6);
+        b.ppi.b = 0x00;
+        assert_eq!(b.port_in(0x62) & 0x0F, 0);
+        let mut b = Board::new(640);
+        b.ppi.b = 0x00;
+        assert_eq!(b.port_in(0x62) & 0x0F, 1); // switch 5 (bit 4 of 18)
+        let mut b = Board::new(64);
+        b.ppi.b = 0x04;
+        assert_eq!(b.port_in(0x62) & 0x0F, 0);
     }
 }

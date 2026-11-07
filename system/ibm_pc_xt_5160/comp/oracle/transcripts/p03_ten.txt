@@ -1,0 +1,28 @@
+# oracle: comp a.txt many.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + A.TXT,MANY.TXT
+# program: the original on the disk
+|
+|Compare error at offset 5
+|File 1 = 75
+|File 2 = 55
+|
+|Compare error at offset 6
+|File 1 = 69
+|File 2 = 49
+|
+|Compare error at offset 7
+|File 1 = 63
+|File 2 = 43
+|
+|Compare error at offset 8
+|File 1 = 6B
+|File 2 = 4B
+|
+|Compare error at offset 9
+|File 1 = 20
+|File 2 = 00
+|
+|10 Mismatches - ending compare
+|
+|Compare more files (Y/N)? n
+|A>

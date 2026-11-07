@@ -5,7 +5,7 @@ the planar's memory and I/O decode, and the interrupt controller, timer, PPI and
 keyboard, DMA controller, diskette controller and CGA. Separate from the title
 reimplementations and the `llvm-i8086` backend.
 
-**Status:** boots the unchanged IBM BIOS, loads PC DOS 1.00 from a 160 KiB diskette image,
+**Status:** boots the unchanged IBM BIOS, loads PC DOS 1.00 from a 160 KiB diskette image (the diskette controller also takes 180, 320 and 360 KiB images),
 and runs typed DOS and BASIC sessions. The screens, and the written drive B image, match
 the hardware project's RTL for a 20-step session (boot, date, `DIR`, `CHKDSK`, ROM and
 disk BASIC, `FORMAT B:`, `COPY`, and BASIC drawing in both CGA graphics modes, compared by

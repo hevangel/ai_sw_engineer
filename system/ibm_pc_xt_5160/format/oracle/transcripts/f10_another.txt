@@ -1,0 +1,29 @@
+# oracle: format b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:ZERO360.IMG
+# program: the original on the disk
+# drive B after: sha256 6a0be87ff88cf1b47f3ffe7274b4e7a0a6c05da276f3062d04f9b08a9249b837
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>format b:
+|Insert new diskette for drive B:
+|and strike any key when ready
+|
+|Formatting...Format complete
+|
+|   362496 bytes total disk space
+|   362496 bytes available on disk
+|
+|Format another (Y/N)?y
+|
+|Insert new diskette for drive B:
+|and strike any key when ready
+|
+|Formatting...Format complete
+|
+|   362496 bytes total disk space
+|   362496 bytes available on disk
+|
+|Format another (Y/N)?n
+|A>

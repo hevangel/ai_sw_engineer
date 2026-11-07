@@ -1,0 +1,28 @@
+# oracle: comp a.txt three.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + A.TXT,THREE.TXT
+# program: the original on the disk
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>comp a.txt three.txt
+|
+|
+|
+|A:A       .TXT and A:THREE   .TXT
+|
+|Compare error at offset 4
+|File 1 = 71
+|File 2 = 51
+|
+|Compare error at offset A
+|File 1 = 62
+|File 2 = 42
+|
+|Compare error at offset 1E
+|File 1 = 72
+|File 2 = 52
+|
+|Compare more files (Y/N)? n
+|A>

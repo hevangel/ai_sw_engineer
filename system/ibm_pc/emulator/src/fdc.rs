@@ -1,23 +1,69 @@
-//! Intel 8272 (NEC uPD765) diskette controller with up to four single-sided
-//! 160 KiB drives, modelled at the command level: the command, execution and
+//! Intel 8272 (NEC uPD765) diskette controller with up to four 5.25-inch
+//! drives (160, 180, 320 or 360 KiB disks), modelled at the command level: the command, execution and
 //! result phases, seeks and sector transfers with the rotational timing a BIOS
 //! can observe, but no flux, gaps or CRC (ASSUMPTION (spec E-A10): command-level
 //! controller with fixed step, rotation and byte times).
 //!
-//! Disk geometry is the 5150's: 40 cylinders, one head, 8 sectors of 512 bytes
-//! (`DISK_BYTES` = 163,840). The data path runs through the DMA controller;
+//! Each mounted disk takes its [`Geometry`] from its image size: 40 cylinders,
+//! one or two heads, 8 or 9 sectors of 512 bytes (`DISK_BYTES` = 163,840 is the
+//! 160 KiB format). Images are cylinder-major, then head, then sector. The data path runs through the DMA controller;
 //! the board moves bytes while [`Fdc::drq`] is high.
 
 use std::collections::VecDeque;
 
 pub const CYLINDERS: u8 = 40;
-pub const SECTORS: u8 = 8;
 pub const SECTOR_BYTES: usize = 512;
-pub const DISK_BYTES: usize = CYLINDERS as usize * SECTORS as usize * SECTOR_BYTES;
+/// Size of the 160 KiB (one head, 8 sectors) image.
+pub const DISK_BYTES: usize = CYLINDERS as usize * 8 * SECTOR_BYTES;
+
+/// Layout of a mounted disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Geometry {
+    pub cylinders: u8,
+    pub heads: u8,
+    pub sectors: u8,
+}
+
+impl Geometry {
+    /// The 160 KiB format, used when no disk is mounted.
+    pub const K160: Geometry = Geometry::new(1, 8);
+
+    const fn new(heads: u8, sectors: u8) -> Self {
+        Self {
+            cylinders: CYLINDERS,
+            heads,
+            sectors,
+        }
+    }
+
+    /// Geometry for an image size, or `None` if it is not an IBM 5.25-inch format.
+    pub fn from_size(len: usize) -> Option<Self> {
+        match len {
+            163_840 => Some(Self::new(1, 8)),
+            184_320 => Some(Self::new(1, 9)),
+            327_680 => Some(Self::new(2, 8)),
+            368_640 => Some(Self::new(2, 9)),
+            _ => None,
+        }
+    }
+
+    pub fn bytes(&self) -> usize {
+        usize::from(self.cylinders)
+            * usize::from(self.heads)
+            * usize::from(self.sectors)
+            * SECTOR_BYTES
+    }
+
+    /// Byte offset of sector `r` (1-based) of track (`c`, `h`) in the image.
+    fn offset(&self, c: u8, h: u8, r: u8) -> usize {
+        ((usize::from(c) * usize::from(self.heads) + usize::from(h)) * usize::from(self.sectors)
+            + usize::from(r - 1))
+            * SECTOR_BYTES
+    }
+}
 
 /// One revolution at 300 rpm, in CPU clocks (200 ms at 4.772727 MHz).
 const ROTATION: u64 = 954_545;
-const SECTOR_TIME: u64 = ROTATION / SECTORS as u64;
 /// One data byte at 250 kbit/s MFM: 32 microseconds.
 const BYTE_TIME: u64 = 153;
 /// Head stepping time: 6 ms per cylinder with the BIOS's SPECIFY values.
@@ -28,6 +74,7 @@ const POLL_DELAY: u64 = 240;
 #[derive(Clone, Debug)]
 pub struct Disk {
     pub data: Vec<u8>,
+    pub geometry: Geometry,
     pub protected: bool,
 }
 
@@ -148,13 +195,18 @@ impl Fdc {
     }
 
     pub fn mount(&mut self, drive: usize, data: Vec<u8>, protected: bool) -> Result<(), String> {
-        if data.len() != DISK_BYTES {
+        let Some(geometry) = Geometry::from_size(data.len()) else {
             return Err(format!(
-                "disk image must be exactly {DISK_BYTES} bytes, got {}",
+                "disk image must be 163840 (160 KiB), 184320 (180 KiB), 327680 (320 KiB) \
+                 or 368640 (360 KiB) bytes, got {}",
                 data.len()
             ));
-        }
-        self.disks[drive] = Some(Disk { data, protected });
+        };
+        self.disks[drive] = Some(Disk {
+            data,
+            geometry,
+            protected,
+        });
         Ok(())
     }
 
@@ -270,6 +322,17 @@ impl Fdc {
 
     fn unit_of(b: u8) -> usize {
         (b & 3) as usize
+    }
+
+    fn geometry(&self, unit: usize) -> Geometry {
+        self.disks[unit]
+            .as_ref()
+            .map_or(Geometry::K160, |d| d.geometry)
+    }
+
+    /// Time for one sector to pass under the head on this unit's disk.
+    fn sector_time(&self, unit: usize) -> u64 {
+        ROTATION / u64::from(self.geometry(unit).sectors)
     }
 
     fn ready(&self, unit: usize) -> bool {
@@ -395,10 +458,11 @@ impl Fdc {
     fn begin(&mut self, mut e: Exec) {
         // Head load and the wait for the first sector to pass under the head.
         let into = self.now % ROTATION;
+        let sector_time = self.sector_time(e.unit);
         let want = match e.op {
             Op::Format => 0,
-            Op::ReadId => (into / SECTOR_TIME + 1) * SECTOR_TIME,
-            _ => u64::from(e.r.saturating_sub(1)) * SECTOR_TIME,
+            Op::ReadId => (into / sector_time + 1) * sector_time,
+            _ => u64::from(e.r.saturating_sub(1)) * sector_time,
         };
         let wait = if want >= into {
             want - into
@@ -516,21 +580,25 @@ impl Fdc {
         };
         let have = self.ready(unit);
         let cyl = self.phys_cyl[unit];
+        let geo = self.geometry(unit);
+        let sector_time = self.sector_time(unit);
         let Phase::Exec(e) = &mut self.phase else {
             return;
         };
         match e.op {
             Op::ReadId => {
-                if !have || e.head != 0 {
+                if !have || e.head >= geo.heads {
                     return self.end_error(0x40, 0x01, 0);
                 }
-                let sector = ((self.now % ROTATION) / SECTOR_TIME) as u8 % SECTORS + 1;
+                let sector = ((self.now % ROTATION) / sector_time) as u8 % geo.sectors + 1;
                 e.c = cyl;
                 e.r = sector;
                 self.end_ok_ids();
             }
             Op::Format => {
-                if !have {
+                // ASSUMPTION (spec E-A10): formatting a head the disk lacks fails like a
+                // missing address mark.
+                if !have || e.head >= geo.heads {
                     return self.end_error(0x40, 0x01, 0);
                 }
                 if self.disks[unit].as_ref().is_some_and(|d| d.protected) {
@@ -540,7 +608,7 @@ impl Fdc {
                 e.id.clear();
             }
             Op::Read | Op::Write => {
-                if !have || e.head != 0 || e.r == 0 || e.r > SECTORS || e.c != cyl {
+                if !have || e.head >= geo.heads || e.r == 0 || e.r > geo.sectors || e.c != cyl {
                     let (st1, st2) = if !have {
                         (0x01, 0)
                     } else if e.c != cyl {
@@ -553,8 +621,7 @@ impl Fdc {
                 if e.op == Op::Write && self.disks[unit].as_ref().is_some_and(|d| d.protected) {
                     return self.end_error(0x40, 0x02, 0);
                 }
-                let lba =
-                    (usize::from(e.c) * usize::from(SECTORS) + usize::from(e.r - 1)) * SECTOR_BYTES;
+                let lba = geo.offset(e.c, e.head, e.r);
                 e.buf = if e.op == Op::Read {
                     self.disks[unit]
                         .as_ref()
@@ -573,14 +640,17 @@ impl Fdc {
             return;
         };
         let unit = e.unit;
+        let geo = self.disks[unit]
+            .as_ref()
+            .map_or(Geometry::K160, |d| d.geometry);
+        let sector_time = ROTATION / u64::from(geo.sectors);
         match e.op {
             Op::Read => {
                 self.media_reads += 1;
                 e.done_sectors += 1;
             }
             Op::Write => {
-                let lba =
-                    (usize::from(e.c) * usize::from(SECTORS) + usize::from(e.r - 1)) * SECTOR_BYTES;
+                let lba = geo.offset(e.c, e.head, e.r);
                 if let Some(d) = self.disks[unit].as_mut() {
                     d.data[lba..lba + SECTOR_BYTES].copy_from_slice(&e.buf[..SECTOR_BYTES]);
                 }
@@ -590,9 +660,8 @@ impl Fdc {
             Op::Format => {
                 // The four bytes are C, H, R, N; the sector is filled with the filler byte.
                 let (c, r) = (e.id[0], e.id[2]);
-                if c < CYLINDERS && (1..=SECTORS).contains(&r) {
-                    let lba =
-                        (usize::from(c) * usize::from(SECTORS) + usize::from(r - 1)) * SECTOR_BYTES;
+                if c < geo.cylinders && (1..=geo.sectors).contains(&r) {
+                    let lba = geo.offset(c, e.head, r);
                     let filler = e.filler;
                     if let Some(d) = self.disks[unit].as_mut() {
                         d.data[lba..lba + SECTOR_BYTES].fill(filler);
@@ -603,7 +672,7 @@ impl Fdc {
                 if e.done_sectors >= e.sc {
                     return self.end_ok_ids();
                 }
-                e.state = Stage::Wait(self.now + SECTOR_TIME);
+                e.state = Stage::Wait(self.now + sector_time);
                 return;
             }
             Op::ReadId => return,
@@ -623,7 +692,7 @@ impl Fdc {
             return self.end_error(0x40, 0x80, 0);
         }
         e.r += 1;
-        e.state = Stage::Wait(self.now + SECTOR_TIME - SECTOR_BYTES as u64 * BYTE_TIME);
+        e.state = Stage::Wait(self.now + sector_time - SECTOR_BYTES as u64 * BYTE_TIME);
         e.pos = 0;
         e.buf.clear();
     }

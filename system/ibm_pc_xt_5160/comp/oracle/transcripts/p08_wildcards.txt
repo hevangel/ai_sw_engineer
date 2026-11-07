@@ -1,0 +1,28 @@
+# oracle: comp *.dat *.bak
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + X1.DAT,X2.DAT,X1.BAK,X2.BAK
+# program: the original on the disk
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>comp *.dat *.bak
+|
+|
+|
+|A:X1      .DAT and A:X1      .BAK
+|
+|Files compare ok
+|
+|
+|
+|A:X2      .DAT and A:X2      .BAK
+|
+|Compare error at offset 2
+|File 1 = 63
+|File 2 = 64
+|
+|Compare more files (Y/N)? n
+|A>

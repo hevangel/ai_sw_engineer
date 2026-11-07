@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 marty_core = { path = "../../../../../external/martypc/crates/lib/marty_core" }
 anyhow = "1"
+# the same fluxfox MartyPC uses, to save drive B as a raw image (MARTY_SAVE_B)
+fluxfox = { git = "https://github.com/dbalsom/fluxfox.git", branch = "finish_fat", default-features = false, features = ["core", "ibm_pc"] }
 marty_common = { path = "../../../../../external/martypc/crates/lib/marty_common" }
 
 # not part of the emulator's workspace: MartyPC pulls in its own dependency tree

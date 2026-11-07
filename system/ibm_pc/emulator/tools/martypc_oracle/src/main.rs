@@ -3,6 +3,13 @@
 //!
 //! `MARTY_MACHINE=5160` boots MartyPC's IBM PC XT 5160 model instead, with `MARTY_RAM_KIB` KiB
 //! of RAM (default 256, the XT profile's). The 5150 default (64 KiB) is unchanged.
+//! Typed keys may include the shifted `< > + | " : ?` and capitals; `MARTY_WRITABLE=1` mounts drives A
+//! and B writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
+//! scripted keys (default: the whole cycle budget). `MARTY_KEY_DELAY=n` runs n cycles after a
+//! wait's text appears before its keys are typed (default 0). A wait text starting with `$` waits
+//! for the last non-blank row to end with the rest, once the screen differs from the one the last
+//! keys were typed at, so a prompt printed again is waited for anew.
+//! `MARTY_SAVE_B=<path>` writes drive B as the run left it, as a raw sector image.
 
 use std::path::PathBuf;
 
@@ -99,8 +106,31 @@ fn key_for(ch: char) -> Option<MartyKey> {
         '0'..='9' => DIGITS[(ch as u8 - b'0') as usize],
         '-' => Minus,
         '.' => Period,
+        ',' => Comma,
+        '/' => Slash,
+        '=' => Equal,
+        '\'' => Quote,
+        ';' => Semicolon,
+        '\\' => Backslash,
         ' ' => Space,
         '\r' => Enter,
+        _ => return Option::None,
+    })
+}
+
+/// A character typed with Shift held on the US keyboard: the unshifted key.
+fn shifted(ch: char) -> Option<MartyKey> {
+    use MartyKey::*;
+    Some(match ch {
+        'A'..='Z' => return key_for(ch.to_ascii_lowercase()),
+        '<' => Comma,
+        '>' => Period,
+        '+' => Equal,
+        '|' => Backslash,
+        '"' => Quote,
+        '*' => Digit8,
+        ':' => Semicolon,
+        '?' => Slash,
         _ => return Option::None,
     })
 }
@@ -192,14 +222,15 @@ fn main() -> anyhow::Result<()> {
         .fdc()
         .as_mut()
         .ok_or_else(|| anyhow::anyhow!("no floppy controller"))?
-        .load_image_from(0, image, None, true)?;
+        // MARTY_WRITABLE=1 mounts drive A writable (DOS 2 pipes write temporary files there).
+        .load_image_from(0, image, None, std::env::var_os("MARTY_WRITABLE").is_none())?;
     // drive B, as the RTL had it (DRIVE_B=<image>)
-    if let Some(path) = std::env::var_os("DRIVE_B") {
+    if let Some(path) = std::env::var_os("DRIVE_B").filter(|p| !p.is_empty()) {
         machine
             .fdc()
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("no floppy controller"))?
-            .load_image_from(1, std::fs::read(path)?, None, true)?;
+            .load_image_from(1, std::fs::read(path)?, None, std::env::var_os("MARTY_WRITABLE").is_none())?;
     }
 
     let mut ctl = ExecutionControl::new();
@@ -209,25 +240,61 @@ fn main() -> anyhow::Result<()> {
     };
     let mut left = cycles;
     let mut settle = 0u64;
+    let mut typed_at: Vec<String> = Vec::new();
+    // MARTY_SETTLE=n: stop n cycles after the last scripted keys were typed (default: run all).
+    let key_delay: Option<u64> = std::env::var("MARTY_KEY_DELAY").ok().and_then(|v| v.parse().ok());
+    let settle_limit: Option<u64> = std::env::var("MARTY_SETTLE").ok().and_then(|v| v.parse().ok());
     while left > 0 {
         let batch = left.min(100_000);
         machine.run(batch as u32, &mut ctl);
         left -= batch;
         if let Some((marker, keys)) = script.last().cloned() {
-            if screen(&mut machine).iter().any(|r| r.contains(marker.as_str())) {
+            // A marker starting with `$` waits for the last non-blank row to end with the rest
+            // (a prompt printed again at the bottom); any other marker for any row containing it.
+            let rows = screen(&mut machine);
+            let seen = match marker.strip_prefix('$') {
+                // ... and only once the screen differs from the one the last keys were typed at,
+                // so a prompt still showing from before is not taken for the next one.
+                Some(end) => rows != typed_at && rows
+                    .iter()
+                    .rfind(|r| !r.trim().is_empty())
+                    .is_some_and(|r| r.trim_end().ends_with(end)),
+                None => rows.iter().any(|r| r.contains(marker.as_str())),
+            };
+            if seen {
                 script.pop();
+                typed_at = rows.clone();
+                // MARTY_KEY_DELAY=n: run n cycles between seeing the text and typing (a program
+                // may print its prompt before it flushes the keyboard buffer and reads).
+                if let Some(d) = key_delay {
+                    machine.run(d as u32, &mut ctl);
+                }
                 for ch in keys.chars() {
-                    let key = key_for(ch).ok_or_else(|| anyhow::anyhow!("no key for {ch:?}"))?;
                     let mods = KeyboardModifiers::default();
+                    let (key, shift) = match key_for(ch) {
+                        Some(k) => (k, false),
+                        None => (shifted(ch).ok_or_else(|| anyhow::anyhow!("no key for {ch:?}"))?, true),
+                    };
+                    if shift {
+                        machine.key_press(MartyKey::ShiftLeft, mods);
+                        machine.run(100_000, &mut ctl);
+                    }
                     machine.key_press(key, mods);
                     machine.run(300_000, &mut ctl);
                     machine.key_release(key);
                     machine.run(300_000, &mut ctl);
+                    if shift {
+                        machine.key_release(MartyKey::ShiftLeft);
+                        machine.run(100_000, &mut ctl);
+                    }
                 }
                 settle = 0;
             }
         } else {
             settle += batch;
+            if settle_limit.is_some_and(|l| settle >= l) {
+                break;
+            }
         }
     }
     let _ = settle;
@@ -238,6 +305,18 @@ fn main() -> anyhow::Result<()> {
         let st = machine.cpu().get_string_state();
         eprintln!("cs:ip {}:{} ax {} sp {}", st.cs, st.ip, st.ax, st.sp);
         eprintln!("boot sector at 7C00: {:02x?}", machine.bus().get_slice_at(0x7C00, 8));
+    }
+    // MARTY_SAVE_B=<path>: write drive B, as the run left it, as a raw sector image.
+    if let Some(path) = std::env::var_os("MARTY_SAVE_B").filter(|p| !p.is_empty()) {
+        let fdc = machine.fdc().as_mut().ok_or_else(|| anyhow::anyhow!("no floppy controller"))?;
+        let (image, _) = fdc.get_image(1);
+        let image = image.ok_or_else(|| anyhow::anyhow!("MARTY_SAVE_B: no disk in drive B"))?;
+        let mut image = image.write().map_err(|_| anyhow::anyhow!("drive B image lock"))?;
+        fluxfox::ImageWriter::<std::fs::File>::new(&mut image)
+            .with_format(fluxfox::DiskImageFileFormat::RawSectorImage)
+            .with_path(PathBuf::from(path))
+            .write()
+            .map_err(|e| anyhow::anyhow!("MARTY_SAVE_B: {e}"))?;
     }
     let rows = screen(&mut machine);
     for r in rows {

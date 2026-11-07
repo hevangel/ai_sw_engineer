@@ -1,0 +1,103 @@
+//! What both tests share: the cases, the drive B disk of a case, and the comparison rule.
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+
+/// One line of `scripts/cases.py`: name, setup (drive B steps, `-` for none), command.
+pub struct Case {
+    pub name: String,
+    pub setup: String,
+    pub cmd: String,
+}
+
+/// Runs `scripts/cases.py DIR` (which writes the input files to DIR) and reads its cases.
+pub fn cases(dir: &Path) -> Vec<Case> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/cases.py");
+    let out = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(&script)
+        .arg(dir)
+        .output()
+        .expect("python3 scripts/cases.py");
+    assert!(out.status.success());
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            Case {
+                name: f[0].into(),
+                setup: f[1].into(),
+                cmd: f[2].into(),
+            }
+        })
+        .collect()
+}
+
+/// The drive B disk of a case, built as `../scripts/capture_dos.sh` builds it with the pcdisk
+/// tool: a blank 360 KiB disk, then each `b:` step in order. None if the case has no step.
+pub fn drive_b(setup: &str, inputs: &Path) -> Option<pcdisk::Disk> {
+    if setup == "-" {
+        return None;
+    }
+    let mut disk = None;
+    for step in setup.split(',') {
+        let step = step.strip_prefix("b:").expect("only drive B steps");
+        let d = disk.get_or_insert_with(|| pcdisk::Disk::blank_with(&pcdisk::GEOMETRY_360));
+        if let Some(p) = step.strip_prefix("mkdir:") {
+            d.mkdir(p).unwrap();
+        } else if let Some(l) = step.strip_prefix("label:") {
+            d.set_label(l).unwrap();
+        } else if let Some(a) = step.strip_prefix("add:") {
+            let (name, file) = a.split_once('=').unwrap();
+            d.add(name, &std::fs::read(inputs.join(file)).unwrap())
+                .unwrap();
+        } else {
+            panic!("unknown step {step}");
+        }
+    }
+    disk
+}
+
+/// The screen rows of a transcript (the lines starting with `|`), right-trimmed.
+pub fn transcript_rows(name: &str) -> Vec<String> {
+    let p: PathBuf =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("oracle/transcripts/{name}.txt"));
+    std::fs::read_to_string(&p)
+        .unwrap_or_else(|_| panic!("{name}: no transcript {}", p.display()))
+        .lines()
+        .filter(|l| l.starts_with('|'))
+        .map(|l| l[1..].trim_end().to_string())
+        .collect()
+}
+
+fn is_command(r: &str) -> bool {
+    r.starts_with("A>") && r.len() > 2
+}
+
+/// The rows compared (plans/testplan.md): if the oracle shows its command line, the rows from
+/// the one after it to the next `A>`, in the oracle and in the session; otherwise (the output
+/// scrolled the command off the screen) the oracle's rows from the top through its final `A>`
+/// against the same number of rows of the session ending with its final `A>`.
+pub fn compared(oracle: &[String], session: &[String]) -> (Vec<String>, Vec<String>) {
+    if let Some(c) = oracle.iter().position(|r| is_command(r)) {
+        let end = c + 1 + oracle[c + 1..].iter().position(|r| r == "A>").unwrap();
+        let want = oracle[c + 1..=end].to_vec();
+        let got = match session.iter().rposition(|r| is_command(r)) {
+            Some(s) => match session[s + 1..].iter().position(|r| r == "A>") {
+                Some(e) => session[s + 1..=s + 1 + e].to_vec(),
+                None => session[s + 1..].to_vec(),
+            },
+            None => session.to_vec(),
+        };
+        (want, got)
+    } else {
+        let end = oracle.iter().rposition(|r| r == "A>").unwrap();
+        let want = oracle[..=end].to_vec();
+        let got = match session.iter().rposition(|r| r == "A>") {
+            Some(e) => session[(e + 1).saturating_sub(want.len())..=e].to_vec(),
+            None => session.to_vec(),
+        };
+        (want, got)
+    }
+}

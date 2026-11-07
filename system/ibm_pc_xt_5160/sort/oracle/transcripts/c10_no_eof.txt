@@ -1,0 +1,29 @@
+# SORT oracle: sort <noeof.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + NOEOF.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 760638b40b04f1a88beebc8f1538439d7a86153327cc2a65bbacf8e53b29ddce
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort <noeof.txt
+|
+|alpha
+|bravo
+|charlie
+|delta
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

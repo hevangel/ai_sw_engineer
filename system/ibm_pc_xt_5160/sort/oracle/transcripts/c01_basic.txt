@@ -1,0 +1,29 @@
+# SORT oracle: sort <fruit.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: original SORT.EXE (sha256 755a3c1c...)
+# input sha256 baf960afda90149df38a42b35901861e93b68796e1456b58b30d42c025cb1afa
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>sort <fruit.txt
+|
+| zebra
+|123
+|Apple
+|Banana
+|apple
+|banana
+|cherry
+|pear
+|pear
+|A>
+|
+|
+|
+|

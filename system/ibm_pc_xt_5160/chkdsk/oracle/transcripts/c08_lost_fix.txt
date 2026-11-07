@@ -1,0 +1,28 @@
+# oracle: chkdsk b:/f
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:LOST.IMG
+# program: the original on the disk
+|
+|   362496 bytes total disk space
+|     3072 bytes in 2 user files
+|     3072 bytes in 1 recovered files
+|   356352 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>chkdsk b:/v
+|Directory B:
+|      B:\GOOD.TXT
+|      B:\SMALL.DAT
+|      B:\FILE0000.CHK
+|
+|   362496 bytes total disk space
+|     6144 bytes in 3 user files
+|   356352 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>

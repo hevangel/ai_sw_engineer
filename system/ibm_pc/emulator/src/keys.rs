@@ -23,6 +23,8 @@ fn base(c: char) -> Option<u8> {
         '\'' => 40,
         '[' => 26,
         ']' => 27,
+        '\\' => 43,
+        '`' => 41,
         _ => return None,
     })
 }
@@ -39,6 +41,10 @@ fn key_for(c: char) -> Option<(u8, bool)> {
         '?' => Some('/'),
         '!' => Some('1'),
         '_' => Some('-'),
+        '<' => Some(','),
+        '>' => Some('.'),
+        '|' => Some('\\'),
+        '~' => Some('`'),
         'A'..='Z' => Some(c.to_ascii_lowercase()),
         _ => None,
     };
@@ -64,4 +70,18 @@ pub fn scan_codes(text: &str) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_codes;
+
+    #[test]
+    fn redirection_and_pipe_characters_have_keys() {
+        // < > | are Shift with , . and \ (scan codes 33h, 34h, 2Bh) on the US keyboard.
+        assert_eq!(scan_codes("<"), vec![42, 51, 51 | 0x80, 42 | 0x80]);
+        assert_eq!(scan_codes(">"), vec![42, 52, 52 | 0x80, 42 | 0x80]);
+        assert_eq!(scan_codes("|"), vec![42, 43, 43 | 0x80, 42 | 0x80]);
+        assert_eq!(scan_codes("\\"), vec![43, 43 | 0x80]);
+    }
 }

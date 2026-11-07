@@ -1,0 +1,28 @@
+# oracle: type fruit.txt | find /n "e"
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.40
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>type fruit.txt | find /n "e"
+|[1]pear
+|[2]Apple
+|[4]apple
+|[6]cherry
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

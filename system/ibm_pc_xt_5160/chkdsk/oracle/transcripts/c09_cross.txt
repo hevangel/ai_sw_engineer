@@ -1,0 +1,28 @@
+# oracle: chkdsk b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:CROSS.IMG
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>chkdsk b:
+|
+|B:\FIRST.TXT
+|   Is cross linked on cluster 5
+|B:\SECOND.TXT
+|   Is cross linked on cluster 5
+|
+|   362496 bytes total disk space
+|     4096 bytes in 2 user files
+|   358400 bytes available on disk
+|
+|   262144 bytes total memory
+|   237568 bytes free
+|
+|
+|A>
