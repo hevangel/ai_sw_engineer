@@ -863,6 +863,7 @@ name = "martypc_oracle"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fluxfox",
  "marty_common",
  "marty_core",
 ]

@@ -11,6 +11,8 @@
 # keys to type) for prompts after the command. A file item may instead be a step for a drive B
 # disk (a blank 360 KiB disk made for the case): b:mkdir:PATH, b:label:LABEL, b:add:PATH=FILE;
 # a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead.
+# SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
+# in WORK, since a disk FORMAT or DISKCOPY wrote holds IBM's boot sector or files).
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
 # (default <title>/oracle/transcripts, <title>/build/oracle).
 set -euo pipefail
@@ -60,7 +62,8 @@ while IFS= read -r line; do
       esac
     done
   fi
-  rows="$(DRIVE_B=${diskb:-} MARTY_MACHINE=5160 MARTY_WRITABLE=1 MARTY_SETTLE="${MARTY_SETTLE:-80000000}" \
+  saveb=""; [[ -n ${SAVE_B:-} && -n $diskb ]] && saveb="$WORK/${name}_b_after.img" && rm -f "$saveb"
+  rows="$(DRIVE_B=${diskb:-} MARTY_SAVE_B=$saveb MARTY_MACHINE=5160 MARTY_WRITABLE=1 MARTY_SETTLE="${MARTY_SETTLE:-80000000}" \
       MARTY_KEY_DELAY="${MARTY_KEY_DELAY:-2000000}" \
       "$MARTY" "$R/xtbios.bin" "$R/xtbasic.bin" "$disk" 700000000 \
       'Enter new date' '\r' 'Enter new time' '\r' 'A>' "$cmd"'\r' "${more[@]}" 2>/dev/null)"
@@ -71,6 +74,9 @@ while IFS= read -r line; do
       echo "# program: $NAME = $(basename "$PROGRAM") sha256 $(sha "$PROGRAM")"
     else
       echo "# program: the original on the disk"
+    fi
+    if [[ -n $saveb ]]; then
+      if [[ -f $saveb ]]; then echo "# drive B after: sha256 $(sha "$saveb")"; else echo "# drive B after: not saved"; fi
     fi
     printf '%s\n' "$rows"
   } > "$OUT/$name.txt"

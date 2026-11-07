@@ -7,7 +7,9 @@
 //! and B writable (default write-protected). `MARTY_SETTLE=n` stops n CPU cycles after the last
 //! scripted keys (default: the whole cycle budget). `MARTY_KEY_DELAY=n` runs n cycles after a
 //! wait's text appears before its keys are typed (default 0). A wait text starting with `$` waits
-//! for the last non-blank row to end with the rest, so a prompt printed again is waited for anew.
+//! for the last non-blank row to end with the rest, once the screen differs from the one the last
+//! keys were typed at, so a prompt printed again is waited for anew.
+//! `MARTY_SAVE_B=<path>` writes drive B as the run left it, as a raw sector image.
 
 use std::path::PathBuf;
 
@@ -238,6 +240,7 @@ fn main() -> anyhow::Result<()> {
     };
     let mut left = cycles;
     let mut settle = 0u64;
+    let mut typed_at: Vec<String> = Vec::new();
     // MARTY_SETTLE=n: stop n cycles after the last scripted keys were typed (default: run all).
     let key_delay: Option<u64> = std::env::var("MARTY_KEY_DELAY").ok().and_then(|v| v.parse().ok());
     let settle_limit: Option<u64> = std::env::var("MARTY_SETTLE").ok().and_then(|v| v.parse().ok());
@@ -250,7 +253,9 @@ fn main() -> anyhow::Result<()> {
             // (a prompt printed again at the bottom); any other marker for any row containing it.
             let rows = screen(&mut machine);
             let seen = match marker.strip_prefix('$') {
-                Some(end) => rows
+                // ... and only once the screen differs from the one the last keys were typed at,
+                // so a prompt still showing from before is not taken for the next one.
+                Some(end) => rows != typed_at && rows
                     .iter()
                     .rfind(|r| !r.trim().is_empty())
                     .is_some_and(|r| r.trim_end().ends_with(end)),
@@ -283,6 +288,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 settle = 0;
+                typed_at = screen(&mut machine);
             }
         } else {
             settle += batch;
@@ -299,6 +305,18 @@ fn main() -> anyhow::Result<()> {
         let st = machine.cpu().get_string_state();
         eprintln!("cs:ip {}:{} ax {} sp {}", st.cs, st.ip, st.ax, st.sp);
         eprintln!("boot sector at 7C00: {:02x?}", machine.bus().get_slice_at(0x7C00, 8));
+    }
+    // MARTY_SAVE_B=<path>: write drive B, as the run left it, as a raw sector image.
+    if let Some(path) = std::env::var_os("MARTY_SAVE_B").filter(|p| !p.is_empty()) {
+        let fdc = machine.fdc().as_mut().ok_or_else(|| anyhow::anyhow!("no floppy controller"))?;
+        let (image, _) = fdc.get_image(1);
+        let image = image.ok_or_else(|| anyhow::anyhow!("MARTY_SAVE_B: no disk in drive B"))?;
+        let mut image = image.write().map_err(|_| anyhow::anyhow!("drive B image lock"))?;
+        fluxfox::ImageWriter::<std::fs::File>::new(&mut image)
+            .with_format(fluxfox::DiskImageFileFormat::RawSectorImage)
+            .with_path(PathBuf::from(path))
+            .write()
+            .map_err(|e| anyhow::anyhow!("MARTY_SAVE_B: {e}"))?;
     }
     let rows = screen(&mut machine);
     for r in rows {
