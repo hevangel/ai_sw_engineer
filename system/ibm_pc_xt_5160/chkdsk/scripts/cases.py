@@ -126,7 +126,9 @@ CASES = [
     ("c12_contiguous", "b:image:FRAG.IMG", "chkdsk b:*.txt", []),
     ("c13_one_file", "b:image:FRAG.IMG", "chkdsk b:contig.txt", []),
     ("c14_bad_drive", "-", "chkdsk q:", []),
-    ("c15_default", "-", "chkdsk", []),
+    # The default drive: B is made current and CHKDSK run from A without a drive argument (on
+    # drive A itself the result would count CHKDSK.COM's own clusters, which a rewrite changes).
+    ("c15_default", TREE, "b:", [("B>", "a:chkdsk\r"), ("$B>", "a:\r")]),
 ]
 
 
