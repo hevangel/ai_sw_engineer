@@ -24,7 +24,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | File | Bytes | What | Fit as a title |
 |---|---:|---|---|
 | **SORT.EXE** | 1,280 | DOS 2 filter: sorts the lines of standard input to standard output; `/R` reverse, `/+n` sort on column n | **done**: `sort/` (#281), selected first (below) |
-| MORE.COM | 384 | filter: pages standard input 24 lines at a time | small; interactive (keypresses) |
+| MORE.COM | 384 | filter: pages standard input 24 lines at a time | **done**: `more/` (#286) |
 | ASSIGN.COM | 896 | redirects drive letters (resident) | resident, patches DOS |
 | GRAPHICS.COM | 789 | resident Print Screen for graphics | needs a printer model |
 | TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | **done**: `tree/` (#285) |
@@ -59,4 +59,5 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 
 1. **SORT.EXE** (PC DOS 2.00): child issue in ai_sw_engineer, folder `sort/`. Why first: the smallest complete program that needs what the XT profile adds over the 5150 (DOS 2.00, its handle-based I/O and redirection, the `.EXE` format); a pure function of its input and switches, so the oracle is exact; small enough to specify from the binary in full.
 2. Then FIND.EXE (#283), COMP.COM (#284) and TREE.COM (#285), done 2026-11-06: each identical to the original in the four-way matrix (22, 10 and 9 cases). They share `scripts/capture_dos.sh` (one MartyPC boot per case, input files on drive A, optional drive B disks with subdirectories and labels built by pcdisk, prompts answered).
-3. Next candidates: MORE.COM (interactive; Microsoft's MORE.ASM is published), CHKDSK.COM 2.00.
+3. MORE.COM (#286), done 2026-11-07: identical on 10 cases; the IBM binary has two instructions the published MORE.ASM lacks (it reprints the character that triggered the prompt).
+4. Next candidate: CHKDSK.COM 2.00.
