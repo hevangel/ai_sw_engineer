@@ -14,7 +14,8 @@
 # SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
 # in WORK, since a disk FORMAT or DISKCOPY wrote holds IBM's boot sector or files).
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
-# (default <title>/oracle/transcripts, <title>/build/oracle).
+# (default <title>/oracle/transcripts, <title>/build/oracle); MARTY_CYCLES is the cycle budget per
+# case (default 700000000).
 set -euo pipefail
 TITLE="$(cd "${1:?title dir}" && pwd)"; shift
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -65,7 +66,7 @@ while IFS= read -r line; do
   saveb=""; [[ -n ${SAVE_B:-} && -n $diskb ]] && saveb="$WORK/${name}_b_after.img" && rm -f "$saveb"
   rows="$(DRIVE_B=${diskb:-} MARTY_SAVE_B=$saveb MARTY_MACHINE=5160 MARTY_WRITABLE=1 MARTY_SETTLE="${MARTY_SETTLE:-80000000}" \
       MARTY_KEY_DELAY="${MARTY_KEY_DELAY:-2000000}" \
-      "$MARTY" "$R/xtbios.bin" "$R/xtbasic.bin" "$disk" 700000000 \
+      "$MARTY" "$R/xtbios.bin" "$R/xtbasic.bin" "$disk" "${MARTY_CYCLES:-700000000}" \
       'Enter new date' '\r' 'Enter new time' '\r' 'A>' "$cmd"'\r' "${more[@]}" 2>/dev/null)"
   {
     echo "# oracle: $cmd"

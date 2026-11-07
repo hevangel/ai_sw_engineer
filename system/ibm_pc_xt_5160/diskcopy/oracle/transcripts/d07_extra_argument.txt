@@ -1,0 +1,29 @@
+# oracle: diskcopy a: b: x
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:ZERO360.IMG
+# program: the original on the disk
+# drive B after: sha256 11c1c60172f29a507d3573e63cc61399f1b47855add99ba9ade5829cb6a99ea1
+|Unrecoverable read error on source
+|Track 33, side 1
+|
+|Unrecoverable read error on source
+|Track 34, side 1
+|
+|Unrecoverable read error on source
+|Track 35, side 1
+|
+|Unrecoverable read error on source
+|Track 36, side 1
+|
+|Unrecoverable read error on source
+|Track 37, side 1
+|
+|Unrecoverable read error on source
+|Track 38, side 1
+|
+|Unrecoverable read error on source
+|Track 39, side 1
+|
+|Target diskette may be unusable
+|
+|Copy another (Y/N)?n
+|A>

@@ -1,0 +1,29 @@
+# oracle: format b:/v
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:ZERO360.IMG
+# program: the original on the disk
+# drive B after: sha256 b639d23ffdd514ed80cb46a0f0c8bbfa352d64b3758232824a20bffcb7d8fe90
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>format b:/v
+|Insert new diskette for drive B:
+|and strike any key when ready
+|
+|Formatting...Format complete
+|
+|Volume label (11 characters, ENTER for none)? BAD.NAME
+|
+|Invalid characters in volume label
+|Volume label (11 characters, ENTER for none)? GOOD
+|
+|
+|   362496 bytes total disk space
+|   362496 bytes available on disk
+|
+|Format another (Y/N)?n
+|A>
