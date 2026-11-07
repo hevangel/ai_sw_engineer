@@ -582,6 +582,32 @@ impl Disk {
 
     /// Sets the volume label (up to 11 characters, space padded) in the root
     /// directory, replacing an existing one.
+    /// A system disk of geometry `geo` with the files of the system disk `src`: a blank `geo`
+    /// disk, then every file of `src`'s root directory in its directory order, with its
+    /// attribute (so IBMBIO.COM and IBMDOS.COM take the first clusters, contiguous, as the boot
+    /// record expects), then `src`'s boot sector with `geo`'s BIOS parameter block (bytes
+    /// 0Bh-1Dh). The PC DOS 2.00 boot record reads the BPB, so the result boots; a volume label
+    /// and subdirectories of `src` are not copied.
+    pub fn system_copy(src: &Disk, geo: &Geometry) -> Result<Disk, String> {
+        let mut d = Disk::blank_with(geo);
+        for e in src.list() {
+            if e.attr & 0x18 != 0 {
+                continue;
+            }
+            d.add(&e.name, &src.read(&e.name)?)?;
+            let off = d
+                .root_offsets()
+                .into_iter()
+                .find(|&o| d.in_use(o) && d.entry_at(o).name == e.name)
+                .ok_or_else(|| format!("{}: not added", e.name))?;
+            d.data[off + 11] = e.attr;
+        }
+        let mut boot = src.data[..SECTOR].to_vec();
+        boot[0x0B..0x1E].copy_from_slice(&d.data[0x0B..0x1E]);
+        d.data[..SECTOR].copy_from_slice(&boot);
+        Ok(d)
+    }
+
     pub fn set_label(&mut self, label: &str) -> Result<(), String> {
         let upper = label.to_ascii_uppercase();
         if upper.len() > 11

@@ -11,6 +11,8 @@ usage: pcdisk blank <out.img> [160|180|320|360|720]     (default 160 KiB)
        pcdisk delete <disk.img> <NAME.EXT>
        pcdisk mkdir <disk.img> <PATH>     (subdirectory, e.g. SUB or SUB\\INNER)
        pcdisk label <disk.img> <LABEL>     (volume label, up to 11 characters)
+       pcdisk syscopy <system.img> <out.img> <160|180|320|360|720>
+                (a system disk of that size with system.img's files and boot record)
 NAME.EXT may be a path with backslashes, e.g. SUB\\INNER\\FILE.TXT.
 ";
 
@@ -74,6 +76,14 @@ fn run() -> Result<(), String> {
             let mut d = load(img)?;
             d.mkdir(path)?;
             save(img, &d)
+        }
+        ["syscopy", src, out, kib] => {
+            let geo = kib
+                .parse()
+                .ok()
+                .and_then(Geometry::by_kib)
+                .ok_or_else(|| format!("no {kib} KiB format"))?;
+            save(out, &Disk::system_copy(&load(src)?, geo)?)
         }
         ["label", img, label] => {
             let mut d = load(img)?;

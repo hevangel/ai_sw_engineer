@@ -1,29 +1,29 @@
 # oracle: diskcopy a: b: x
-# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:image:ZERO360.IMG
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:system360,b:image:ZERO360.IMG
 # program: the original on the disk
-# drive B after: sha256 11c1c60172f29a507d3573e63cc61399f1b47855add99ba9ade5829cb6a99ea1
-|Unrecoverable read error on source
-|Track 33, side 1
+# drive B after: sha256 55f412a16c6e074b6460c7f4cbb16dee8b84c4785be1f9412082c44c98c6bcab
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.68
+|Enter new time:
 |
-|Unrecoverable read error on source
-|Track 34, side 1
 |
-|Unrecoverable read error on source
-|Track 35, side 1
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
 |
-|Unrecoverable read error on source
-|Track 36, side 1
+|A>diskcopy a: b: x
 |
-|Unrecoverable read error on source
-|Track 37, side 1
+|Insert source diskette in drive A:
 |
-|Unrecoverable read error on source
-|Track 38, side 1
+|Insert target diskette in drive B:
 |
-|Unrecoverable read error on source
-|Track 39, side 1
+|Strike any key when ready
 |
-|Target diskette may be unusable
+|Copying 9 sectors per track, 2 side(s)
+|
+|Copy complete
 |
 |Copy another (Y/N)?n
 |A>
+|
+|

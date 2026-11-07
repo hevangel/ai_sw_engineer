@@ -11,6 +11,8 @@
 # keys to type) for prompts after the command. A file item may instead be a step for a drive B
 # disk (a blank 360 KiB disk made for the case): b:mkdir:PATH, b:label:LABEL, b:add:PATH=FILE;
 # a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead.
+# The item a:system360 makes drive A a double-sided 360 KiB copy of disk 1 instead (pcdisk
+# syscopy: its files in order and its boot record with the 360 KiB BPB).
 # SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
 # in WORK, since a disk FORMAT or DISKCOPY wrote holds IBM's boot sector or files).
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
@@ -39,13 +41,18 @@ while IFS= read -r line; do
   more=("${f[@]:3}")
   [[ $# -gt 0 && $want != *" $name "* ]] && continue
   disk="$WORK/$name.img"
-  cp "$R/pcdos200.img" "$disk"
+  if [[ ,$files, == *,a:system360,* ]]; then
+    "$PCDISK" syscopy "$R/pcdos200.img" "$disk" 360
+  else
+    cp "$R/pcdos200.img" "$disk"
+  fi
   [[ -n ${PROGRAM:-} ]] && "$PCDISK" add "$disk" "$PROGRAM" "${NAME:?NAME=<8.3 name of the program>}"
   diskb=""
   if [[ $files != - ]]; then
     IFS=, read -ra fl <<< "$files"
     for x in "${fl[@]}"; do
       case $x in
+        a:system360) ;;
         b:*)
           step=${x#b:}
           if [[ -z $diskb ]]; then
