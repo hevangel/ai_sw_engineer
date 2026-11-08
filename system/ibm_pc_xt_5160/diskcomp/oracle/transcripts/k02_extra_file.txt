@@ -1,0 +1,28 @@
+# oracle: diskcomp a: b:
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:system360,b:copy_a,b:add:EXTRA.TXT=EXTRA.TXT
+# program: the original on the disk
+|Current time is  0:00:03.68
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>diskcomp a: b:
+|
+|Insert first diskette in drive A:
+|
+|Insert second diskette in drive B:
+|
+|Strike any key when ready
+|
+|Comparing 9 sectors per track, 2 side(s)
+|
+|Compare error(s) on
+|Track 00, Side 0
+|
+|Compare error(s) on
+|Track 17, Side 1
+|
+|Compare more diskettes (Y/N)?n
+|A>
