@@ -4,6 +4,8 @@ target/
 !llvm-*/target/
 !llvm-*/target/**
 debug/
+# ...but not the DEBUG.COM title of the XT profile.
+!system/ibm_pc_xt_5160/debug/
 **/*.rs.bk
 *.pdb
 **/mutants.out*/

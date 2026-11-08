@@ -1,0 +1,28 @@
+# oracle: debug
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:disk2:DEBUG.COM
+# program: the original on the disk
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>debug
+|-a 100
+|08F1:0100 mov ax,5
+|08F1:0103 inc ax
+|08F1:0104 mov cx,ax
+|08F1:0106 int 20
+|08F1:0108
+|-t
+|
+|AX=0005  BX=0000  CX=0000  DX=0000  SP=FFEE  BP=0000  SI=0000  DI=0000
+|DS=08F1  ES=08F1  SS=08F1  CS=08F1  IP=0103   NV UP DI PL NZ NA PO NC
+|08F1:0103 40            INC     AX
+|-t
+|
+|AX=0006  BX=0000  CX=0000  DX=0000  SP=FFEE  BP=0000  SI=0000  DI=0000
+|DS=08F1  ES=08F1  SS=08F1  CS=08F1  IP=0104   NV UP DI PL NZ NA PE NC
+|08F1:0104 89C1          MOV     CX,AX
+|-g
+|
+|Program terminated normally
+|-q
+|
+|A>

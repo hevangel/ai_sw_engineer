@@ -1,0 +1,28 @@
+# oracle: debug sort.exe
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:disk2:DEBUG.COM
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>debug sort.exe
+|-r
+|AX=0000  BX=0000  CX=0300  DX=0000  SP=0060  BP=0000  SI=0000  DI=0000
+|DS=0905  ES=0905  SS=0939  CS=0915  IP=0000   NV UP DI PL NZ NA PO NC
+|0915:0000 B430          MOV     AH,30
+|-u l 6
+|   ^ Error
+|-q
+|
+|A>
+|
+|
+|
+|
+|
+|
