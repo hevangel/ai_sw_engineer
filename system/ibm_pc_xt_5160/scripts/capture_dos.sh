@@ -10,7 +10,8 @@
 # name, comma-separated files (- for none), command, then optional pairs of (text to wait for,
 # keys to type) for prompts after the command. A file item may instead be a step for a drive B
 # disk (a blank 360 KiB disk made for the case): b:mkdir:PATH, b:label:LABEL, b:add:PATH=FILE;
-# a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead.
+# a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead, and a
+# first step b:copy_a a copy of drive A as built so far (the program under test included).
 # The item a:system360 makes drive A a double-sided 360 KiB copy of disk 1 instead (pcdisk
 # syscopy: its files in order and its boot record with the 360 KiB BPB).
 # SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
@@ -58,6 +59,7 @@ while IFS= read -r line; do
           if [[ -z $diskb ]]; then
             diskb="$WORK/${name}_b.img"
             if [[ $step == image:* ]]; then cp "$WORK/in/${step#image:}" "$diskb"; continue; fi
+            if [[ $step == copy_a ]]; then cp "$disk" "$diskb"; continue; fi
             "$PCDISK" blank "$diskb" 360
           fi
           case $step in
