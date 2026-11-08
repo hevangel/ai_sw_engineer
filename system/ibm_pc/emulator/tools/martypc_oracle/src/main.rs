@@ -149,6 +149,15 @@ fn shifted(ch: char) -> Option<MartyKey> {
         '*' => Digit8,
         ':' => Semicolon,
         '?' => Slash,
+        '!' => Digit1,
+        '@' => Digit2,
+        '#' => Digit3,
+        '$' => Digit4,
+        '%' => Digit5,
+        '&' => Digit7,
+        '(' => Digit9,
+        ')' => Digit0,
+        '_' => Minus,
         _ => return Option::None,
     })
 }

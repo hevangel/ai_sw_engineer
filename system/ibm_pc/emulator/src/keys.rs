@@ -41,6 +41,12 @@ fn key_for(c: char) -> Option<(u8, bool)> {
         '+' => Some('='),
         '?' => Some('/'),
         '!' => Some('1'),
+        '@' => Some('2'),
+        '#' => Some('3'),
+        '$' => Some('4'),
+        '%' => Some('5'),
+        '^' => Some('6'),
+        '&' => Some('7'),
         '_' => Some('-'),
         '<' => Some(','),
         '>' => Some('.'),
@@ -91,6 +97,7 @@ mod tests {
         assert_eq!(scan_codes("\u{1a}"), vec![29, 44, 44 | 0x80, 29 | 0x80]);
         assert_eq!(scan_codes("\u{3}"), vec![29, 46, 46 | 0x80, 29 | 0x80]);
         assert_eq!(scan_codes("\r"), vec![28, 28 | 0x80]);
+        assert_eq!(scan_codes("#"), vec![42, 4, 4 | 0x80, 42 | 0x80]);
     }
 
     #[test]

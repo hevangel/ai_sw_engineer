@@ -1,0 +1,28 @@
+# oracle: edlin fruit.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>edlin fruit.txt
+|End of input file
+|*1,3d
+|*q
+|Abort edit (Y/N)? y
+|A>type fruit.txt
+|apple
+|banana
+|cherry
+|date
+|elderberry
+|
+|A>
+|
+|
+|

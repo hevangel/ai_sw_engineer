@@ -1,0 +1,28 @@
+# oracle: edlin fruit.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: the original on the disk
+|
+|A>edlin fruit.txt
+|End of input file
+|*3i
+|     3:*inserted
+|     4:*^C
+|
+|*l
+|     1: apple
+|     2: banana
+|     3: inserted
+|     4:*cherry
+|     5: date
+|     6: elderberry
+|*e
+|
+|A>type fruit.txt
+|apple
+|banana
+|inserted
+|cherry
+|date
+|elderberry
+|
+|A>
