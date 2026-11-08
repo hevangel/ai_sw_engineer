@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! boot                          power on (reset); first step only
-//! type 10-14-81\r               keys typed through scan codes (\r = Enter)
+//! type 10-14-81\r               keys typed through scan codes (\r = Enter, ^Z = Ctrl+Z)
 //! until contains|endswith|row T wait until the screen shows T
 //! until idle N                  wait N clocks (screens that cannot be read as text)
 //! screen                        (output only) 25 rows follow, prefixed '|'
@@ -63,7 +63,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
         } else if line == "boot" {
             action = Some(None);
         } else if let Some(t) = line.strip_prefix("type ") {
-            action = Some(Some(t.replace("\\r", "\r")));
+            action = Some(Some(control_keys(&t.replace("\\r", "\r"))));
         } else if let Some(c) = line.strip_prefix("until ") {
             let (kind, needle) = c
                 .split_once(' ')
@@ -131,7 +131,7 @@ pub fn run(machine: &mut Machine, steps: &[Step]) -> Result<String, String> {
                 for code in scan_codes(text) {
                     machine.key(code);
                 }
-                let _ = writeln!(out, "type {}", text.replace('\r', "\\r"));
+                let _ = writeln!(out, "type {}", caret_notation(&text.replace('\r', "\\r")));
             }
         }
         let before = rows(machine);
@@ -196,5 +196,32 @@ pub fn strip_comments(text: &str) -> String {
     text.lines()
         .filter(|l| !l.starts_with('#'))
         .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+/// `^A`..`^Z` (and `^a`..`^z`) in a `type` step stand for the control characters 01h-1Ah,
+/// typed with Ctrl held (`^Z` is Ctrl+Z). A `^` before anything else is kept.
+fn control_keys(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, chars.peek()) {
+            ('^', Some(&l)) if l.is_ascii_alphabetic() => {
+                out.push((l.to_ascii_uppercase() as u8 - b'@') as char);
+                chars.next();
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The inverse of [`control_keys`] for writing a session back out.
+fn caret_notation(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '\u{1}'..='\u{1a}' if c != '\r' => format!("^{}", (c as u8 + b'@') as char),
+            _ => c.to_string(),
+        })
         .collect()
 }

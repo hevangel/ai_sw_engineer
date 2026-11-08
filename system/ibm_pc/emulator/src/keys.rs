@@ -6,6 +6,7 @@ const LETTER_CODES: [u8; 26] = [
 ];
 const DIGIT_CODES: [u8; 10] = [11, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const LEFT_SHIFT: u8 = 42;
+const LEFT_CTRL: u8 = 29;
 
 /// Scan code of an unshifted character, if it has a key.
 fn base(c: char) -> Option<u8> {
@@ -55,10 +56,18 @@ fn key_for(c: char) -> Option<(u8, bool)> {
 }
 
 /// Scan codes that type `text` on a US keyboard, shift handled around each
-/// shifted character. Characters without a key are skipped.
+/// shifted character and Ctrl around each control character 01h-1Ah (Ctrl with
+/// that letter; `\r` stays Enter). Characters without a key are skipped.
 pub fn scan_codes(text: &str) -> Vec<u8> {
     let mut out = Vec::new();
     for c in text.chars() {
+        if ('\u{1}'..='\u{1a}').contains(&c) && c != '\r' {
+            let letter = (b'a' + c as u8 - 1) as char;
+            if let Some((key, _)) = key_for(letter) {
+                out.extend([LEFT_CTRL, key, key | 0x80, LEFT_CTRL | 0x80]);
+            }
+            continue;
+        }
         if let Some((key, shifted)) = key_for(c) {
             if shifted {
                 out.push(LEFT_SHIFT);
@@ -75,6 +84,14 @@ pub fn scan_codes(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::scan_codes;
+
+    #[test]
+    fn control_characters_are_typed_with_ctrl() {
+        // ^Z: Ctrl down, Z, Z up, Ctrl up; Enter stays Enter
+        assert_eq!(scan_codes("\u{1a}"), vec![29, 44, 44 | 0x80, 29 | 0x80]);
+        assert_eq!(scan_codes("\u{3}"), vec![29, 46, 46 | 0x80, 29 | 0x80]);
+        assert_eq!(scan_codes("\r"), vec![28, 28 | 0x80]);
+    }
 
     #[test]
     fn redirection_and_pipe_characters_have_keys() {
