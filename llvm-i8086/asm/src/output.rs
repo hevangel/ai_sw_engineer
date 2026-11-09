@@ -271,7 +271,8 @@ pub fn floppy(
 /// a smaller maximum does not start the program, and DOS builds the program's first
 /// `IRET` frame at the `SS:SP` of the header, so SP must be inside the memory the program
 /// has (at the end of what it asked for, not at FFFEh).
-/// The header of a `.EXE`: one 512-byte sector.
+/// The header of a `.EXE`: whole 512-byte sectors, one unless the relocation table needs
+/// more (a medium-model program has one entry per far call).
 const HEADER: usize = 512;
 
 pub fn exe(image: &[u8], load_addr: u32, entry: u32, extra: u32) -> Result<Vec<u8>, String> {
@@ -315,12 +316,13 @@ pub fn exe_segmented(
             image.len()
         ));
     }
-    if 0x1C + 4 * relocs.len() > HEADER {
+    if relocs.len() > 0xFFFF {
         return Err(format!(
-            "{} segment relocations do not fit the {HEADER}-byte header",
+            "{} segment relocations do not fit a .EXE header (at most 65535)",
             relocs.len()
         ));
     }
+    let header = (0x1C + 4 * relocs.len()).div_ceil(HEADER).max(1) * HEADER;
     let mut image = image.to_vec();
     let mut table = Vec::new();
     for &at in relocs {
@@ -337,16 +339,16 @@ pub fn exe_segmented(
         table.extend_from_slice(&((m & 15) as u16).to_le_bytes());
         table.extend_from_slice(&((m >> 4) as u16).to_le_bytes());
     }
-    let total = HEADER + image.len();
+    let total = header + image.len();
     // DOS adds the loaded image itself; the minimum is what comes after it
     let min_alloc = extra.div_ceil(16) as u16;
     let sp = sp.unwrap_or(((0x100 + image.len() as u32 + extra) & !1).min(0xFFFE) as u16);
-    let mut h = vec![0u8; HEADER];
+    let mut h = vec![0u8; header];
     h[0..2].copy_from_slice(b"MZ");
     h[2..4].copy_from_slice(&((total % 512) as u16).to_le_bytes()); // bytes in the last page
     h[4..6].copy_from_slice(&(total.div_ceil(512) as u16).to_le_bytes()); // pages
     h[6..8].copy_from_slice(&(relocs.len() as u16).to_le_bytes()); // relocations
-    h[8..10].copy_from_slice(&((HEADER / 16) as u16).to_le_bytes()); // header paragraphs
+    h[8..10].copy_from_slice(&((header / 16) as u16).to_le_bytes()); // header paragraphs
     h[10..12].copy_from_slice(&min_alloc.to_le_bytes());
     h[12..14].copy_from_slice(&0xFFFFu16.to_le_bytes());
     h[14..16].copy_from_slice(&0xFFF0u16.to_le_bytes()); // SS: the PSP segment

@@ -55,3 +55,31 @@ fn images_that_are_not_a_tiny_model_program_are_refused() {
         .unwrap_err()
         .contains("outside the image"));
 }
+
+#[test]
+fn a_relocation_table_longer_than_one_sector_gets_a_longer_header() {
+    // 200 segment words (a medium-model program has one per far call): 0x1C + 800 bytes of
+    // header round up to two sectors, and every entry is in the table.
+    let mut image = vec![0u8; 1000];
+    let relocs: Vec<u32> = (0..200u32).map(|k| 0x100 + 4 * k).collect();
+    for k in 0..200usize {
+        image[4 * k..4 * k + 2].copy_from_slice(&0x0011u16.to_le_bytes());
+    }
+    let out = i8086_ld::exe_segmented(&image, 0x100, 0x100, 0, Some(0x800), &relocs).unwrap();
+    assert_eq!(word(&out, 8), 64, "a header of two sectors: 64 paragraphs");
+    assert_eq!(out.len(), 1024 + image.len());
+    assert_eq!(word(&out, 6), 200, "relocations");
+    assert_eq!(word(&out, 4), out.len().div_ceil(512) as u16, "pages");
+    for k in 0..200usize {
+        let e = 0x1C + 4 * k;
+        assert_eq!(
+            (word(&out, e), word(&out, e + 2)),
+            (((4 * k) & 15) as u16, ((4 * k) >> 4) as u16)
+        );
+        assert_eq!(
+            word(&out, 1024 + 4 * k),
+            0x0001,
+            "stored relative to the load module"
+        );
+    }
+}
