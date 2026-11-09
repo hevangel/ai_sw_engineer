@@ -16,6 +16,9 @@
 # syscopy: its files in order and its boot record with the 360 KiB BPB). The item a:disk2:NAME
 # copies NAME from PC DOS 2.00 disk 2 (XT_ROMS/pcdos200d2.img) onto drive A, unless NAME is the
 # rewrite under test (PROGRAM/NAME), which is on the disk already.
+# ORACLE=86box runs the case on 86Box's XT instead (scripts/xt_86box.py; BOX86=<86Box binary>,
+# XT86_ROMS=<dir of the two 5160 ROM chips>), whose LPT1 text printer adds the printed lines to
+# the transcript as `#lpt|` rows; SAVE_B is MartyPC-only.
 # SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
 # in WORK, since a disk FORMAT or DISKCOPY wrote holds IBM's boot sector or files).
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
@@ -81,13 +84,21 @@ while IFS= read -r line; do
     done
   fi
   saveb=""; [[ -n ${SAVE_B:-} && -n $diskb ]] && saveb="$WORK/${name}_b_after.img" && rm -f "$saveb"
-  rows="$(DRIVE_B=${diskb:-} MARTY_SAVE_B=$saveb MARTY_MACHINE=5160 MARTY_WRITABLE=1 MARTY_SETTLE="${MARTY_SETTLE:-80000000}" \
-      MARTY_KEY_DELAY="${MARTY_KEY_DELAY:-2000000}" \
-      "$MARTY" "$R/xtbios.bin" "$R/xtbasic.bin" "$disk" "${MARTY_CYCLES:-700000000}" \
-      'Enter new date' '\r' 'Enter new time' '\r' 'A>' "$cmd"'\r' "${more[@]}" 2>/dev/null)"
+  if [[ ${ORACLE:-martypc} == 86box ]]; then
+    machine="86Box a1e92633 IBM PC/XT (ibmxt, BIOS ibm5160_1501512_5000027), 256 KiB, CGA, LPT1 text printer, PC DOS 2.00 disk 1 + $files"
+    rows="$(python3 -I "$ROOT/system/ibm_pc_xt_5160/scripts/xt_86box.py" "${BOX86:?set BOX86 to the 86Box binary}" \
+        "${XT86_ROMS:?set XT86_ROMS (toolchain/scripts/fetch_reference.py)}" "$disk" "${diskb:--}" "${BOX86_TIMEOUT:-600}" \
+        'Enter new date' '\r' 'Enter new time' '\r' 'A>' "$cmd"'\r' "${more[@]}" 2>/dev/null)"
+  else
+    machine="MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + $files"
+    rows="$(DRIVE_B=${diskb:-} MARTY_SAVE_B=$saveb MARTY_MACHINE=5160 MARTY_WRITABLE=1 MARTY_SETTLE="${MARTY_SETTLE:-80000000}" \
+        MARTY_KEY_DELAY="${MARTY_KEY_DELAY:-2000000}" \
+        "$MARTY" "$R/xtbios.bin" "$R/xtbasic.bin" "$disk" "${MARTY_CYCLES:-700000000}" \
+        'Enter new date' '\r' 'Enter new time' '\r' 'A>' "$cmd"'\r' "${more[@]}" 2>/dev/null)"
+  fi
   {
     echo "# oracle: $cmd"
-    echo "# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + $files"
+    echo "# machine: $machine"
     if [[ -n ${PROGRAM:-} ]]; then
       echo "# program: $NAME = $(basename "$PROGRAM") sha256 $(sha "$PROGRAM")"
     else

@@ -21,6 +21,8 @@ PCJS = ("https://raw.githubusercontent.com/jeffpar/pcjs/"
 DISKS = ("https://raw.githubusercontent.com/jeffpar/pcjs-diskettes/"
          "cd3433748b09837a4c60ca7066f3642772b2d711/pcx86/sys/dos/ibm/2.00")
 
+ROMS86 = "https://raw.githubusercontent.com/86Box/roms/c4cd8da9"
+
 FILES = {
     # IBM 5160 BIOS of 1982-11-08 (8 KiB, FE000h) and Cassette BASIC C1.10 (32 KiB, F6000h).
     "xtbios.bin": (PCJS + "/bios/1982-11-08/XTBIOS-REV1.rom",
@@ -30,6 +32,12 @@ FILES = {
     # PC DOS 2.00 disk 1, 180 KiB single-sided (9 sectors a track).
     "pcdos200.img": (DISKS + "/PCDOS200-DISK1.json",
                      "934e62ceb797537600847902e627908969bd99df6a58637c4045e1ecaeb53a88"),
+    # The same BIOS and BASIC as the two 5160 ROM chips of the 86Box ROM set (for 86Box's ibmxt,
+    # the printer oracle): U18 = BASIC 2000h-7FFFh + BIOS, U19 = BASIC 0000h-1FFFh.
+    "BIOS_5160_08NOV82_U18_1501512.BIN": (ROMS86 + "/machines/ibmxt/BIOS_5160_08NOV82_U18_1501512.BIN",
+                                          "545aeea288235c36be53f23422efb32e9230dadce4b19d4b21682b36c3e86fb2"),
+    "BIOS_5160_08NOV82_U19_5000027.BIN": (ROMS86 + "/machines/ibmxt/BIOS_5160_08NOV82_U19_5000027.BIN",
+                                          "9f5716f27665516f1fa98b8aa8dfbf49d8f7441ec3ef1be0c736826e247bc1ae"),
     # PC DOS 2.00 disk 2 (DEBUG, LINK, EXE2BIN, BASIC samples), 180 KiB single-sided.
     "pcdos200d2.img": (DISKS + "/PCDOS200-DISK2.json",
                        "2b80a8a3554d29706444aa1a9928a32aca70b10b4d88e733650d012e5044ff0c"),
