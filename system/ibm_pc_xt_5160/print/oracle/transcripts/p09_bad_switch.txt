@@ -1,0 +1,32 @@
+# oracle: print /x fruit.txt
+# machine: 86Box a1e92633 IBM PC/XT (ibmxt, BIOS ibm5160_1501512_5000027), 256 KiB, CGA, LPT1 text printer, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:06.64
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>print /x fruit.txt
+|Name of list device [PRN]:
+|Resident part of PRINT installed
+|Invalid parameter
+|
+|        A:FRUIT   .TXT is currently being printed
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+#lpt|apple
+#lpt|banana
+#lpt|cherry
+#lpt|

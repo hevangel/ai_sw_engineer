@@ -1,0 +1,28 @@
+# oracle: print
+# machine: 86Box a1e92633 IBM PC/XT (ibmxt, BIOS ibm5160_1501512_5000027), 256 KiB, CGA, LPT1 text printer, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:06.64
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>print
+|Name of list device [PRN]:
+|Resident part of PRINT installed
+|PRINT queue is empty
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
