@@ -1,0 +1,28 @@
+# oracle: debug
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:disk2:DEBUG.COM
+# program: the original on the disk
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>debug
+|-f 300 l 20 55 aa
+|-s 300 l 40 55 aa
+|08F1:0300
+|08F1:0302
+|08F1:0304
+|08F1:0306
+|08F1:0308
+|08F1:030A
+|08F1:030C
+|08F1:030E
+|08F1:0310
+|08F1:0312
+|08F1:0314
+|08F1:0316
+|08F1:0318
+|08F1:031A
+|08F1:031C
+|08F1:031E
+|-s 300 l 40 99
+|-q
+|
+|A>

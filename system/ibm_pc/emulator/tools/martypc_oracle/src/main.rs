@@ -9,6 +9,7 @@
 //! wait's text appears before its keys are typed (default 0). A wait text starting with `$` waits
 //! for the last non-blank row to end with the rest, once the screen differs from the one the last
 //! keys were typed at, so a prompt printed again is waited for anew.
+//! `^Z` (any `^` and a letter) in typed keys is that letter with Ctrl held.
 //! `MARTY_SAVE_B=<path>` writes drive B as the run left it, as a raw sector image.
 
 use std::path::PathBuf;
@@ -112,10 +113,30 @@ fn key_for(ch: char) -> Option<MartyKey> {
         '\'' => Quote,
         ';' => Semicolon,
         '\\' => Backslash,
+        '[' => BracketLeft,
+        ']' => BracketRight,
+        '`' => Backquote,
         ' ' => Space,
         '\r' => Enter,
         _ => return Option::None,
     })
+}
+
+/// `^A`..`^Z` in typed keys stand for the control characters 01h-1Ah (typed with Ctrl held);
+/// a `^` before anything else is kept.
+fn control_keys(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, chars.peek()) {
+            ('^', Some(&l)) if l.is_ascii_alphabetic() => {
+                out.push((l.to_ascii_uppercase() as u8 - b'@') as char);
+                chars.next();
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// A character typed with Shift held on the US keyboard: the unshifted key.
@@ -131,6 +152,15 @@ fn shifted(ch: char) -> Option<MartyKey> {
         '*' => Digit8,
         ':' => Semicolon,
         '?' => Slash,
+        '!' => Digit1,
+        '@' => Digit2,
+        '#' => Digit3,
+        '$' => Digit4,
+        '%' => Digit5,
+        '&' => Digit7,
+        '(' => Digit9,
+        ')' => Digit0,
+        '_' => Minus,
         _ => return Option::None,
     })
 }
@@ -153,7 +183,7 @@ fn main() -> anyhow::Result<()> {
     let basic = std::fs::read(&a[2])?;
     let image = std::fs::read(&a[3])?;
     // pairs: once the screen shows the first text, type the second (\r is Enter)
-    let mut script: Vec<(String, String)> = a[5..].chunks(2).map(|c| (c[0].clone(), c[1].replace("\\r", "\r"))).collect();
+    let mut script: Vec<(String, String)> = a[5..].chunks(2).map(|c| (c[0].clone(), control_keys(&c[1].replace("\\r", "\r")))).collect();
     script.reverse();
     let cycles: u64 = a[4].parse()?;
 
@@ -271,6 +301,19 @@ fn main() -> anyhow::Result<()> {
                 }
                 for ch in keys.chars() {
                     let mods = KeyboardModifiers::default();
+                    // ^A..^Z: the letter's key with Ctrl held.
+                    if ('\u{1}'..='\u{1a}').contains(&ch) && ch != '\r' {
+                        let key = key_for((b'a' + ch as u8 - 1) as char).expect("letter key");
+                        machine.key_press(MartyKey::ControlLeft, mods);
+                        machine.run(100_000, &mut ctl);
+                        machine.key_press(key, mods);
+                        machine.run(300_000, &mut ctl);
+                        machine.key_release(key);
+                        machine.run(300_000, &mut ctl);
+                        machine.key_release(MartyKey::ControlLeft);
+                        machine.run(100_000, &mut ctl);
+                        continue;
+                    }
                     let (key, shift) = match key_for(ch) {
                         Some(k) => (k, false),
                         None => (shifted(ch).ok_or_else(|| anyhow::anyhow!("no key for {ch:?}"))?, true),

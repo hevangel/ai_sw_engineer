@@ -13,7 +13,9 @@
 # a first step b:image:FILE uses FILE (written by cases.py) as the drive B disk instead, and a
 # first step b:copy_a a copy of drive A as built so far (the program under test included).
 # The item a:system360 makes drive A a double-sided 360 KiB copy of disk 1 instead (pcdisk
-# syscopy: its files in order and its boot record with the 360 KiB BPB).
+# syscopy: its files in order and its boot record with the 360 KiB BPB). The item a:disk2:NAME
+# copies NAME from PC DOS 2.00 disk 2 (XT_ROMS/pcdos200d2.img) onto drive A, unless NAME is the
+# rewrite under test (PROGRAM/NAME), which is on the disk already.
 # SAVE_B=1 records the SHA-256 of drive B as the run left it ("# drive B after:"; the image stays
 # in WORK, since a disk FORMAT or DISKCOPY wrote holds IBM's boot sector or files).
 # PROGRAM=<file> with NAME=<8.3 name> puts a rewrite on the disk in place of the original; OUT and WORK choose where transcripts and disks go
@@ -54,6 +56,12 @@ while IFS= read -r line; do
     for x in "${fl[@]}"; do
       case $x in
         a:system360) ;;
+        a:disk2:*)
+          d2="$R/pcdos200d2.img"
+          [[ $(sha "$d2") == 2b80a8a3554d29706444aa1a9928a32aca70b10b4d88e733650d012e5044ff0c ]] || { echo "ERROR: pcdos200d2.img is not PC DOS 2.00 disk 2" >&2; exit 1; }
+          n=${x#a:disk2:}
+          if [[ -n ${PROGRAM:-} && $n == "${NAME:-}" ]]; then continue; fi
+          "$PCDISK" extract "$d2" "$n" "$WORK/in/disk2_$n" && "$PCDISK" add "$disk" "$WORK/in/disk2_$n" "$n" ;;
         b:*)
           step=${x#b:}
           if [[ -z $diskb ]]; then

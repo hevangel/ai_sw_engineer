@@ -1,0 +1,28 @@
+# oracle: edlin long.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + LONG.TXT
+# program: the original on the disk
+|    20: line 20
+|    21: line 21
+|    22: line 22
+|    23:*line 23
+|*p
+|    24: line 24
+|    25: line 25
+|    26: line 26
+|    27: line 27
+|    28: line 28
+|    29: line 29
+|    30: line 30
+|    31: line 31
+|    32: line 32
+|    33: line 33
+|    34: line 34
+|    35: line 35
+|    36: line 36
+|    37: line 37
+|    38: line 38
+|    39: line 39
+|    40:*line 40
+|*q
+|Abort edit (Y/N)? y
+|A>

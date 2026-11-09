@@ -1,0 +1,28 @@
+# oracle: debug
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:disk2:DEBUG.COM
+# program: the original on the disk
+|Current date is Tue  1-01-1980
+|Enter new date:
+|Current time is  0:00:03.84
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>debug
+|-r ax
+|AX 0000
+|:1234
+|-r f
+|NV UP DI PL NZ NA PO NC -ov dn
+|-r
+|AX=1234  BX=0000  CX=0000  DX=0000  SP=FFEE  BP=0000  SI=0000  DI=0000
+|DS=08F1  ES=08F1  SS=08F1  CS=08F1  IP=0100   OV DN DI PL NZ NA PO NC
+|08F1:0100 0000          ADD     [BX+SI],AL                         DS:0000=CD
+|-q
+|
+|A>
+|
+|
+|

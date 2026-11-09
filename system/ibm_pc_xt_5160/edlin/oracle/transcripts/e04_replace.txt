@@ -1,0 +1,28 @@
+# oracle: edlin fruit.txt
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FRUIT.TXT
+# program: the original on the disk
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>edlin fruit.txt
+|End of input file
+|*1,5rerr^Zxx
+|     3: chxxy
+|     5: elderbxxy
+|*l
+|     1: apple
+|     2: banana
+|     3: chxxy
+|     4:*date
+|     5: elderbxxy
+|*e
+|
+|A>type fruit.txt
+|apple
+|banana
+|chxxy
+|date
+|elderbxxy
+|
+|A>

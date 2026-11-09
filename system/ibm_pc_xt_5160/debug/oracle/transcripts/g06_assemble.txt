@@ -1,0 +1,28 @@
+# oracle: debug
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + a:disk2:DEBUG.COM
+# program: the original on the disk
+|Enter new time:
+|
+|
+|The IBM Personal Computer DOS
+|Version 2.00 (C)Copyright IBM Corp 1981, 1982, 1983
+|
+|A>debug
+|-a 100
+|08F1:0100 mov ax,1234
+|08F1:0103 add ax,bx
+|08F1:0105 mov [bx+si+10],al
+|08F1:0108 jmp 100
+|08F1:010A int 20
+|08F1:010C
+|-u 100 l 10
+|08F1:0100 B83412        MOV     AX,1234
+|08F1:0103 01D8          ADD     AX,BX
+|08F1:0105 884010        MOV     [BX+SI+10],AL
+|08F1:0108 EBF6          JMP     0100
+|08F1:010A CD20          INT     20
+|08F1:010C 0000          ADD     [BX+SI],AL
+|08F1:010E 0000          ADD     [BX+SI],AL
+|-q
+|
+|A>

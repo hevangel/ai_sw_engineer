@@ -30,6 +30,9 @@ FILES = {
     # PC DOS 2.00 disk 1, 180 KiB single-sided (9 sectors a track).
     "pcdos200.img": (DISKS + "/PCDOS200-DISK1.json",
                      "934e62ceb797537600847902e627908969bd99df6a58637c4045e1ecaeb53a88"),
+    # PC DOS 2.00 disk 2 (DEBUG, LINK, EXE2BIN, BASIC samples), 180 KiB single-sided.
+    "pcdos200d2.img": (DISKS + "/PCDOS200-DISK2.json",
+                       "2b80a8a3554d29706444aa1a9928a32aca70b10b4d88e733650d012e5044ff0c"),
 }
 
 
