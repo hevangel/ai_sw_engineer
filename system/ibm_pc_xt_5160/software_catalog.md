@@ -35,7 +35,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | MODE.COM | 3,139 | sets display, printer, serial modes | device-specific |
 | BACKUP.COM, RESTORE.COM | 3,687, 4,003 | fixed-disk backup | need the fixed disk |
 | EDLIN.COM | 4,608 | line editor | **done**: `edlin/` (#293) |
-| PRINT.COM | 4,608 | background print spooler | resident, printer |
+| PRINT.COM | 4,608 | background print spooler (resident) | **done**: `print/` (#297), oracle 86Box with a text printer |
 | FIND.EXE | 5,888 | filter: lines containing a string, `/V /C /N` | **done**: `find/` (#283) |
 | FORMAT.COM | 6,016 | formats diskettes | **done**: `format/` (#288) |
 | FDISK.COM | 6,177 | fixed-disk partitioning | needs the fixed disk |
@@ -66,4 +66,5 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 7. DISKCOMP.COM (#291), done 2026-11-08: identical on 8 cases (identical, changed and other disks, compare more, one drive).
 8. EDLIN.COM (#293), done 2026-11-08: identical on 14 interactive cases, each followed by TYPE of the result. The IBM binary is revision 12 (older than the published source); its T leaves a byte of COMMAND.COM from memory at the end of the file, which the rewrite reproduces by loading high (spec D1).
 9. DEBUG.COM (#295, disk 2), done 2026-11-08: identical on 12 cases (R D E F S M C H A U T G N W, an .EXE); the rewrite loads high so the program segments it creates are the original's (CS=08F1). Its assembler covers the integer forms the cases use (spec D-ASM).
-10. ASSIGN.COM (#296), done 2026-11-09: identical on 8 cases; the resident INT 21h/25h/26h hooks are assembly in the original's layout (spec D1, D2). PRINT and GRAPHICS wait on a printer model for an oracle of the printed bytes.
+10. ASSIGN.COM (#296), done 2026-11-09: identical on 8 cases; the resident INT 21h/25h/26h hooks are assembly in the original's layout (spec D1, D2). 
+11. PRINT.COM (#297), done 2026-11-09: identical on 10 cases, screen and printed lines. The printer oracle is 86Box's XT with its text printer (MartyPC keeps its parallel port private); the Rust emulator gained a printer adapter (spec E-A13). GRAPHICS needs a graphics printer model next.
