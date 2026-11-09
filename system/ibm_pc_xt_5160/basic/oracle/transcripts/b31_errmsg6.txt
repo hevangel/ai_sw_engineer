@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 28
+|Unprintable error
+|Ok
+|error 56
+|Unprintable error
+|Ok
+|error 59
+|Unprintable error
+|Ok
+|error 60
+|Unprintable error
+|Ok
+|error 65
+|Unprintable error
+|Ok
+|error 68
+|Device Unavailable
+|Ok
+|error 69
+|Communication buffer overflow
+|Ok
+|system
+|
+|A>

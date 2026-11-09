@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|50 print 6;7
+|60 print 8
+|70 print
+|"x"
+|80
+|Undefined line number
+|Ok
+|list
+|10 PRINT "abxy"
+|20 PRINT "abxy"
+|40 PRINT 5
+|50 PRINT 6;7
+|70 PRINT
+|"x"
+|Ok
+|run
+|abxy
+|abxy
+| 5
+| 6  7
+|x
+|Ok
+|system
+|
+|A>

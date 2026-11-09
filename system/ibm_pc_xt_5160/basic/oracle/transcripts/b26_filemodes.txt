@@ -1,0 +1,28 @@
+# oracle: basic fmode
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + FMODE.BAS,b:label:BASIC
+# program: the original on the disk
+| 0  37
+|abc  | 1
+|[d 1      -2 ]
+|[ 3.1]
+|["q",1.5,-2]
+|[more]
+|err 62 in 90
+|err 55 in 100
+|err 54 in 110
+|err 50 in 120
+|err 63 in 130
+|err 64 in 140
+|err 52 in 150
+|err 53 in 160
+|err 55 in 170
+|
+|A>type b:f.txt
+|abc  d 1      -2
+| 3.1
+|"q",1.5,-2
+|more
+|
+|A>
+|
+|

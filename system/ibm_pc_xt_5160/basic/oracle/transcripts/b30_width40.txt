@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|print 1
+| 1
+|Ok
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|1LIST   2RUN    3LOAD"  4SAVE"  5CONT

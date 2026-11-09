@@ -1,0 +1,28 @@
+# oracle: basic scr
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + SCR.BAS
+# program: the original on the disk
+| 5  17
+|a 97  7
+|
+|
+|         at 5,10
+|
+|================================================================================
+|=====
+|
+|wrap test
+|a     b
+|  c
+|F1 hello
+|F2 RUN
+|F3 LOAD"
+|F4 SAVE"
+|F5 CONT
+|F6 ,"LPT1:"
+|F7 TRON
+|F8 TROFF
+|F9 KEY
+|F10 SCREEN 0,0,0
+|
+|A>
+|

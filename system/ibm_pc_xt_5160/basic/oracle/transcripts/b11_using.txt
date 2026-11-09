@@ -1,0 +1,28 @@
+# oracle: basic using
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + USING.BAS
+# program: the original on the disk
+| 1.01-1.50%123.46
+|**2.3*-2.3
+|***$4.50
+| 12.30- 12.30
+|0.12E+05-.12E-03
+|hw
+|abcdab
+|abc
+|#  5
+|Total: %1,234,567.89
+|%12345-5
+| +5   5- +5   5-
+| -$12.50  $12.50
+|.556%1.000
+| 1.50E+30^
+|% 9.999999E+37
+|%10000.0
+|a1b,a2b,
+|
+|A>
+|
+|
+|
+|
+|

@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 23
+|Line buffer overflow
+|Ok
+|error 24
+|Device Timeout
+|Ok
+|error 25
+|Device Fault
+|Ok
+|error 26
+|FOR Without NEXT
+|Ok
+|error 27
+|Out of Paper
+|Ok
+|error 29
+|WHILE without WEND
+|Ok
+|error 21
+|Unprintable error
+|Ok
+|system
+|
+|A>

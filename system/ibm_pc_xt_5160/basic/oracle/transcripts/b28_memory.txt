@@ -1,0 +1,28 @@
+# oracle: basic mem
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + MEM.BAS
+# program: the original on the disk
+| 3254  3456
+| 3460  3468  3480  2  61526
+|0 E4 C A 0 91 20 FF 97 28 C 30 0 29 E9 1C 0 1 EB FF 97 28 C 31
+| 36032
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

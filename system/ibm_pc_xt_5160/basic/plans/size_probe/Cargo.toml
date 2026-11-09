@@ -1,0 +1,20 @@
+[package]
+name = "slice"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "slice"
+path = "src/main.rs"
+test = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false

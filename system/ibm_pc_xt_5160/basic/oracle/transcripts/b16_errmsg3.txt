@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 50
+|FIELD overflow
+|Ok
+|error 51
+|Internal error
+|Ok
+|error 52
+|Bad file number
+|Ok
+|error 54
+|Bad file mode
+|Ok
+|error 55
+|File already open
+|Ok
+|error 57
+|Device I/O Error
+|Ok
+|error 58
+|File already exists
+|Ok
+|system
+|
+|A>

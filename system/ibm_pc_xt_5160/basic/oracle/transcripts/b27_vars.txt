@@ -1,0 +1,28 @@
+# oracle: basic vars
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + VARS.BAS
+# program: the original on the disk
+| 4 str .3333333432674408
+| 1  2
+| 3  2  3  4 5
+| 23  11
+| 0
+| 7
+|-1
+|hi!
+| 9
+|-8 -12
+| 3  3
+| 6
+| 1
+| 1  1.5  2
+| 60958
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|

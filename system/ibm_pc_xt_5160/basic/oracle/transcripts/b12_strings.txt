@@ -1,0 +1,28 @@
+# oracle: basic strs
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + STRS.BAS
+# program: the original on the disk
+| 5  9  0  1  0
+|*****AAA   ||
+|HOWDY, World
+|HOWDY, Earth
+||HOWDY, Earth|||
+|-1 -1  0 -1 x
+|FFFF 177777 1000 2
+|-2  .3333333333333333  4  2.5
+|ABCDE 10
+| 65  0  0 2 x 0
+|[  pad  ] 7
+| 255 zzz
+| 60775  60790  60790
+|[][one]
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

@@ -1,0 +1,23 @@
+[package]
+name = "medium"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "medium"
+path = "src/main.rs"
+test = false
+
+[features]
+pad = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false

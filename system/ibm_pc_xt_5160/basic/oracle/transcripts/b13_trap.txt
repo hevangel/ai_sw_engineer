@@ -1,0 +1,28 @@
+# oracle: basic trap
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + TRAP.BAS,b:label:BASIC
+# program: the original on the disk
+| 5  20  3  30  1  40  4  50  9  60  10  70  6  80  18  90  200  100  5  110  52
+| 120  54  130  30  140  13  150  8  160  5  170  5  180 Overflow
+|
+| 53  200 Division by zero
+|
+|Division by zero
+|
+|RESUME without error in 230
+|Ok
+|system
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

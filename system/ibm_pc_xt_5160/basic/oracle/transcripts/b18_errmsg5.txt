@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 71
+|Disk not Ready
+|Ok
+|error 72
+|Disk Media Error
+|Ok
+|error 74
+|Rename across disks
+|Ok
+|error 75
+|Path/File access error
+|Ok
+|error 76
+|Path not found
+|Ok
+|error 255
+|Unprintable error
+|Ok
+|play "c"
+|Advanced Feature
+|Ok
+|system
+|
+|A>

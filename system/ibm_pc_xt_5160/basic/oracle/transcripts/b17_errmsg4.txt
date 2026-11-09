@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 61
+|Disk full
+|Ok
+|error 62
+|Input past end
+|Ok
+|error 63
+|Bad record number
+|Ok
+|error 64
+|Bad file name
+|Ok
+|error 66
+|Direct statement in file
+|Ok
+|error 67
+|Too many files
+|Ok
+|error 70
+|Disk Write Protected
+|Ok
+|system
+|
+|A>

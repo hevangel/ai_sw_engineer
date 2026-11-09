@@ -1,0 +1,28 @@
+# oracle: basic input
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + INPUT.BAS
+# program: the original on the disk
+|name? bob
+|[bob]
+|? 1
+|?Redo from start
+|? 1,2
+| 3
+|? abc
+|?Redo from start
+|? 7
+| 7
+|line? a, "b", c
+|a, "b", c
+|? "q,r",1,2
+|?Redo from start
+|? "q,r",1
+|q,r 1
+|
+|A>
+|
+|
+|
+|
+|
+|
+|

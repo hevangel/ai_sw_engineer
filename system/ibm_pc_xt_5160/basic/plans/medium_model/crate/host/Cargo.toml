@@ -1,0 +1,8 @@
+[package]
+name = "medium_host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+[[bin]]
+name = "medium_host"
+path = "main.rs"

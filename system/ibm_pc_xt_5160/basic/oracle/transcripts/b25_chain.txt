@@ -1,0 +1,28 @@
+# oracle: basic chain
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + CHAIN.BAS,b:label:BASIC
+# program: the original on the disk
+|merged
+|in part2 42 kept 0
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

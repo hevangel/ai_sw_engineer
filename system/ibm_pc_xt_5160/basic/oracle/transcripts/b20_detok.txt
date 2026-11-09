@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + TOK.BAS
+# program: the original on the disk
+|Ok
+|load "tok"
+|Ok
+|30 for i=1to10 step 3:? i;:next
+|40 a = b+c  :   rem  spaces
+|50 x=1e5:y=.5e-3:z#=1.234567890123d2:w=123456789
+|list
+|10 PRINT A$;:IF X>=1 THEN 20 ELSE X=&H1F+1.5#+12345!+7+&O7+300+65000!:' r
+|20 GOSUB 10:A=CVI(B$)+SQR(4)+FRE(0):FILES:REM x
+|30 FOR I=1TO10 STEP 3:PRINT I;:NEXT
+|40 A = B+C  :   REM  spaces
+|50 X=100000!:Y=.0005:Z#=123.4567890123#:W=123456789#
+|Ok
+|system
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|

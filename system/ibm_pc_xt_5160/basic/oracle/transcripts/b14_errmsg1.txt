@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|Ok
+|error 15
+|String too long
+|Ok
+|error 16
+|String formula too complex
+|Ok
+|error 17
+|Can't continue
+|Ok
+|error 18
+|Undefined user function
+|Ok
+|error 19
+|No RESUME
+|Ok
+|error 20
+|RESUME without error
+|Ok
+|error 22
+|Missing operand
+|Ok
+|system
+|
+|A>
