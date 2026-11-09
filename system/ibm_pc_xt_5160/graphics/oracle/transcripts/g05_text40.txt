@@ -1,0 +1,30 @@
+# oracle: prncap
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + PRNCAP.COM,PRNDUMP.COM,DRAW.COM,b:label:PRINTOUT
+# program: the original on the disk
+# drive B after: sha256 8909d3818667eeabe0b967f6946f9a58acf5e7f6038bc443afed886c2c5027f3
+# printed: 1052 bytes sha256 ac893df185418e8ac3daae2c0f455c96f839c52f00b7e528627d55f5f962440d
+|INT 5 done, status 00h
+|
+|A>prndump b:out.prn
+|1052 bytes
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

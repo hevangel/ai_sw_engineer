@@ -26,7 +26,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 | **SORT.EXE** | 1,280 | DOS 2 filter: sorts the lines of standard input to standard output; `/R` reverse, `/+n` sort on column n | **done**: `sort/` (#281), selected first (below) |
 | MORE.COM | 384 | filter: pages standard input 24 lines at a time | **done**: `more/` (#286) |
 | ASSIGN.COM | 896 | redirects drive letters (resident) | **done**: `assign/` (#296) |
-| GRAPHICS.COM | 789 | resident Print Screen for graphics | needs a printer model |
+| GRAPHICS.COM | 789 | resident Print Screen for graphics | **done**: `graphics/` (#299), printed bytes captured in the guest |
 | TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | **done**: `tree/` (#285) |
 | SYS.COM | 1,408 | copies the system files | writes system areas |
 | DISKCOMP.COM, DISKCOPY.COM | 2,074, 2,444 | compare/copy whole diskettes | DISKCOPY **done**: `diskcopy/` (#289); DISKCOMP **done**: `diskcomp/` (#291) |
@@ -68,3 +68,4 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 9. DEBUG.COM (#295, disk 2), done 2026-11-08: identical on 12 cases (R D E F S M C H A U T G N W, an .EXE); the rewrite loads high so the program segments it creates are the original's (CS=08F1). Its assembler covers the integer forms the cases use (spec D-ASM).
 10. ASSIGN.COM (#296), done 2026-11-09: identical on 8 cases; the resident INT 21h/25h/26h hooks are assembly in the original's layout (spec D1, D2). 
 11. PRINT.COM (#297), done 2026-11-09: identical on 10 cases, screen and printed lines. The printer oracle is 86Box's XT with its text printer (MartyPC keeps its parallel port private); the Rust emulator gained a printer adapter (spec E-A13). GRAPHICS needs a graphics printer model next.
+12. GRAPHICS.COM (#299), done 2026-11-09: identical on 11 cases, screen and printed bytes. The bytes are captured inside the guest by this repository's PRNCAP (an INT 17h hook), written out by PRNDUMP and read from drive B, so MartyPC is the oracle; DRAW sets the CGA modes, draws a fixed picture and calls INT 5.
