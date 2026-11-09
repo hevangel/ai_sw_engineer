@@ -12,6 +12,7 @@ pub mod debug;
 pub mod dma;
 pub mod fdc;
 pub mod keys;
+pub mod lpt;
 pub mod machine;
 pub mod pic;
 pub mod pit;

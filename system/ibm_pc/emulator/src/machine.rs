@@ -57,6 +57,8 @@ pub struct Board {
     pub sw1: u8,
     /// Switch block 2 (expansion memory), see [`sw2_for`].
     pub sw2: u8,
+    /// The printer adapter at 378h, if one is fitted ([`Machine::attach_printer`]).
+    pub lpt: Option<crate::lpt::Lpt>,
     pub nmi_enabled: bool,
     /// CPU clocks since reset.
     pub clock: u64,
@@ -86,6 +88,7 @@ impl Board {
             speaker: Speaker::new(),
             sw1: SW1_DEFAULT,
             sw2: sw2_for(ram_kib),
+            lpt: None,
             nmi_enabled: false,
             clock: 0,
             pit_phase: 0,
@@ -235,6 +238,10 @@ impl Bus for Board {
                 2 => self.port_c(),
                 _ => 0xFF,
             },
+            0x378..=0x37A if self.lpt.is_some() => self
+                .lpt
+                .as_ref()
+                .map_or(0xFF, |l| l.read(p - crate::lpt::BASE)),
             0x3D0..=0x3DF => self.cga.read(p, self.clock),
             0x3F4 => self.fdc.status(),
             0x3F5 => self.fdc.read_data(),
@@ -262,6 +269,11 @@ impl Bus for Board {
             }
             0x80..=0x9F => self.dma.write_page(p as u8, value),
             0xA0..=0xBF => self.nmi_enabled = value & 0x80 != 0,
+            0x378..=0x37A => {
+                if let Some(l) = self.lpt.as_mut() {
+                    l.write(p - crate::lpt::BASE, value);
+                }
+            }
             0x3D0..=0x3DF => self.cga.write(p, value),
             0x3F2 => self.fdc.write_dor(value),
             0x3F5 => self.fdc.write_data(value),
@@ -285,6 +297,17 @@ impl Machine {
             board: Board::new(ram_kib),
             instructions: 0,
         }
+    }
+
+    /// Fit the IBM printer adapter at 378h with an always-ready printer (spec E-A13); what it
+    /// prints is in `board.lpt` (`printed`). It stays fitted across [`Machine::reset`], emptied.
+    pub fn attach_printer(&mut self) {
+        self.board.lpt = Some(crate::lpt::Lpt::new());
+    }
+
+    /// The bytes the printer has taken, if one is fitted.
+    pub fn printed(&self) -> Option<&[u8]> {
+        self.board.lpt.as_ref().map(|l| l.printed.as_slice())
     }
 
     /// Latch a non-maskable interrupt edge.
@@ -318,6 +341,7 @@ impl Machine {
             self.board.sw1,
             self.board.sw2,
         );
+        let lpt = self.board.lpt.take().map(|_| crate::lpt::Lpt::new());
         let disks = std::mem::take(&mut self.board.fdc.disks);
         let capture = self.board.speaker.capture;
         self.cpu = Cpu::new();
@@ -325,6 +349,7 @@ impl Machine {
         self.board.rom = rom;
         self.board.sw1 = sw1;
         self.board.sw2 = sw2;
+        self.board.lpt = lpt;
         self.board.fdc.disks = disks;
         self.board.speaker.capture = capture;
         self.instructions = 0;

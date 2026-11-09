@@ -174,3 +174,21 @@ fn the_debugger_stops_at_the_bios_entry_point() {
         "{regs}"
     );
 }
+
+#[test]
+#[ignore = "needs the original IBM BIOS and PC DOS 1.00 (see module docs)"]
+fn copy_to_prn_reaches_the_printer_adapter() {
+    // The BIOS finds the adapter at 378h at power-on (0040:0008) and INT 17h strobes each
+    // byte; DOS's PRN device goes through INT 17h.
+    let mut m = machine();
+    m.attach_printer();
+    let mut disk = pcdisk::Disk::from_bytes(read_checked("pcdos100.img", DOS_SHA256)).unwrap();
+    disk.add("P.TXT", b"printed line\r\n\x1a").unwrap();
+    m.mount(0, disk.into_bytes(), false).unwrap();
+    let steps = session::parse(
+        "boot\nuntil contains Enter today's date\ntype 1-01-80\\r\nuntil endswith A>\ntype copy p.txt prn\\r\nuntil endswith A>\n",
+    )
+    .unwrap();
+    session::run(&mut m, &steps).unwrap();
+    assert_eq!(m.printed(), Some(&b"printed line\r\n"[..]));
+}
