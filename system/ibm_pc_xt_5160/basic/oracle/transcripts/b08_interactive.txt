@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + b:label:BASIC
+# program: the original on the disk
+|30 PRINT "skipped"
+|40 PRINT "end"
+|Ok
+|save "b:p"
+|Ok
+|save "b:pa",a
+|Ok
+|new
+|Ok
+|load "b:p"
+|Ok
+|list 20-
+|20 GOTO 40
+|30 PRINT "skipped"
+|40 PRINT "end"
+|Ok
+|system
+|
+|A>type b:pa.bas
+|10 PRINT "hi";2*3
+|20 GOTO 40
+|30 PRINT "skipped"
+|40 PRINT "end"
+|
+|A>

@@ -1,0 +1,28 @@
+# oracle: basic loops
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + LOOPS.BAS
+# program: the original on the disk
+|sum 385
+| 10  7  4  1
+|sub 1
+|sub 2
+|while 5
+|big
+|two
+| 7 seven
+| 7
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

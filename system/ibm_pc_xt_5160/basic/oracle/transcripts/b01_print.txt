@@ -1,0 +1,28 @@
+# oracle: basic print
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + PRINT.BAS
+# program: the original on the disk
+|integers 3  3  1 -5
+|singles .3333334  2500  .00001  123456789
+|doubles .3333333333333333  12345678.9
+|strings abcbcdef 3
+|  3.14   $1,234.50  -1.230E-04
+|tab                here   x
+|FF 10 A 97  42 12.5
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

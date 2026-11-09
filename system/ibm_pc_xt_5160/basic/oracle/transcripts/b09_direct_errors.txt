@@ -1,0 +1,28 @@
+# oracle: basic
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + -
+# program: the original on the disk
+|The IBM Personal Computer Basic
+|Version D2.00 Copyright IBM Corp. 1981, 1982, 1983
+|61766 Bytes free
+|
+|Ok
+|key off
+|Ok
+|print 1/0
+|Division by zero
+|
+| 1.701412E+38
+|Ok
+|goto 100
+|Undefined line number
+|Ok
+|x$="a"+1
+|Type mismatch
+|Ok
+|foo bar
+|Syntax error
+|Ok
+|system
+|
+|A>
+|

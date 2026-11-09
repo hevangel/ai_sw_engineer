@@ -1,0 +1,28 @@
+# oracle: basic seq
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + SEQ.BAS,b:label:BASIC
+# program: the original on the disk
+| 1 item 1 .25
+| 2 item 2 .5
+| 3 item 3 .75
+|plain line-1
+|
+|A>type b:seq.dat
+|1,"item 1",.25
+|2,"item 2",.5
+|3,"item 3",.75
+|plain line
+|appended
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

@@ -1,0 +1,28 @@
+# oracle: basic math
+# machine: MartyPC 05c0d088 IBM 5160, 256 KiB, XT BIOS 1982-11-08, PC DOS 2.00 disk 1 + MATH.BAS
+# program: the original on the disk
+| 1.414214  .841471  .5403023  3.141593
+| 2.718282  2.302585 -3 -2  3 -1
+| 1024  1.414213  3  4  .3333334  .3333333432674408
+| 10
+|Overflow
+|
+| 1.701412E+38
+|
+|A>
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
