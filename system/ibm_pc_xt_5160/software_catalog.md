@@ -25,7 +25,7 @@ Sizes from the disk's directory. All are Microsoft/IBM 1983.
 |---|---:|---|---|
 | **SORT.EXE** | 1,280 | DOS 2 filter: sorts the lines of standard input to standard output; `/R` reverse, `/+n` sort on column n | **done**: `sort/` (#281), selected first (below) |
 | MORE.COM | 384 | filter: pages standard input 24 lines at a time | **done**: `more/` (#286) |
-| ASSIGN.COM | 896 | redirects drive letters (resident) | resident, patches DOS |
+| ASSIGN.COM | 896 | redirects drive letters (resident) | **done**: `assign/` (#296) |
 | GRAPHICS.COM | 789 | resident Print Screen for graphics | needs a printer model |
 | TREE.COM | 1,513 | lists directories (DOS 2 subdirectories), `/F` with files | **done**: `tree/` (#285) |
 | SYS.COM | 1,408 | copies the system files | writes system areas |
@@ -66,3 +66,4 @@ Third-party XT-era applications (word processors, spreadsheets, games) are not o
 7. DISKCOMP.COM (#291), done 2026-11-08: identical on 8 cases (identical, changed and other disks, compare more, one drive).
 8. EDLIN.COM (#293), done 2026-11-08: identical on 14 interactive cases, each followed by TYPE of the result. The IBM binary is revision 12 (older than the published source); its T leaves a byte of COMMAND.COM from memory at the end of the file, which the rewrite reproduces by loading high (spec D1).
 9. DEBUG.COM (#295, disk 2), done 2026-11-08: identical on 12 cases (R D E F S M C H A U T G N W, an .EXE); the rewrite loads high so the program segments it creates are the original's (CS=08F1). Its assembler covers the integer forms the cases use (spec D-ASM).
+10. ASSIGN.COM (#296), done 2026-11-09: identical on 8 cases; the resident INT 21h/25h/26h hooks are assembly in the original's layout (spec D1, D2). PRINT and GRAPHICS wait on a printer model for an oracle of the printed bytes.

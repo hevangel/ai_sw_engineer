@@ -57,6 +57,7 @@ Catalog of candidates: [software_catalog.md](software_catalog.md) (ai_engineer#8
 | DISKCOMP.COM (PC DOS 2.00) | 1983 | IBM (David Litton, Mark Tyson) | reimplemented in Rust; identical on both emulators, 8 cases | [diskcomp/](diskcomp/README.md) |
 | EDLIN.COM (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented in Rust; identical on both emulators, 14 interactive cases | [edlin/](edlin/README.md) |
 | DEBUG.COM (PC DOS 2.00, disk 2) | 1983 | Microsoft for IBM | reimplemented in Rust; identical on both emulators, 12 cases | [debug/](debug/README.md) |
+| ASSIGN.COM (PC DOS 2.00) | 1983 | Microsoft for IBM | reimplemented (transient part Rust, resident hooks assembly); identical on both emulators, 8 cases | [assign/](assign/README.md) |
 
 ## Sources
 
