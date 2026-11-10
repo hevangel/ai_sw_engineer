@@ -1,0 +1,32 @@
+[package]
+name = "basic"
+version = "0.1.0"
+edition = "2021"
+description = "IBM PC BASIC (Cassette BASIC C1.10 + Disk BASIC D2.00) for the IBM PC XT 5160, reimplemented in Rust"
+license = "MIT"
+publish = false
+
+[lib]
+# Fixed crate name so main.rs and tests stay identical across titles.
+name = "software"
+path = "src/lib.rs"
+
+[[bin]]
+name = "basic"
+path = "src/main.rs"
+test = false
+
+[dev-dependencies]
+# The Rust emulator the four-way test runs PC DOS 2.00 on, and the disk tool.
+system_emulator = { package = "ibm_pc-emulator", path = "../../ibm_pc/emulator" }
+pcdisk = { path = "../../ibm_pc/platform/tools/pcdisk" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false

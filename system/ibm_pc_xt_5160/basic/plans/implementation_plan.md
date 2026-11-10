@@ -1,7 +1,8 @@
 # IBM PC BASIC rewrite: implementation plan
 
 Issue [#301](https://github.com/hevangel/ai_sw_engineer/issues/301). Phase 1 (this document, the spec, the new
-cases) done 2026-11-09; phase 2 (the implementation) waits for the decisions at the end.
+cases) done 2026-11-09. The user accepted its recommendations on 2026-11-10 (§5, decisions recorded there); the
+medium-model route moved into the toolchain, and M0 and M1 are done (§3, status column).
 
 ## 1. Toolchain findings (measured)
 
@@ -49,7 +50,8 @@ Rust beyond what the earlier titles achieved.
 
 ### The medium-model proof (done in this phase)
 
-[medium_model/](medium_model/) builds one source twice:
+Phase 1's proof (now the toolchain's route, [medium_model/](medium_model/README.md): `llvm-i8086/scripts/build_rust_medium.sh`,
+`llvm-i8086/rt/medium/`, test `llvm-i8086/tests/medium/`) built one source twice:
 
 - `tiny.com` (2,110 bytes): no padding, near calls, `link_com.ld`;
 - `medium.exe` (120,009 bytes): the same program plus 150 generated functions (~95 KB of code), **every
@@ -62,7 +64,7 @@ Both ran under PC DOS 2.00 on MartyPC's IBM 5160 and printed exactly the text of
 logic (`FE44A5E2E4723C00 ... 014A 40D12DE0 $`). Code-size overhead of all-far calls: 114,863 bytes in
 segments vs 112,988 near (1.7%, including two per-segment runtime copies).
 
-What it took (`medium_model/scripts/`):
+What it took (now in `llvm-i8086/scripts/`, spec/abi.md D10):
 
 1. **`ir_medium.py`**, an IR pass between rustc's IR and `llc`:
    - `--far-intrinsics`: calls to `__far_r8/__far_r16/__far_w8/__far_w16(seg, off[, v])` (declared
@@ -117,6 +119,7 @@ dispatches with `match`); calls inside one segment are far too (an optimisation 
 
 | M | Content | Cases it must pass | Size (KB) |
 |---|---|---|---|
+| (status) | **M0 and M1 done 2026-11-10**: `scripts/build.sh` → `build/basic.com` (22,692 bytes; segment 0: 4,390 bytes of code, 3,024 of rodata, 4,102 of .bss and stack; far segment 1: 9,635 bytes of code — `MEDIUM_CAP0=0x1000` keeps segment 0 small on purpose so the far route is exercised from the start; all in one segment it was 22,689 bytes); M1's cases and b21 identical on the host model, on the Rust emulator and on MartyPC; the original identical on the Rust emulator on all 31 cases | | |
 | M0 | Medium-model build moved into the toolchain (after approval, §5): `build_rust_medium.sh`, the pass, per-segment runtime, linker script template; a hello `BASIC.COM` that prints the banner with `Bytes free` from a real 64 KiB data segment and returns on `system` | — (a smoke run on MartyPC and the Rust emulator) | 3 |
 | M1 | Screen output, key line, line input (Enter, backspace), crunch/list, line storage, direct mode, `ERROR n`, error messages, NEW/LIST/RUN skeleton, WIDTH, KEY | b29, b30, b14-b18, b31 | 25 |
 | M2 | Evaluator, MBF single/double, FIN/FOUT, PRINT USING, transcendentals, RND, variables/arrays/DEF FN, control flow, strings, ON ERROR, `basic FILE` (ASCII LOAD) | b01, b02, b03, b09, b10, b11, b12, b20, b27, b28 | 60 |
@@ -138,7 +141,14 @@ Each milestone ends with the host replay and MartyPC runs of its cases green and
 | Ctrl-Break and SHELL cannot be driven by the harness | implement as GW; document as untested; SHELL case left out (as for b01-b09) |
 | Hidden ROM behaviour the cases do not show | more cases per milestone (the harness takes ~12 s per case) |
 
-## 5. Decisions needed from the user
+## 5. Decisions (asked 2026-11-09, answered 2026-11-10: all recommendations accepted)
+
+Answers: (1) the route moved into `llvm-i8086/scripts/` and `rt/medium/` with the test `tests/medium/`;
+(2) the i8086-ld header change stays; (3) BASIC.COM ships as a multi-segment `.EXE` (spec D1); (4) the simple
+layout, recorded as spec D4; (5) only what programs are documented to rely on is reproduced in 0000h-0CB5h
+(spec D2); (6) graphics and sound wait for M5 with screen-image capture.
+
+The questions as asked:
 
 1. **Toolchain extension**: approve moving `medium_model/scripts/{ir_medium.py, seg_rt.py}` into
    `llvm-i8086/scripts/` as the supported medium-model route (with a run test in

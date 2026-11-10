@@ -383,8 +383,9 @@ milestone; none is covered by a committed case yet.
 | ID | Difference | Why |
 |---|---|---|
 | D1 | The rewrite is a multi-segment `.EXE` file named BASIC.COM (DOS runs it by its `MZ` signature), not a 16,256-byte `.COM` | its code does not fit one 64 KiB segment (implementation plan, toolchain findings) |
-| D2 | Interpreter state (FAC, pointers, stacks) lives in the rewrite's own data segment; the BASIC data segment holds what programs can observe at the original's offsets (TXTTAB, VARTAB, program text, variables, strings, file buffers) | the original's 0000h-0CB5h work area is ROM/BASIC.COM internal; mirroring all of it is not required by any case. PEEKs into that area other than the documented words differ |
+| D2 | Interpreter state (FAC, pointers, stacks, soft keys, screen state) lives in the rewrite's own data segment; the BASIC data segment holds what programs can observe at the original's offsets: TXTTAB (0030h) and VARTAB (0358h), the 0 at 0CB5h, program text from 0CB6h, variables, arrays, strings and file buffers. The rest of 0000h-0CB5h is zeros (decision of 2026-11-10: only what programs are documented to rely on is reproduced) | the original's work area there is ROM/BASIC.COM internal; PEEK/POKE of other addresses in it differ (known difference) |
 | D3 | No ROM calls; the ROM BASIC is not needed | the title's goal |
+| D4 | Load layout (decision of 2026-11-10): the `.EXE`'s segments follow the PSP (segment 0: start code, segment-0 functions, Rust data and a 4 KiB stack; then the far code segments), and BASIC's 64 KiB data segment is a DOS block (function 48h) above them. The original's data segment is at PSP+403h, below nothing but its own discarded start code | the rewrite's code is bigger than 16 KiB. Offsets in the data segment are the original's, so VARPTR, PEEK of the observable words and `Bytes free` agree (61766 with 256 KiB); the absolute segment (`DEF SEG` default, `VARSEG`-like PEEKs of DS) differs, and with less than about 140 KiB free the rewrite's data segment is smaller than the original's |
 
 ### Assumptions
 
@@ -393,6 +394,11 @@ milestone; none is covered by a committed case yet.
 | A1 | `CLEAR ,n` sets the top of BASIC memory to n and keeps the 512-byte stack below it as at start (b28 gives one data point) |
 | A2 | The warning format for Overflow / Division by zero is message, CR LF, then one more CR LF (b03, b06, b09, b13 agree with it) |
 | A3 | TXTTAB depends on /F and /S as GW-BASIC's GWINIT (file data blocks below the text); only the default (0CB6h) is checked |
+| M1-N1 | Until FIN (M2) the tokenizer keeps numeric constants with a fraction, an exponent, a `!`/`#` suffix or above 32767 as text (integers, `&H`, `&O` and line numbers are stored as the original stores them) |
+| M1-A1 | PAINT, COM, CIRCLE, DRAW and PLAY (FE 8F-93) give `Advanced Feature` (b18 shows PLAY); the later words ERDEV ... PMAP (FE 95-9E) give `Syntax error` until U3 is read from BASIC.COM |
+| M1-K1 | KEY LIST shows a control character of a soft key (CR) as a blank (the transcripts show a blank, b24) |
+| M1-K2 | The key line shows CR as character 1Bh (a left arrow, GW `FKEYCR`) and LF as `<`; the transcripts render both as blanks, so only a framebuffer comparison could tell |
+| M1-W1 | WIDTH 40 sets BIOS mode 0 or 1 and WIDTH 80 mode 2 or 3, keeping the colour-burst bit of the mode BASIC found at start; on a monochrome adapter WIDTH does not change the mode |
 
 ### Observations needing care
 

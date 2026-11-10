@@ -8,16 +8,18 @@ must do the same. Behaviour: [spec.md](spec.md). Phase 1, 2026-11-09.
 | Range | Original | Rewrite |
 |---|---|---|
 | PSP (DOS gives the program all memory) | BASIC.COM's PSP; the command tail is copied to DS:01F9h | the same PSP; the tail is parsed from PSP:0080h |
-| PSP+10h .. PSP+403h paragraphs | BASIC.COM's code (16,256 bytes from PSP:0100h) | the rewrite's code and Rust data: a multi-segment `.EXE` (spec D1). **Open decision M-1**: where it is loaded (see below) |
-| PSP+403h, 64 KiB | BASIC's data segment (DS, DEF SEG default): spec §3 | a 64 KiB far segment with the same offsets for the observable data (spec D2) |
+| PSP+10h .. PSP+403h paragraphs | BASIC.COM's code (16,256 bytes from PSP:0100h) | the rewrite's segments from the PSP up: segment 0 (start, segment-0 code, Rust data, stack), then the far code segments (spec D1, D4) |
+| PSP+403h, 64 KiB | BASIC's data segment (DS, DEF SEG default): spec §3 | a 64 KiB DOS block (function 48h) above the program, with the original's offsets for the observable data (spec D2, D4) |
 | F600:0000-7FFF | ROM BASIC, called through BASIC.COM's far-jump table and RAM hooks | not used |
 
 The original's DS is `PSP+403h` (the PSP segment depends on what DOS has resident), so DEF SEG's segment and `VARPTR` are offsets in it. Programs cannot see the absolute segment
 without PEEKing low memory; none of the cases does.
 
 **Bytes free** must come out as 61766 with 256 KiB: the data segment must be a full 64 KiB (it is when at
-least 64 KiB remain after the code, as on the oracle machine). The rewrite asks DOS for its blocks with
-functions 4Ah/48h (the original: 4Ah with BX=FFFFh to learn the size, then 4Ah to take it all).
+least 64 KiB remain after the code, as on the oracle machine). The rewrite gives back what DOS gave the `.EXE`
+beyond its image (`far_shrink`, function 4Ah) and asks for 1000h paragraphs with function 48h (`far_alloc`;
+if DOS has less, the largest block); the original takes everything with 4Ah (BX=FFFFh to learn the size).
+MEMSIZ = paragraphs × 16 − 2 − 200h, Bytes free = MEMSIZ − VARTAB (O b09, b29; M0).
 
 ## Keyboard and screen
 
@@ -25,7 +27,7 @@ functions 4Ah/48h (the original: 4Ah with BX=FFFFh to learn the size, then 4Ah t
 |---|---|---|
 | INT 16h (ROM BASIC's keyboard routines, through BIOS) | read keys, check for Ctrl-Break / Ctrl-C (INT 1Bh hooked) | the same BIOS calls |
 | INT 10h function 0Fh at start | the video mode (saved at DS:0048h, 071Ah); 80 or 40 columns | the same |
-| Video memory B800h (CGA) / B000h (MDA), written directly and through INT 10h | text, cursor (INT 10h 02h), scrolling, the key line on row 25 | the same addresses and attributes (7 = normal), so the transcripts and a framebuffer hash agree |
+| Video memory B800h (CGA) / B000h (MDA), written directly and through INT 10h | text, cursor (INT 10h 02h), scrolling, the key line on row 25 | the same: cells written with inline far stores (attribute 7, the key line's text 70h), scrolling by `far_copy`, the cursor by INT 10h function 2, WIDTH by function 0 (spec M1-W1), the mode at start by function 0Fh; keys by INT 16h function 0 |
 | INT 1Bh, 1Ch, 0, 4 vectors | saved at start (DS:0712h-071Ah, from 0000:0000-0012h and 006Ch-0072h), restored at SYSTEM | the same set |
 
 The screen editor keeps a per-row "logical line continues" table (GW `SCNDRV` terminator table) so Enter
@@ -87,4 +89,4 @@ U7), and disk files with drive and path.
 |---|---|
 | U6 | BASIC.COM's DOS-error-to-BASIC-error table |
 | U7 | What CAS1: gives under BASIC.COM |
-| M-1 | Load address of the rewrite (decision for the user, plan §"Decisions"): low (code right after the PSP, data segment above it: Bytes free stays 61766 at 256 KiB, absolute segments differ) or loaded so that the data segment sits exactly at PSP+403h (code above it); the cases cannot tell the two apart |
+| M-1 | Decided 2026-11-10: the simple layout (code, then data), spec D4 |
