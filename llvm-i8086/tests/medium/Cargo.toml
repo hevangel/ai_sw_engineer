@@ -1,0 +1,17 @@
+[package]
+name = "medium-model-tests"
+version = "0.1.0"
+edition = "2021"
+description = "llvm-i8086's medium-model route (spec/abi.md D10) built and run under PC DOS 2.00 on the Rust emulator"
+license = "MIT"
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+system_emulator = { package = "ibm_pc-emulator", path = "../../../system/ibm_pc/emulator" }
+pcdisk = { path = "../../../system/ibm_pc/platform/tools/pcdisk" }
+
+[profile.test]
+opt-level = 3

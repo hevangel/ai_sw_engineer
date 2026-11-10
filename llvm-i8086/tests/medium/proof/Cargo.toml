@@ -1,16 +1,15 @@
 [package]
-name = "medium"
+name = "medium_proof"
 version = "0.1.0"
 edition = "2021"
+description = "The medium-model proof program (llvm-i8086 spec/abi.md D10): code in several segments"
+license = "MIT"
 publish = false
 
 [[bin]]
-name = "medium"
+name = "medium_proof"
 path = "src/main.rs"
 test = false
-
-[features]
-pad = []
 
 [profile.dev]
 panic = "abort"

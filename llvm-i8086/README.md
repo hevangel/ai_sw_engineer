@@ -30,7 +30,7 @@ Done in the last round: floating point and `i128`, branchless booleans, `loop`/`
 
 Not done, and why: `in`/`out` intrinsics (inline asm and the HAL do it), 80186+ instructions and x87 (the chip has none).
 
-The tiny model is the default program model; programs with several segments use far data pointers (D7), far calls (D8, `cc 1000`) and segment relocations (D9).
+The tiny model is the default program model; programs with several segments use far data pointers (D7), far calls (D8, `cc 1000`) and segment relocations (D9). Rust programs with more than 64 KiB of code use the medium-model route (D10: `scripts/build_rust_medium.sh`, `rt/medium/`, test `tests/medium/`).
 
 ## Layout
 

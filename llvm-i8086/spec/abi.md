@@ -74,6 +74,39 @@ Not done: a far *data* object larger than 64 KiB (the compiler takes one segment
 
 Inline assembly (used by the pass and available to C-like IR) takes the constraints `r` and `q` (any register of the operand's width), `a b c d S D` (AX, BX, CX, DX, SI, DI or their byte halves) and the `{reg}` form; operands print as register names.
 
+### Medium model from Rust (implemented 2026-11-10, D10)
+
+A Rust program whose code exceeds one segment is built in the **medium model**: code in several segments, every
+function far (D8), all data, `.bss` and the stack in the first segment (DS = SS for all code), more data reached
+through far pointers (D7). Rust cannot say `cc 1000` or `addrspace(1)`, so an IR pass does it after rustc
+(`scripts/build_rust_medium.sh`, which drives the steps below; rust/README.md "Medium model" has the recipe):
+
+- `scripts/ir_medium.py --far-intrinsics`: calls of the `extern "C"` functions `__far_r8(seg, off)`,
+  `__far_r16`, `__far_w8(seg, off, v)`, `__far_w16` become `load`/`store` through `ptr addrspace(1)` (offset low
+  word, segment high word), which `I8086FarPointers` expands inline: no call per access.
+- `scripts/ir_medium.py --medium SIZES`: every defined function, and every declared one not named in `--near`,
+  gets `cc 1000`, and so does every direct call of it; functions are packed first-fit-decreasing by size (from a
+  near-model compile of the same IR) into segment 0 (`--seg0` names, `--cap0` bytes, sections `.text.*`) and far
+  segments of `--cap` bytes (`section ".far.text.<n>.<name>"`). **Indirect calls and taken function addresses are
+  refused**: a 16-bit function pointer cannot name another segment, so the program may not use `fn` pointers,
+  `dyn` traits or anything of `core` that does (in particular `core::fmt`: the panic handler must not format, and
+  nothing may call `panic!` with arguments that need formatting in a way that survives LTO).
+- `scripts/seg_rt.py`: `llc` calls the runtime library (`rt/`, `memcpy`, `__udivsi3`, `__muldi3` ...) with near
+  calls from any segment, so every far segment that calls one gets its own copy of `rt/asm/*.s` and `rt/ir/di.ll`
+  with the symbols renamed `<sym>__s<n>`, and its calls are renamed to match.
+- `scripts/medium_ld.py <n>`: the linker script: `main` from offset 100h (start code, segment 0's code, rodata,
+  data, bss, stack, as `system/ibm_pc/platform/link_exe_seg.ld`), then `far1`..`far<n>` (`SEGMENT = AUTO`), then
+  `.endmark`.
+- `rt/medium/start_far.s` (the start: clears `.bss`, keeps the PSP in `__psp`, `call main@seg:main`, a 4 KiB stack
+  `__stack_top`, `__prog_end` last) and `rt/medium/far.s` (the far runtime pieces: `far_int21`/`far_int10`/`far_int16`
+  with a register block, `far_exit`, `far_shrink`, `far_alloc`, `far_largest`, `far_psp`, `far_copy`), all `retf`.
+  A program's own assembly must return with `retf` too.
+
+Every far call has a segment relocation, so `i8086-ld --exe` writes as many header sectors as the table needs.
+Cost measured on the proof program: 1.7% more code than the near model. Calls inside one segment are far as well
+(an optimisation left open). Test: `tests/medium/tests/dos_run.rs` builds `tests/medium/proof/` (about 100 KB,
+three code segments) and runs it under PC DOS 2.00 on the Rust emulator against the host's result.
+
 ## Frames (implemented 2026-10-25, D4)
 
 SP cannot address memory (there is no `[sp+disp]`), so a function with stack objects (locals, spills, incoming stack arguments) addresses its frame through BP, and BP is therefore reserved in every function. A function without stack objects has no frame pointer and no prologue.

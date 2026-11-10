@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Medium-model IR pass for llvm-i8086 (proof of concept).
+"""Medium-model IR pass for llvm-i8086 (spec/abi.md D10; driven by build_rust_medium.sh).
 
     ir_medium.py <in.ll> <out.ll> [--far-intrinsics] [--medium SIZES|-] [--seg0 NAME,...]
                  [--cap0 BYTES] [--cap BYTES] [--near NAME,...]

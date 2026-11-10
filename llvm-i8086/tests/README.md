@@ -18,4 +18,6 @@ exact bytes and MartyPC's disassembly of thousands of random instances of every
 opcode, captured from a real chip. It checks that each decodes with the right
 mnemonic and nothing left over, and that the printed text assembles back to the
 same bytes (or to an alternative encoding that disassembles identically).
+- `medium/` — the medium-model route (spec/abi.md D10): `proof/` (about 100 KB of Rust in three code segments) built by `scripts/build_rust_medium.sh` and run under PC DOS 2.00 on the Rust emulator by `tests/dos_run.rs` against the host (`cargo test --release -- --ignored`, needs `IBM_PC_ROMS` and `XT_ROMS`)
+
 Run all with `scripts/run_tests.sh`.

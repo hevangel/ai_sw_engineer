@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "medium"
+name = "medium_proof"
 version = "0.1.0"

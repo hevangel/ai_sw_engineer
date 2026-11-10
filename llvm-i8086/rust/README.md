@@ -29,3 +29,24 @@ Variadic functions and `byval` arguments compile (`spec/abi.md` D3a), so `core::
 Floating point and `i128` work: `f32`, `f64` and 128-bit integers compile to the soft-float and 128-bit routines of `compiler_builtins` (`rt/obj/compiler_builtins.o`, abi.md D6); `tests/smoke/float_rs` prints the bit patterns of 69 lines of arithmetic, conversions and 128-bit operations, and the text is identical to what the host's hardware floating point gives (`system/ibm_pc/emulator/tests/i8086_rust.rs`).
 
 Known limits: the builds that do not fit the 64 KiB tiny model are skipped by the matrix test, which says so: opt-level 0 (70 to 95 KB) and the `llc -O0` builds at opt-level 1 and 3. Everything else agrees with the host: `scripts/stress_matrix.sh` builds `stress_rs` at opt-level 0, 1, 2, 3, `s`, `z` with `llc -O2` and `-O0`; all twelve compile (opt-level 0 needed the half-precision and signed-multiply-with-overflow libcalls), eight of the twelve fit and run on the bare 8088 core and print the host's text. Finding this took two backend fixes: a displacement wider than 16 bits tripped an assertion when compiling `core`, and values pinned to the single-register class `GR16_BASE` could not be allocated (selection now makes a short-lived copy at each address use and `shouldCoalesce` refuses to join into the address classes).
+
+## Medium model (more than 64 KiB of code)
+
+`scripts/build_rust_medium.sh <crate> <bin> <out>` builds a crate whose code needs several segments
+(spec/abi.md D10): every function far, packed into segments by size, per-segment runtime copies, far data through
+`__far_r8/__far_r16/__far_w8/__far_w16`. It leaves `<bin>_medium.o`, `rt_s*.o` and the linker script `<bin>.ld` in
+`<out>`; link them as a `.EXE`:
+
+```bash
+llvm-i8086/scripts/build_rust_medium.sh mycrate prog build
+llvm-mc -triple=i8086 -filetype=obj llvm-i8086/rt/medium/start_far.s -o build/start_far.o
+llvm-mc -triple=i8086 -filetype=obj llvm-i8086/rt/medium/far.s -o build/far.o
+i8086-ld -T build/prog.ld --exe build/prog.exe build/start_far.o build/far.o [own .o, retf] \
+         build/prog_medium.o build/rt_s*.o llvm-i8086/rt/obj/*.o
+```
+
+The program's `main` is `#[no_mangle] extern "C" fn main() -> !`; it declares the far pieces it uses
+(`fn far_int21(r: *mut Regs)` ...) as `extern "C"`. Limits: no function pointers or `dyn` (the pass refuses them),
+no `core::fmt` (a panic handler that only exits), every assembly routine returns with `retf`. Example and test:
+`tests/medium/` (`cargo test --release -- --ignored` with `IBM_PC_ROMS` and `XT_ROMS`); first title: the IBM PC
+XT's BASIC (`system/ibm_pc_xt_5160/basic`).

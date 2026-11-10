@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Medium model, libcalls (proof of concept). llc calls the runtime library (rt/) with near
+"""Medium model, libcalls (spec/abi.md D10; driven by build_rust_medium.sh).
+llc calls the runtime library (rt/) with near
 calls whatever segment the caller is in, so every code segment N >= 1 gets its own copy of
 the routines it calls, renamed <sym>__sN and placed in sections .far.text.N.rt.<sym>.
 
