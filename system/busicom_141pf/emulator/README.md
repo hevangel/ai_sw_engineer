@@ -30,6 +30,11 @@ The CLI accepts the deterministic schedule documented in
 [spec/spec.md](spec/spec.md), prints oracle-format output and exits nonzero on
 invalid input. `--help` shows usage.
 
+Related documents: [machine contract](spec/machine_contract.md) (shared with the SV
+system issue), [inventory of existing emulators](spec/inventory.md), and the
+independent-simulator comparison `../platform/scripts/compare_inside4004.py`
+(42/42 identical tapes against inside4004, see [verification](report/verification.md)).
+
 ## Debugger
 
 `busicom-emulator debug <image.bin>` runs instructions from reset with fixed

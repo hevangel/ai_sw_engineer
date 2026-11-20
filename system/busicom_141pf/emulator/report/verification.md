@@ -86,3 +86,29 @@ use hand-assembled programs whose expected state follows the MCS-4 data sheet.
 Limits: breakpoints stop after the instruction at the address ran, because the
 pinned model exposes state only through its per-instruction debug log; no
 watchpoints, disassembler or reverse stepping.
+
+---
+
+# Verification - 2026-11-20 (independent simulator)
+
+Compared the emulator against `inside4004` (Python RTL-level MCS-4 model by
+Patrick Leboutillier, CC BY-NC-SA 4.0, commit
+`43c1a077c7fec2c7a3ff21e874f943ec41e00e61`, cloned outside the repository and
+run, not copied). Its shipped `141-PF/ROM.bin` text converts to 1280 bytes
+with SHA-256 `c6af325d...ceb7`, identical to the original ROM used here.
+
+| Command | Result |
+| --- | --- |
+| `py platform/scripts/compare_inside4004.py --inside4004 <clone> --rom <original-rom> --emulator emulator/target/release/busicom-emulator.exe` | 42/42 examples identical, every printed row (digits, symbol column A, symbol column B), 164 s on 4 workers |
+
+Method: each example's setup keys, selector changes and keystrokes are fed to
+`inside4004` through its key buffer; the emulator runs the same example from
+the committed schedule. Blank rows are ignored. This compares complete tapes,
+stricter than the suffix rule of the committed oracle. Differences from the
+simulator that the script handles: it has no diamond (`ST`) or `00` key (added
+to its keyboard table at run time) and never clears the red state, so paper
+colour is not compared.
+
+The tapes were compared from independent code, but both run the same ROM, so
+the check covers the emulator's board wiring, keyboard scan, printer decode and
+pacing, not the firmware itself. Lamp state and cycle timing are not compared.

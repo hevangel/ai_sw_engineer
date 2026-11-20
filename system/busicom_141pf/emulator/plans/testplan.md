@@ -27,3 +27,5 @@
 The exact original-ROM regression is the behavior gate. This core also drives
 the old secondary adapter; independent evidence is the RTL validation recorded
 in the oracle provenance, not a claim that two wrappers are independent.
+
+7. Independent simulator: with a local clone of inside4004 and the original ROM, run `platform/scripts/compare_inside4004.py`. It replays every manual example through that simulator and requires the complete printed tape to match the emulator's row for row (see report/verification.md and spec/inventory.md).
