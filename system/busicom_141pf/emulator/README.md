@@ -30,6 +30,27 @@ The CLI accepts the deterministic schedule documented in
 [spec/spec.md](spec/spec.md), prints oracle-format output and exits nonzero on
 invalid input. `--help` shows usage.
 
+## Debugger
+
+`busicom-emulator debug <image.bin>` runs instructions from reset with fixed
+selector/key inputs and prints one trace line per instruction: program
+counter, opcode (and second byte), ACC, carry, TEST and R0..RF **before** the
+instruction. Options: `--steps N`, `--skip N`, `--break ADDR` (repeatable, hex
+with `0x` or decimal), `--precision`, `--rounding`, `--key`, `--dump` (4002
+RAM characters/status/ports and 4001 ports at the end).
+
+```bash
+busicom-emulator debug /path/to/rom.bin --steps 20 --break 0x06e --dump
+```
+
+The same facilities are in the library (`busicom_emulator::debug`):
+`enable_cpu_probe`, `step_instruction`, `run`, `run_to_breakpoint`,
+`ram_char`, `ram_status`, `ram_port` and `rom_port`. A breakpoint stops
+*after* the instruction at that address ran; the next step shows its effect.
+The pinned 4004 model keeps its registers private, so CPU state is read from
+the model's own per-instruction debug log through a thread-local probe. The
+probe is off by default and slows stepping; plain replays are unaffected.
+
 ```bash
 cargo test --manifest-path system/busicom_141pf/emulator/Cargo.toml
 cargo fmt --manifest-path system/busicom_141pf/emulator/Cargo.toml -- --check

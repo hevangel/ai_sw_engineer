@@ -15,7 +15,13 @@
    shares no code with this crate, so agreement cross-checks the emulator and
    the original firmware against an independent model. Opt-in for the same
    ROM reason; a debug run takes a few minutes.
-5. Run host format and clippy checks. Build the CLI and exercise schedule input
+5. Debugger (`tests/debug.rs`): step hand-encoded programs and check PC, ACC,
+   registers, opcode/operand bytes, two-cycle instruction handling, breakpoints
+   and RAM/port reads against MCS-4 data sheet semantics (LDM, XCH, JUN, FIM,
+   FIN, SRC, WMP). Stepping shares `advance`'s cycle path; the original-ROM
+   replay (item 3) and an exact trace diff before and after the refactor
+   guard that path.
+6. Run host format and clippy checks. Build the CLI and exercise schedule input
    and error exit status. Firmware and LLVM sources are unchanged.
 
 The exact original-ROM regression is the behavior gate. This core also drives

@@ -1,5 +1,7 @@
 //! Busicom board wiring around the pinned Rust MCS-4 chip models.
 use arbitrary_int::u4;
+pub mod debug;
+
 use chips::{mcs4::shifter4003::Shifter, mcs4::Board, shifter::Direction};
 
 const DIGITS: [&str; 13] = [
@@ -12,12 +14,24 @@ const SYMBOL_B: [&str; 13] = [
     "#", "*", "Ⅰ", "Ⅱ", "Ⅲ", "M+", "M-", "T", "K", "E", "Ex", "C", "M",
 ];
 
+pub(crate) fn validate_inputs(precision: u8, rounding: u8, key: u8) -> Result<(), String> {
+    if matches!(precision, 0..=6 | 8)
+        && matches!(rounding, 0 | 1 | 8)
+        && (key == 0 || (129..=160).contains(&key))
+    {
+        Ok(())
+    } else {
+        Err("invalid precision, rounding or key code".into())
+    }
+}
+
 /// Complete stock-RAM board, including keyboard and printer state.
 pub struct Emulator {
     image: Vec<u8>,
     board: Board,
     shifts: [Shifter; 3],
     spin: usize,
+    phase: usize,
     previous: u8,
     red: bool,
     row: [&'static str; 18],
@@ -35,6 +49,7 @@ impl Emulator {
             image: padded,
             shifts: [Shifter::new(); 3],
             spin: 0,
+            phase: 0,
             previous: 0,
             red: false,
             row: [" "; 18],
@@ -45,6 +60,7 @@ impl Emulator {
         self.board = Board::new(self.image.clone(), 2);
         self.shifts = [Shifter::new(); 3];
         self.spin = 0;
+        self.phase = 0;
         self.previous = 0;
         self.red = false;
         self.row.fill(" ");
@@ -62,35 +78,50 @@ impl Emulator {
         key: u8,
         half_spins: usize,
     ) -> Result<Vec<String>, String> {
-        if !matches!(precision, 0..=6 | 8)
-            || !matches!(rounding, 0 | 1 | 8)
-            || !(key == 0 || (129..=160).contains(&key))
-        {
-            return Err("invalid precision, rounding or key code".into());
-        }
+        validate_inputs(precision, rounding, key)?;
         let mut rows = Vec::new();
         for tick in 0..half_spins {
             let current = if tick < 64 { key } else { 0 };
             for _ in 0..1481 {
-                self.board.run_cycle();
-                self.update_io(precision, rounding, current, &mut rows);
+                self.step_cycle(precision, rounding, current, &mut rows);
             }
-            // The pinned core's JCN TEST polarity is inverted; match the
-            // reference capture. See platform/README.md "JCN TEST-pin polarity".
-            self.board.cpu.set_test_flag(self.spin.is_multiple_of(2));
-            if self.spin.is_multiple_of(2) {
-                let mut port = self.board.roms[2].ports.value();
-                if self.spin == 26 {
-                    port |= 1;
-                    self.spin = 0;
-                } else {
-                    port &= 14;
-                }
-                self.board.roms[2].ports = u4::new(port);
-            }
-            self.spin += 1;
         }
         Ok(rows)
+    }
+
+    /// Run one chip machine cycle (one 4004 instruction cycle) and its board
+    /// I/O. Every 1481st cycle the drum advances one half-spin.
+    pub(crate) fn step_cycle(
+        &mut self,
+        precision: u8,
+        rounding: u8,
+        key: u8,
+        rows: &mut Vec<String>,
+    ) {
+        self.board.run_cycle();
+        self.update_io(precision, rounding, key, rows);
+        self.phase += 1;
+        if self.phase == 1481 {
+            self.phase = 0;
+            self.end_half_spin();
+        }
+    }
+
+    fn end_half_spin(&mut self) {
+        // The pinned core's JCN TEST polarity is inverted; match the
+        // reference capture. See platform/README.md "JCN TEST-pin polarity".
+        self.board.cpu.set_test_flag(self.spin.is_multiple_of(2));
+        if self.spin.is_multiple_of(2) {
+            let mut port = self.board.roms[2].ports.value();
+            if self.spin == 26 {
+                port |= 1;
+                self.spin = 0;
+            } else {
+                port &= 14;
+            }
+            self.board.roms[2].ports = u4::new(port);
+        }
+        self.spin += 1;
     }
 
     fn update_io(&mut self, precision: u8, rounding: u8, key: u8, rows: &mut Vec<String>) {

@@ -29,6 +29,20 @@ against the hardware project's RTL (see its oracle README).
   the platform README. This is deterministic reference pacing, not a physical
   motor simulation or transistor-level timing model.
 
+## Debug contract
+
+`busicom_emulator::debug` steps whole instructions (a two-cycle JCN, FIM, FIN,
+JUN, JMS or ISZ is one step). Each step reports the CPU state before the
+instruction (PC, ACC, carry, TEST, R0..RF), the opcode byte, the second byte
+where one exists, and any printer rows emitted. State is captured from the
+pinned model's `log::debug!` record at each instruction boundary because its
+registers are private and `external/` is not edited. Breakpoints stop after
+the instruction at the address executed. RAM characters, status nibbles and
+the 4002/4001 port nibbles are readable at any time. Stepping uses the same
+cycle, drum and I/O path as `advance`, so a stepped run and a replay are
+cycle-identical. Not provided: watchpoints on writes, disassembly, reverse
+stepping and mid-instruction state.
+
 ## Output contract
 
 Emit `#EXAMPLE`, `#RESET`, `#STEP`, `LAMPS|n` and

@@ -62,3 +62,27 @@ fixed here; the exclusions shrink as the core is corrected. `SIGN`, the `00`
 key, entries with more decimals than DP and FL totals after `+`/`-` remain
 uncovered (not oracle-anchored). The emulator again ran the original image,
 not a newly compiled firmware image.
+
+---
+
+# Verification - 2026-11-20 (debugger)
+
+Added instruction-level debugging (issue #23, acceptance item "debugging
+facilities"): `busicom_emulator::debug` and the `debug` CLI subcommand.
+`advance` now runs through a shared `step_cycle`. Windows host, Rust/Cargo
+1.99.1; original ROM SHA-256 `c6af325d...ceb7` (checked, 1280 bytes).
+
+| Check | Result |
+| --- | --- |
+| `cargo test` (4 new `tests/debug.rs` tests plus existing) | Passed |
+| `cargo test --test replay original_rom_replays_all_manual_examples -- --ignored` with `BUSICOM_ROM` | Passed (42 manual examples against the committed original-ROM trace) |
+| Release CLI trace of `manual_examples.json` before vs after the refactor | Byte-identical (SHA-256 equal) |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | Passed |
+| `busicom-emulator debug <original-rom> --steps 12 --dump` | Starts `CLB`, `JCN`, `JMS 0B0`, then the init loop; exit 0 |
+
+The random-corpus replay (about 290 s in a debug build) was not rerun; the
+refactor is covered by the identical manual-example trace. The debugger tests
+use hand-assembled programs whose expected state follows the MCS-4 data sheet.
+Limits: breakpoints stop after the instruction at the address ran, because the
+pinned model exposes state only through its per-instruction debug log; no
+watchpoints, disassembler or reverse stepping.
