@@ -60,3 +60,6 @@ Blame-free: the question is which step let a shared assumption pass as verified.
   (FL result width, width-14 false overflow, zero-result scale, sqrt of a
   recalled radicand, `M±` alignment); caught by the seeded random corpus
   replayed on the original ROM.
+- `2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md` - the compiled
+  Rust firmware fails 3 of 1000 random corpus programs that the host core and the
+  original ROM pass; found by running the compiled image on the Rust emulator.
