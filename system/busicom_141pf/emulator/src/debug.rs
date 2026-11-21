@@ -257,6 +257,13 @@ impl Emulator {
         self.board.rams.get(chip).map(|r| r.ports.value())
     }
 
+    /// Drum half-spin counter (0..=26) and machine cycles into the current
+    /// half-spin (0..1481). The drum index pulse is raised when the counter
+    /// wraps; the printer's drum character is `(spin / 2 + 12) % 13`.
+    pub fn drum(&self) -> (usize, usize) {
+        (self.spin, self.phase)
+    }
+
     /// Port nibble of a 4001 ROM chip (outputs written by WRR, inputs set by the board).
     pub fn rom_port(&self, chip: usize) -> Option<u8> {
         self.board.roms.get(chip).map(|r| r.ports.value())

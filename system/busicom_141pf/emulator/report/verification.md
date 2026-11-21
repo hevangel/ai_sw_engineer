@@ -142,3 +142,26 @@ compiled firmware's tape exactly. See
 Both executors share the pinned `chips` cores, so this does not rule out a core
 defect that affects only compiled code; the RTL run is the remaining check.
 Not run: ROM-banked images (over 4096 bytes); the RTL primary executor.
+
+---
+
+# Verification - 2026-11-20 (R0534 debugging and printer drum-sync fix)
+
+Debugged the three compiled-firmware random-corpus failures with the emulator
+debugger (`failure_notes/2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md`).
+Per-key RAM of the compiled image matched the host core exactly, so the fault
+was in printing; `hammer_trace` showed the first hammer of the failing row one
+drum sector late, caused by a one-cycle race between the drum-index read and the
+TEST-edge wait in `__pr_print`. Fixed in `firmware/asm/drivers.s`; the image
+stays at 4096 bytes, SHA-256
+`47772d01067bbcae341189b32f8d5f92ee2b574730aaf03a8567e5ecf0baa2fd`.
+
+| Check | Result |
+| --- | --- |
+| The 3 failing programs vs the original ROM on the same schedule | Traces identical |
+| `cargo test --release --test replay -- --include-ignored` with `BUSICOM_ROM` and `BUSICOM_FIRMWARE` | 5 passed (42 manual examples, original ROM and compiled firmware) |
+| `platform/scripts/run_image.sh secondary --board xl` (separate adapter) on the fixed image, 42 examples | Tape equals the original-ROM oracle |
+| 1000-program random corpus, compiled firmware, `--ram 16`, `compare_oracle.py` | **1000/1000** (4438 steps, 5325 rows, 1244 lamp checkpoints), 754 s |
+
+Not run: the RTL primary executor on the fixed image, and a sweep that starts a
+print at every cycle of a drum revolution (the deterministic test for this race).

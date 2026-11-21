@@ -48,7 +48,7 @@ BUSICOM_FIRMWARE=system/busicom_141pf/firmware/build/target/firmware.bin \
 ```
 
 All 42 manual examples reproduce the original-ROM tape. Of the 1000 random
-programs the compiled image fails 3 (see the failure note in the verification
+programs the compiled image passes all 1000 (it failed 3 until the printer drum-sync fix; see the failure note in the verification
 record).
 
 Related documents: [machine contract](spec/machine_contract.md) (shared with the SV

@@ -61,5 +61,6 @@ Blame-free: the question is which step let a shared assumption pass as verified.
   recalled radicand, `M±` alignment); caught by the seeded random corpus
   replayed on the original ROM.
 - `2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md` - the compiled
-  Rust firmware fails 3 of 1000 random corpus programs that the host core and the
-  original ROM pass; found by running the compiled image on the Rust emulator.
+  Rust firmware printed 3 of 1000 random corpus rows one drum sector late (a
+  one-cycle TEST-edge race in the printer driver's drum sync, fixed); found by
+  running the compiled image on the Rust emulator and located with its debugger.
