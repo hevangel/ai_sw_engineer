@@ -82,12 +82,13 @@ its last recorded result is 42/42 in the firmware final report.
 
 ## Limits and gaps
 
-- **The native Rust system emulator cannot execute the compiled firmware**: it
-  models the stock board (2 × 4002, no RAM banks), while the compiled image is
-  linked for the banked xl board. Attempting it prints all-sector-0 rows
-  (observed 2026-10-25). Compiled images must go through
-  `platform/scripts/run_image.sh --board xl`. Adding xl-board support to the
-  native emulator is open work, tracked in the compiler-profile report.
+- **ROM bank switching is not in the native Rust system emulator.** Images up
+  to 4096 bytes run on it with `--ram 16` (the xl board's 16 x 4002); the
+  current compiled firmware is such an image and replays all 42 manual
+  examples identically to the original-ROM oracle there (see
+  [emulator verification](../emulator/report/verification.md)). Images over
+  4096 bytes (`i4004_pack --banks`) still need
+  `platform/scripts/run_image.sh --board xl`.
 - The image sits exactly at the 4,096-byte budget; any firmware growth fails
   the packer gate by design.
 - The IR detour through `avr-none` depends on the pinned nightly's data layout

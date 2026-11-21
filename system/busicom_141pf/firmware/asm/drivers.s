@@ -250,11 +250,11 @@ __pr_print:
 	wmp
 1:	fim	p0, 0x20	; wait for the drum index
 	src	p0
-2:	rdr
+2:	jms	.Lpr_edge	; sample the index only just after a TEST edge, so the
+	xch	r6		; edge counted below cannot already be behind us;
+	rdr			; (BBL 0 left ACC = 0, so R6 = 0 is the sector)
 	rar
 	jcn	nc, 2b
-	ldm	0
-	xch	r6
 	jms	.Lpr_edge	; the next TEST edge starts sector 0
 3:	ldm	0		; bits 19, 18
 	xch	r7
@@ -334,8 +334,7 @@ __pr_print:
 	wrr
 	ld	r7
 	wrr
-	clc
-	ldm	4
+	ldm	4		; carry is still clear: 4 + R7 <= 6
 	add	r7
 	wrr
 	bbl	0
