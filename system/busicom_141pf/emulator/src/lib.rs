@@ -1,5 +1,5 @@
 //! Busicom board wiring around the pinned Rust MCS-4 chip models.
-use arbitrary_int::u4;
+use arbitrary_int::{u2, u4};
 pub mod debug;
 
 use chips::{mcs4::shifter4003::Shifter, mcs4::Board, shifter::Direction};
@@ -25,9 +25,24 @@ pub(crate) fn validate_inputs(precision: u8, rounding: u8, key: u8) -> Result<()
     }
 }
 
-/// Complete stock-RAM board, including keyboard and printer state.
+fn build_board(image: &[u8], ram_chips: u8) -> Board {
+    let mut board = Board::new(image.to_vec(), ram_chips.min(4));
+    if ram_chips > 4 {
+        // Board::new builds at most four 4002s (page_mask is a u2).
+        board.rams.clear();
+        for i in 0..ram_chips {
+            board
+                .rams
+                .push(chips::mcs4::ram4002::RAM::new(u2::new(i % 4)));
+        }
+    }
+    board
+}
+
+/// Complete board: ROM, 2..=16 RAM chips, keyboard and printer state.
 pub struct Emulator {
     image: Vec<u8>,
+    ram_chips: u8,
     board: Board,
     shifts: [Shifter; 3],
     spin: usize,
@@ -38,15 +53,28 @@ pub struct Emulator {
 }
 
 impl Emulator {
+    /// Stock board: two 4002 RAM chips.
     pub fn new(image: &[u8]) -> Result<Self, String> {
+        Self::with_ram(image, 2)
+    }
+
+    /// Board with `ram_chips` 4002 RAM chips (2..=16). Chip `i` sits in
+    /// CM-RAM bank `i / 4` as chip `i % 4`, so a bank is selected by DCL. 16
+    /// chips is the extended (xl) board the compiled firmware is linked for.
+    /// Chips 0 and 1 keep the printer and lamp roles.
+    pub fn with_ram(image: &[u8], ram_chips: u8) -> Result<Self, String> {
+        if !(2..=16).contains(&ram_chips) {
+            return Err("RAM chip count must be 2..=16".into());
+        }
         if image.is_empty() || image.len() > 4096 {
             return Err("ROM image must contain 1..=4096 bytes (flat ROM only)".into());
         }
         let mut padded = image.to_vec();
         padded.resize(image.len().max(1280).div_ceil(256) * 256, 0);
         Ok(Self {
-            board: Board::new(padded.clone(), 2),
+            board: build_board(&padded, ram_chips),
             image: padded,
+            ram_chips,
             shifts: [Shifter::new(); 3],
             spin: 0,
             phase: 0,
@@ -57,7 +85,7 @@ impl Emulator {
     }
 
     pub fn reset(&mut self) {
-        self.board = Board::new(self.image.clone(), 2);
+        self.board = build_board(&self.image, self.ram_chips);
         self.shifts = [Shifter::new(); 3];
         self.spin = 0;
         self.phase = 0;

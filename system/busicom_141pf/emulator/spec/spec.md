@@ -16,8 +16,11 @@ against the hardware project's RTL (see its oracle README).
 - Accept 1–4096 ROM bytes; zero-pad to at least five whole 256-byte ROMs,
   allowing the 4095-byte compiled image without a partial-chip panic. More than
   five ROMs is the documented flat ROM expansion, not the original capacity.
-  RAM stays at the stock two chips. XL RAM and bank-switching are unsupported;
-  use the existing platform runner for those variants.
+  RAM is two chips by default; `Emulator::with_ram` and `--ram N` accept 2 to
+  16. Chip `i` is chip `i % 4` of CM-RAM bank `i / 4`, selected by DCL, as on
+  the xl board; chips 0 and 1 keep the printer and lamp roles. ROM
+  bank-switching (images over 4096 bytes) is unsupported; use the existing
+  platform runner for that variant.
 - A reset reconstructs all chips and peripheral state using the loaded image.
 - Input is the schedule from `platform/scripts/build_schedule.py`: example
   markers reset, reset/step markers checkpoint, numeric events specify

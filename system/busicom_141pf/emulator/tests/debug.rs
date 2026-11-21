@@ -89,3 +89,20 @@ fn ram_ports_and_errors_are_inspectable() {
         .unwrap_err()
         .contains("probe is off"));
 }
+
+#[test]
+fn xl_board_ram_banks_are_selected_by_dcl() {
+    assert!(Emulator::with_ram(&[0], 1).is_err());
+    assert!(Emulator::with_ram(&[0], 17).is_err());
+    // LDM 1; DCL; FIM P0,0; SRC P0; LDM 7; WRM; JUN 7. DCL with ACC=1 selects
+    // CM-RAM bank 1, so the write lands in 4002 chip 4 (bank 1, chip 0).
+    let rom = [0xd1, 0xfd, 0x20, 0x00, 0x21, 0xd7, 0xe0, 0x40, 0x07];
+    let mut emu = Emulator::with_ram(&rom, 16).unwrap();
+    emu.enable_cpu_probe().unwrap();
+    for _ in 0..6 {
+        emu.step_instruction(Inputs::default()).unwrap();
+    }
+    assert_eq!(emu.ram_char(4, 0, 0), Some(7));
+    assert_eq!(emu.ram_char(0, 0, 0), Some(0));
+    assert_eq!(emu.ram_char(16, 0, 0), None);
+}

@@ -20,7 +20,9 @@ bash system/busicom_141pf/platform/scripts/compare.sh /tmp/busicom.trace
 Supply your own original ROM (see
 [provenance](../firmware/original/provenance.md)), or a compiled flat firmware
 image. No original ROM is distributed by this crate. Flat ROMs up to 4096 bytes
-are supported, with two stock RAM chips. XL RAM and banked images still use
+are supported, with 2 stock RAM chips by default or up to 16 (`--ram 16`, the
+xl board the compiled firmware is linked for). ROM-bank-switched images (over
+4096 bytes) still use
 the [platform runner](../platform/README.md). There is no graphical panel yet.
 
 The library exposes `Emulator::new`, `reset`, `advance`, `lamps` and `replay`.
@@ -29,6 +31,25 @@ returned printer rows and `lamps()` can drive another host interface.
 The CLI accepts the deterministic schedule documented in
 [spec/spec.md](spec/spec.md), prints oracle-format output and exits nonzero on
 invalid input. `--help` shows usage.
+
+## Running the compiled Rust firmware
+
+The Rust to LLVM to i4004 image is a 4096-byte flat ROM linked for the xl board,
+so run it with 16 RAM chips (`--ram 16`):
+
+```bash
+system/busicom_141pf/firmware/scripts/build_target_ir.sh && \
+  llvm-i4004/scripts/build_image.sh system/busicom_141pf/firmware \
+  system/busicom_141pf/firmware/build/target system/busicom_141pf/platform/link_xl.ld   # in ai-sw-engineer
+busicom-emulator --ram 16 system/busicom_141pf/firmware/build/target/firmware.bin /tmp/busicom.schedule
+BUSICOM_FIRMWARE=system/busicom_141pf/firmware/build/target/firmware.bin \
+  cargo test --manifest-path system/busicom_141pf/emulator/Cargo.toml \
+  --test replay compiled_rust_firmware_replays_all_manual_examples -- --ignored
+```
+
+All 42 manual examples reproduce the original-ROM tape. Of the 1000 random
+programs the compiled image fails 3 (see the failure note in the verification
+record).
 
 Related documents: [machine contract](spec/machine_contract.md) (shared with the SV
 system issue), [inventory of existing emulators](spec/inventory.md), and the

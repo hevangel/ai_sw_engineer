@@ -29,3 +29,5 @@ the old secondary adapter; independent evidence is the RTL validation recorded
 in the oracle provenance, not a claim that two wrappers are independent.
 
 7. Independent simulator: with a local clone of inside4004 and the original ROM, run `platform/scripts/compare_inside4004.py`. It replays every manual example through that simulator and requires the complete printed tape to match the emulator's row for row (see report/verification.md and spec/inventory.md).
+
+8. Compiled Rust firmware: build the xl-board image (`toolchain/README.md`), then run `compiled_rust_firmware_replays_all_manual_examples` with `BUSICOM_FIRMWARE` (16 RAM chips, rows and lamps must equal the original-ROM oracle) and replay the random corpus with `--ram 16` through `compare_oracle.py`. The corpus run currently has 3 known failures, recorded in `failure_notes/2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md`.

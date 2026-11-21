@@ -9,9 +9,10 @@ use std::{
 };
 
 const USAGE: &str = "Usage:\n  \
-    busicom-emulator <image.bin> <schedule.txt>\n  \
-    busicom-emulator debug <image.bin> [--steps N] [--break ADDR]... [--skip N]\n                   \
+    busicom-emulator [--ram N] <image.bin> <schedule.txt>\n  \
+    busicom-emulator [--ram N] debug <image.bin> [--steps N] [--break ADDR]... [--skip N]\n                   \
     [--precision P] [--rounding R] [--key K] [--dump]\n\
+    --ram N sets the number of 4002 RAM chips: 2 (stock, default) to 16 (xl).\n\
     Build schedules with platform/scripts/build_schedule.py.\n\
     debug runs N instructions (default 100) from reset with fixed inputs and\n\
     prints one line per instruction after the first --skip: PC, opcode bytes,\n\
@@ -27,7 +28,7 @@ fn number(text: &str) -> Result<u64, String> {
     .map_err(|_| format!("invalid number `{text}`"))
 }
 
-fn debug(args: &[std::ffi::OsString]) -> Result<(), String> {
+fn debug(args: &[std::ffi::OsString], ram: u8) -> Result<(), String> {
     let mut args = args.iter().map(|a| a.to_string_lossy().into_owned());
     let path = args.next().ok_or(USAGE)?;
     let (mut steps, mut skip, mut dump) = (100, 0, false);
@@ -49,7 +50,7 @@ fn debug(args: &[std::ffi::OsString]) -> Result<(), String> {
         }
     }
     let image = fs::read(&path).map_err(|e| format!("ROM: {e}"))?;
-    let mut emu = Emulator::new(&image)?;
+    let mut emu = Emulator::with_ram(&image, ram)?;
     emu.enable_cpu_probe()?;
     let mut out = io::BufWriter::new(io::stdout().lock());
     let mut index = 0u64;
@@ -73,7 +74,7 @@ fn debug(args: &[std::ffi::OsString]) -> Result<(), String> {
     }
     .map_err(|e| e.to_string())?;
     if dump {
-        for chip in 0..2 {
+        for chip in 0..usize::from(ram) {
             writeln!(out, "RAM{chip} port={:X}", emu.ram_port(chip).unwrap_or(0))
                 .map_err(|e| e.to_string())?;
             for reg in 0..4 {
@@ -98,20 +99,29 @@ fn debug(args: &[std::ffi::OsString]) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let args: Vec<_> = env::args_os().skip(1).collect();
+    let mut args: Vec<_> = env::args_os().skip(1).collect();
+    let mut ram = 2;
+    if let Some(i) = args.iter().position(|a| a == "--ram") {
+        let value = args.get(i + 1).ok_or("--ram needs a value")?;
+        ram = value
+            .to_string_lossy()
+            .parse()
+            .map_err(|_| "--ram needs a number 2..=16")?;
+        args.drain(i..i + 2);
+    }
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         println!("{USAGE}");
         return Ok(());
     }
     if args.first().is_some_and(|a| a == "debug") {
-        return debug(&args[1..]);
+        return debug(&args[1..], ram);
     }
     if args.len() != 2 {
         return Err(USAGE.into());
     }
     let image = fs::read(&args[0]).map_err(|e| format!("ROM: {e}"))?;
     let schedule = fs::read_to_string(&args[1]).map_err(|e| format!("schedule: {e}"))?;
-    let trace = Emulator::new(&image)?.replay(&schedule)?;
+    let trace = Emulator::with_ram(&image, ram)?.replay(&schedule)?;
     io::stdout()
         .lock()
         .write_all(trace.as_bytes())

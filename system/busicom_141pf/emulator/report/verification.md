@@ -112,3 +112,33 @@ colour is not compared.
 The tapes were compared from independent code, but both run the same ROM, so
 the check covers the emulator's board wiring, keyboard scan, printer decode and
 pacing, not the firmware itself. Lamp state and cycle timing are not compared.
+
+---
+
+# Verification - 2026-11-20 (compiled Rust firmware on the emulator)
+
+Added `Emulator::with_ram` and `--ram N` (2 to 16 4002 chips, bank `i / 4`
+selected by DCL) so the emulator can run the image the Rust to LLVM to i4004
+pipeline produces. Windows host, Rust/Cargo 1.99.1. The image was rebuilt from
+this branch in `ai-sw-engineer:latest`
+(`system/busicom_141pf/firmware/scripts/build_target_ir.sh`, then
+`llvm-i4004/scripts/build_image.sh ... platform/link_xl.ld`):
+`firmware.bin`, 4096 bytes, SHA-256
+`4c0a9535d15735ab653066d84662dc7b3ffe84c142d9966e889755dfba678061`.
+
+| Check | Result |
+| --- | --- |
+| `cargo test --test replay -- --include-ignored` with `BUSICOM_ROM` and `BUSICOM_FIRMWARE` | 5 passed. `compiled_rust_firmware_replays_all_manual_examples`: all 42 manual examples, rows and lamps identical to `rom_port_trace.txt` (the original-ROM oracle) |
+| `busicom-emulator --ram 16 firmware.bin <manual schedule>` | 33 s; 600 non-comment trace lines identical to the oracle |
+| Same three failing programs through `platform/scripts/run_image.sh secondary --board xl` (separate adapter on the pinned `chips`) | Output identical to the emulator's, line for line |
+| 1000-program random corpus, compiled firmware, `--ram 16`, `compare_oracle.py` | **997/1000 pass; 3 differ** (R0534, R0568, R0872), 817 s release build |
+| Same 3 programs on the original ROM | All three pass (expected tapes agree with the ROM) |
+| New `xl_board_ram_banks_are_selected_by_dcl`, fmt, clippy `-D warnings` | Passed |
+
+The three differences are compiled-firmware behaviours, not emulator ones: the
+original ROM matches the expected tapes, and a second adapter reproduces the
+compiled firmware's tape exactly. See
+`failure_notes/2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md`.
+Both executors share the pinned `chips` cores, so this does not rule out a core
+defect that affects only compiled code; the RTL run is the remaining check.
+Not run: ROM-banked images (over 4096 bytes); the RTL primary executor.
