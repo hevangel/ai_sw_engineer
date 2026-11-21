@@ -16,8 +16,11 @@ against the hardware project's RTL (see its oracle README).
 - Accept 1–4096 ROM bytes; zero-pad to at least five whole 256-byte ROMs,
   allowing the 4095-byte compiled image without a partial-chip panic. More than
   five ROMs is the documented flat ROM expansion, not the original capacity.
-  RAM stays at the stock two chips. XL RAM and bank-switching are unsupported;
-  use the existing platform runner for those variants.
+  RAM is two chips by default; `Emulator::with_ram` and `--ram N` accept 2 to
+  16. Chip `i` is chip `i % 4` of CM-RAM bank `i / 4`, selected by DCL, as on
+  the xl board; chips 0 and 1 keep the printer and lamp roles. ROM
+  bank-switching (images over 4096 bytes) is unsupported; use the existing
+  platform runner for that variant.
 - A reset reconstructs all chips and peripheral state using the loaded image.
 - Input is the schedule from `platform/scripts/build_schedule.py`: example
   markers reset, reset/step markers checkpoint, numeric events specify
@@ -28,6 +31,20 @@ against the hardware project's RTL (see its oracle README).
   TEST uses the pinned core's compensated polarity, exactly as documented in
   the platform README. This is deterministic reference pacing, not a physical
   motor simulation or transistor-level timing model.
+
+## Debug contract
+
+`busicom_emulator::debug` steps whole instructions (a two-cycle JCN, FIM, FIN,
+JUN, JMS or ISZ is one step). Each step reports the CPU state before the
+instruction (PC, ACC, carry, TEST, R0..RF), the opcode byte, the second byte
+where one exists, and any printer rows emitted. State is captured from the
+pinned model's `log::debug!` record at each instruction boundary because its
+registers are private and `external/` is not edited. Breakpoints stop after
+the instruction at the address executed. RAM characters, status nibbles and
+the 4002/4001 port nibbles are readable at any time. Stepping uses the same
+cycle, drum and I/O path as `advance`, so a stepped run and a replay are
+cycle-identical. Not provided: watchpoints on writes, disassembly, reverse
+stepping and mid-instruction state.
 
 ## Output contract
 

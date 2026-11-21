@@ -48,16 +48,7 @@ fn rom_input_reaches_cpu_and_ram_output() {
     assert_eq!(emu.lamps(), 6);
 }
 
-#[test]
-#[ignore = "requires BUSICOM_ROM pointing to the original 1280-byte ROM; see README"]
-fn original_rom_replays_all_manual_examples() {
-    let path = std::env::var_os("BUSICOM_ROM").expect("set BUSICOM_ROM");
-    let rom = std::fs::read(path).unwrap();
-    assert_eq!(
-        rom.len(),
-        1280,
-        "use the original ROM, not the Rust firmware"
-    );
+fn manual_schedule() -> String {
     let doc: serde_json::Value =
         serde_json::from_str(include_str!("../../firmware/oracle/manual_examples.json")).unwrap();
     let mut schedule = String::new();
@@ -92,8 +83,11 @@ fn original_rom_replays_all_manual_examples() {
             }
         }
     }
-    let actual = Emulator::new(&rom).unwrap().replay(&schedule).unwrap();
-    let expected = include_str!("../../firmware/oracle/rom_port_trace.txt")
+    schedule
+}
+
+fn expected_trace() -> String {
+    include_str!("../../firmware/oracle/rom_port_trace.txt")
         .lines()
         .filter(|s| {
             ["#EXAMPLE", "#RESET", "#STEP", "LAMPS|", "ROW|"]
@@ -102,6 +96,43 @@ fn original_rom_replays_all_manual_examples() {
         })
         .collect::<Vec<_>>()
         .join("\n")
-        + "\n";
-    assert_eq!(actual, expected, "exact original-ROM tape and lamp replay");
+        + "\n"
+}
+
+#[test]
+#[ignore = "requires BUSICOM_ROM pointing to the original 1280-byte ROM; see README"]
+fn original_rom_replays_all_manual_examples() {
+    let path = std::env::var_os("BUSICOM_ROM").expect("set BUSICOM_ROM");
+    let rom = std::fs::read(path).unwrap();
+    assert_eq!(
+        rom.len(),
+        1280,
+        "use the original ROM, not the Rust firmware"
+    );
+    let actual = Emulator::new(&rom)
+        .unwrap()
+        .replay(&manual_schedule())
+        .unwrap();
+    assert_eq!(
+        actual,
+        expected_trace(),
+        "exact original-ROM tape and lamp replay"
+    );
+}
+
+#[test]
+#[ignore = "requires BUSICOM_FIRMWARE pointing to the compiled xl-board firmware.bin; see README"]
+fn compiled_rust_firmware_replays_all_manual_examples() {
+    let path = std::env::var_os("BUSICOM_FIRMWARE").expect("set BUSICOM_FIRMWARE");
+    let image = std::fs::read(path).unwrap();
+    assert_eq!(image.len(), 4096, "compiled xl-board image is 4096 bytes");
+    let actual = Emulator::with_ram(&image, 16)
+        .unwrap()
+        .replay(&manual_schedule())
+        .unwrap();
+    assert_eq!(
+        actual,
+        expected_trace(),
+        "compiled firmware tape must equal the original-ROM oracle"
+    );
 }

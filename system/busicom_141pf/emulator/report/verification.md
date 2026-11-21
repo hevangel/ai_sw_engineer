@@ -62,3 +62,83 @@ fixed here; the exclusions shrink as the core is corrected. `SIGN`, the `00`
 key, entries with more decimals than DP and FL totals after `+`/`-` remain
 uncovered (not oracle-anchored). The emulator again ran the original image,
 not a newly compiled firmware image.
+
+---
+
+# Verification - 2026-11-20 (debugger)
+
+Added instruction-level debugging (issue #23, acceptance item "debugging
+facilities"): `busicom_emulator::debug` and the `debug` CLI subcommand.
+`advance` now runs through a shared `step_cycle`. Windows host, Rust/Cargo
+1.99.1; original ROM SHA-256 `c6af325d...ceb7` (checked, 1280 bytes).
+
+| Check | Result |
+| --- | --- |
+| `cargo test` (4 new `tests/debug.rs` tests plus existing) | Passed |
+| `cargo test --test replay original_rom_replays_all_manual_examples -- --ignored` with `BUSICOM_ROM` | Passed (42 manual examples against the committed original-ROM trace) |
+| Release CLI trace of `manual_examples.json` before vs after the refactor | Byte-identical (SHA-256 equal) |
+| `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` | Passed |
+| `busicom-emulator debug <original-rom> --steps 12 --dump` | Starts `CLB`, `JCN`, `JMS 0B0`, then the init loop; exit 0 |
+
+The random-corpus replay (about 290 s in a debug build) was not rerun; the
+refactor is covered by the identical manual-example trace. The debugger tests
+use hand-assembled programs whose expected state follows the MCS-4 data sheet.
+Limits: breakpoints stop after the instruction at the address ran, because the
+pinned model exposes state only through its per-instruction debug log; no
+watchpoints, disassembler or reverse stepping.
+
+---
+
+# Verification - 2026-11-20 (independent simulator)
+
+Compared the emulator against `inside4004` (Python RTL-level MCS-4 model by
+Patrick Leboutillier, CC BY-NC-SA 4.0, commit
+`43c1a077c7fec2c7a3ff21e874f943ec41e00e61`, cloned outside the repository and
+run, not copied). Its shipped `141-PF/ROM.bin` text converts to 1280 bytes
+with SHA-256 `c6af325d...ceb7`, identical to the original ROM used here.
+
+| Command | Result |
+| --- | --- |
+| `py platform/scripts/compare_inside4004.py --inside4004 <clone> --rom <original-rom> --emulator emulator/target/release/busicom-emulator.exe` | 42/42 examples identical, every printed row (digits, symbol column A, symbol column B), 164 s on 4 workers |
+
+Method: each example's setup keys, selector changes and keystrokes are fed to
+`inside4004` through its key buffer; the emulator runs the same example from
+the committed schedule. Blank rows are ignored. This compares complete tapes,
+stricter than the suffix rule of the committed oracle. Differences from the
+simulator that the script handles: it has no diamond (`ST`) or `00` key (added
+to its keyboard table at run time) and never clears the red state, so paper
+colour is not compared.
+
+The tapes were compared from independent code, but both run the same ROM, so
+the check covers the emulator's board wiring, keyboard scan, printer decode and
+pacing, not the firmware itself. Lamp state and cycle timing are not compared.
+
+---
+
+# Verification - 2026-11-20 (compiled Rust firmware on the emulator)
+
+Added `Emulator::with_ram` and `--ram N` (2 to 16 4002 chips, bank `i / 4`
+selected by DCL) so the emulator can run the image the Rust to LLVM to i4004
+pipeline produces. Windows host, Rust/Cargo 1.99.1. The image was rebuilt from
+this branch in `ai-sw-engineer:latest`
+(`system/busicom_141pf/firmware/scripts/build_target_ir.sh`, then
+`llvm-i4004/scripts/build_image.sh ... platform/link_xl.ld`):
+`firmware.bin`, 4096 bytes, SHA-256
+`4c0a9535d15735ab653066d84662dc7b3ffe84c142d9966e889755dfba678061`.
+
+| Check | Result |
+| --- | --- |
+| `cargo test --test replay -- --include-ignored` with `BUSICOM_ROM` and `BUSICOM_FIRMWARE` | 5 passed. `compiled_rust_firmware_replays_all_manual_examples`: all 42 manual examples, rows and lamps identical to `rom_port_trace.txt` (the original-ROM oracle) |
+| `busicom-emulator --ram 16 firmware.bin <manual schedule>` | 33 s; 600 non-comment trace lines identical to the oracle |
+| Same three failing programs through `platform/scripts/run_image.sh secondary --board xl` (separate adapter on the pinned `chips`) | Output identical to the emulator's, line for line |
+| 1000-program random corpus, compiled firmware, `--ram 16`, `compare_oracle.py` | **997/1000 pass; 3 differ** (R0534, R0568, R0872), 817 s release build |
+| Same 3 programs on the original ROM | All three pass (expected tapes agree with the ROM) |
+| New `xl_board_ram_banks_are_selected_by_dcl`, fmt, clippy `-D warnings` | Passed |
+
+The three differences are compiled-firmware behaviours, not emulator ones: the
+original ROM matches the expected tapes, and a second adapter reproduces the
+compiled firmware's tape exactly. See
+`failure_notes/2026-11-20-busicom-141pf-compiled-firmware-random-divergences.md`.
+Both executors share the pinned `chips` cores, so this does not rule out a core
+defect that affects only compiled code; the RTL run is the remaining check.
+Not run: ROM-banked images (over 4096 bytes); the RTL primary executor.
